@@ -16,6 +16,8 @@ const Settings = () => {
         return <window.Interface />;
       case "Library":
         return <window.Library />;
+      case "Scan Sources":
+        return <window.ScanSources />;
       case "Platforms":
         return <window.Platforms />;
       case "Emulators":
@@ -24,6 +26,8 @@ const Settings = () => {
         return <window.Appearance />;
       case "Metadata":
         return <window.Metadata />;
+      case "Cloud Saves":
+        return <window.CloudSync />;
       default:
         return <div className="p-4 text-text">Select a settings category</div>;
     }

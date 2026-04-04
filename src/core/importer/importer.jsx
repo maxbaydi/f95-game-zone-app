@@ -3,7 +3,7 @@ const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
 
 const Importer = () => {
-  const [view, setView] = useState("settings");
+  const [view, setView] = useState("source");
   const [importSource, setImportSource] = useState("local");
   const [folder, setFolder] = useState("");
   const [useUnstructured, setUseUnstructured] = useState(true);
@@ -25,6 +25,7 @@ const Importer = () => {
   const [forceImport, setForceImport] = useState(false);
   const [defaultLibraryPath, setDefaultLibraryPath] = useState(null);
   const [askingForLibraryFolder, setAskingForLibraryFolder] = useState(false);
+  const [configuredSources, setConfiguredSources] = useState([]);
 
   const [progress, setProgress] = useState({
     value: 0,
@@ -35,6 +36,8 @@ const Importer = () => {
   const [gamesList, setGamesList] = useState([]);
   const [isMaximized, setIsMaximized] = useState(false);
   const [hideMatches, setHideMatches] = useState(false);
+  const [scanWarnings, setScanWarnings] = useState([]);
+  const [isScanRunning, setIsScanRunning] = useState(false);
 
   const canImport =
     gamesList.every((game) => {
@@ -131,6 +134,7 @@ const Importer = () => {
       );
       Promise.all(updatedGames).then((newGamesList) => {
         setGamesList(newGamesList);
+        setIsScanRunning(false);
         setView("scan");
         console.log(
           `Updated gamesList on scan complete: ${JSON.stringify(newGamesList)}`,
@@ -138,6 +142,13 @@ const Importer = () => {
         window.electronAPI.log(
           `Updated gamesList on scan complete: ${JSON.stringify(newGamesList)}`,
         );
+      });
+    });
+
+    window.electronAPI.onScanWarning((warning) => {
+      setScanWarnings((previous) => {
+        const next = [...previous, warning];
+        return next.slice(-20);
       });
     });
 
@@ -162,6 +173,12 @@ const Importer = () => {
           setDefaultLibraryPath(path);
           console.log("Default library folder:", path);
         });
+
+        window.electronAPI.getScanSources().then((result) => {
+          if (result.success) {
+            setConfiguredSources(result.sources || []);
+          }
+        });
       })
       .catch((err) => {
         console.error("Error loading config:", err);
@@ -173,6 +190,7 @@ const Importer = () => {
       window.electronAPI.removeAllListeners("scan-progress");
       window.electronAPI.removeAllListeners("scan-complete");
       window.electronAPI.removeAllListeners("scan-complete-final");
+      window.electronAPI.removeAllListeners("scan-warning");
       window.electronAPI.removeAllListeners("update-progress");
     };
   }, []);
@@ -195,6 +213,8 @@ const Importer = () => {
       return alert("Select a folder");
     }
     setView("scan");
+    setIsScanRunning(true);
+    setScanWarnings([]);
     console.log("Starting scan");
     window.electronAPI.log("Starting scan");
     setGamesList([]);
@@ -214,10 +234,112 @@ const Importer = () => {
     console.log(`Scan params: ${JSON.stringify(params)}`);
     window.electronAPI.log(`Scan params: ${JSON.stringify(params)}`);
     const result = await window.electronAPI.startScan(params);
+    if (result.cancelled) {
+      setIsScanRunning(false);
+      setScanWarnings((previous) => [
+        ...previous,
+        { message: "Scan cancelled by user" },
+      ]);
+      return;
+    }
+
     if (!result.success) {
+      setIsScanRunning(false);
       console.error(`Scan error: ${result.error}`);
       window.electronAPI.log(`Scan error: ${result.error}`);
-      alert(`Error: ${result.error}`);
+      if (!result.games || result.games.length === 0) {
+        alert(`Error: ${result.error}`);
+      }
+    }
+  };
+
+  const openFolderImportSettings = () => {
+    setImportSource("local");
+    setView("settings");
+  };
+
+  const startSteamImport = () => {
+    setImportSource("steam");
+    setView("scan");
+    setIsScanRunning(false);
+    setScanWarnings([]);
+    setGamesList([]);
+    window.electronAPI
+      .startSteamScan({
+        downloadBannerImages: false,
+        downloadPreviewImages: false,
+        previewLimit: "5",
+        downloadVideos: false,
+      })
+      .catch((err) => {
+        console.error("Steam scan error:", err);
+        alert("Error starting Steam scan");
+      });
+  };
+
+  const startConfiguredSourcesScan = async () => {
+    const enabledSources = configuredSources.filter(
+      (source) => source.isEnabled,
+    );
+
+    if (enabledSources.length === 0) {
+      return alert("No enabled scan sources configured");
+    }
+
+    setImportSource("scan-sources");
+    setView("scan");
+    setIsScanRunning(true);
+    setScanWarnings([]);
+    setGamesList([]);
+    setProgress({ value: 0, total: enabledSources.length, potential: 0 });
+
+    const params = {
+      format: useUnstructured ? "" : customFormat,
+      gameExt: gameExt.split(",").map((e) => e.trim()),
+      archiveExt: archiveExt.split(",").map((e) => e.trim()),
+      isCompressed,
+      deleteAfter,
+      scanSize,
+      downloadBannerImages,
+      downloadPreviewImages,
+      previewLimit,
+      downloadVideos,
+    };
+
+    const result = await window.electronAPI.startScanSources(params);
+    if (result.cancelled) {
+      setIsScanRunning(false);
+      setScanWarnings((previous) => [
+        ...previous,
+        { message: "Scan cancelled by user" },
+      ]);
+      return;
+    }
+
+    if (!result.success) {
+      setIsScanRunning(false);
+      console.error(`Multi-source scan error: ${result.error}`);
+      if (!result.games || result.games.length === 0) {
+        alert(`Error: ${result.error}`);
+      }
+    }
+  };
+
+  const cancelScan = async () => {
+    try {
+      const result = await window.electronAPI.cancelScan();
+      if (!result.success) {
+        alert(result.error || "No active scan to cancel");
+        return;
+      }
+
+      setScanWarnings((previous) => [
+        ...previous,
+        { message: "Cancel requested. Atlas is stopping the current scan." },
+      ]);
+    } catch (error) {
+      console.error("Failed to cancel scan:", error);
+      alert("Failed to cancel scan");
     }
   };
 
@@ -550,40 +672,113 @@ const Importer = () => {
       <div className="flex-1 p-4 bg-secondary overflow-y-auto">
         {view === "source" && (
           <div className="flex items-center justify-center h-full">
-            <div className="flex flex-col space-y-4 max-w-md w-full">
-              <h2 className="text-xl text-center">Select Import Source</h2>
-              <button
-                onClick={() => setView("settings")}
-                className="bg-secondary hover:bg-selected text-text p-2 rounded"
-              >
-                Atlas Game Importer
-              </button>
-              <button
-                onClick={() => {
-                  setView("scan");
-                  setGamesList([]);
-                  window.electronAPI
-                    .startSteamScan({
-                      downloadBannerImages: false,
-                      downloadPreviewImages: false,
-                      previewLimit: "5",
-                      downloadVideos: false,
-                    })
-                    .catch((err) => {
-                      console.error("Steam scan error:", err);
-                      alert("Error starting Steam scan");
-                    });
-                }}
-                className="bg-secondary hover:bg-selected text-text p-2 rounded"
-              >
-                Import Steam Games
-              </button>
+            <div className="flex flex-col space-y-4 max-w-3xl w-full">
+              <h2 className="text-2xl text-center font-semibold">
+                Choose How To Add Games
+              </h2>
+              <p className="text-center text-sm opacity-70">
+                Borrowing the good part of YAM here: start from an explicit
+                action choice, not from a wall of settings.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button
+                  onClick={startConfiguredSourcesScan}
+                  disabled={
+                    configuredSources.filter((source) => source.isEnabled)
+                      .length === 0
+                  }
+                  className={`text-left rounded border border-border p-4 transition-colors ${
+                    configuredSources.filter((source) => source.isEnabled)
+                      .length === 0
+                      ? "bg-primary/40 opacity-50 cursor-not-allowed"
+                      : "bg-primary hover:bg-selected"
+                  }`}
+                >
+                  <div className="text-lg font-semibold mb-2">
+                    Scan Enabled Sources
+                  </div>
+                  <div className="text-sm opacity-70">
+                    Run recursive scan across configured roots and import newly
+                    detected games into the library.
+                  </div>
+                  <div className="text-xs opacity-60 mt-3">
+                    Enabled roots:{" "}
+                    {
+                      configuredSources.filter((source) => source.isEnabled)
+                        .length
+                    }
+                  </div>
+                </button>
+
+                <button
+                  onClick={openFolderImportSettings}
+                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                >
+                  <div className="text-lg font-semibold mb-2">
+                    Import From Folder
+                  </div>
+                  <div className="text-sm opacity-70">
+                    Manual importer for one folder or archive batch, with match
+                    review before import.
+                  </div>
+                  <div className="text-xs opacity-60 mt-3">
+                    Best for ad-hoc imports and archive extraction.
+                  </div>
+                </button>
+
+                <button
+                  onClick={startSteamImport}
+                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                >
+                  <div className="text-lg font-semibold mb-2">
+                    Import Steam Games
+                  </div>
+                  <div className="text-sm opacity-70">
+                    Scan Steam libraries and convert detected games into Atlas
+                    records.
+                  </div>
+                  <div className="text-xs opacity-60 mt-3">
+                    Uses the existing Steam scan flow.
+                  </div>
+                </button>
+              </div>
+
+              <div className="rounded border border-border bg-primary/40 p-4">
+                <div className="font-medium">Configured Scan Sources</div>
+                {configuredSources.length === 0 ? (
+                  <div className="text-sm opacity-60 mt-2">
+                    No scan sources configured yet. Add them in Settings before
+                    using automatic library scan.
+                  </div>
+                ) : (
+                  <div className="text-xs opacity-60 mt-2 break-all">
+                    {configuredSources
+                      .map(
+                        (source) =>
+                          `${source.isEnabled ? "[on]" : "[off]"} ${source.path}`,
+                      )
+                      .join(" | ")}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
 
         {view === "settings" && (
           <div className="space-y-4 flex-1">
+            <div className="flex justify-between items-center">
+              <div className="text-sm opacity-70">
+                Manual import settings for a selected folder.
+              </div>
+              <button
+                onClick={() => setView("source")}
+                className="bg-primary hover:bg-selected text-text px-3 py-1 rounded"
+              >
+                Back
+              </button>
+            </div>
             <div className="flex items-center">
               <label>Game Path:</label>
               <input
@@ -600,6 +795,19 @@ const Importer = () => {
                 Set Folder
               </button>
             </div>
+            <div className="text-xs opacity-60">
+              Enabled scan sources:{" "}
+              {configuredSources.filter((source) => source.isEnabled).length}
+            </div>
+            {configuredSources.filter((source) => source.isEnabled).length >
+              0 && (
+              <div className="text-xs opacity-50 break-all">
+                {configuredSources
+                  .filter((source) => source.isEnabled)
+                  .map((source) => source.path)
+                  .join(" | ")}
+              </div>
+            )}
 
             <div className="flex items-center">
               <label>Folder Structure:</label>
@@ -741,6 +949,13 @@ const Importer = () => {
 
             <div className="flex justify-end space-x-2">
               <button
+                onClick={startConfiguredSourcesScan}
+                className="bg-accent p-2"
+                style={{ pointerEvents: "auto", zIndex: 1000 }}
+              >
+                Scan Enabled Sources
+              </button>
+              <button
                 onClick={startScan}
                 className="bg-accent p-2"
                 style={{ pointerEvents: "auto", zIndex: 1000 }}
@@ -761,7 +976,15 @@ const Importer = () => {
         {view === "scan" && (
           <div className="h-full flex flex-col">
             <div className="shrink-0">
-              <h2 className="text-xl mb-4">Scan Results</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl">Scan Results</h2>
+                <button
+                  onClick={() => setView("source")}
+                  className="bg-primary hover:bg-selected text-text px-3 py-1 rounded"
+                >
+                  Back
+                </button>
+              </div>
               <div className="flex items-center mb-4">
                 <progress
                   value={progress.value}
@@ -770,11 +993,37 @@ const Importer = () => {
                 />
                 <span className="ml-2">
                   {progress.value}/{progress.total}{" "}
-                  {importSource === "steam"
-                    ? "Games Scanned"
-                    : "Folders Scanned"}
+                  {progress.mode === "scan-sources"
+                    ? "Sources Scanned"
+                    : importSource === "steam"
+                      ? "Games Scanned"
+                      : "Folders Scanned"}
                 </span>
               </div>
+              <div className="text-xs opacity-60 mb-2">
+                Scan mode: {importSource}
+              </div>
+              {scanWarnings.length > 0 && (
+                <div className="mb-2 rounded border border-yellow-600/40 bg-yellow-500/10 p-2 text-xs text-yellow-100">
+                  <div className="font-semibold">
+                    Scan warnings: {scanWarnings.length}
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {scanWarnings.slice(-3).map((warning, index) => (
+                      <div key={`${warning.path || warning.message}-${index}`}>
+                        {warning.message}
+                        {warning.path ? ` (${warning.path})` : ""}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {progress.mode === "scan-sources" &&
+                progress.currentSourcePath && (
+                  <div className="text-xs opacity-60 mb-2 break-all">
+                    Current source: {progress.currentSourcePath}
+                  </div>
+                )}
               <span className="mb-4">Found {progress.potential} Games</span>
             </div>
 
@@ -799,6 +1048,9 @@ const Importer = () => {
                     </th>
                     <th className="border border-border p-1 min-w-[100px]">
                       Engine
+                    </th>
+                    <th className="border border-border p-1 min-w-[220px]">
+                      Detection
                     </th>
                     <th className="border border-border p-1 min-w-[200px]">
                       Version
@@ -877,6 +1129,17 @@ const Importer = () => {
                             }
                             className="w-full bg-secondary border border-border p-1"
                           />
+                        </td>
+                        <td className="border border-border p-1 text-xs align-top">
+                          <div className="font-semibold">
+                            {typeof game.detectionScore === "number"
+                              ? `${game.detectionScore}% confidence`
+                              : "No score"}
+                          </div>
+                          <div className="opacity-70 break-words">
+                            {(game.detectionReasons || []).join(" | ") ||
+                              "No classifier reasons recorded"}
+                          </div>
                         </td>
                         <td className="border border-border p-1">
                           <input
@@ -996,6 +1259,16 @@ const Importer = () => {
                 >
                   Update Matches
                 </button>
+
+                {isScanRunning && (
+                  <button
+                    onClick={cancelScan}
+                    className="bg-red-700 hover:bg-red-800 px-4 py-2 rounded text-text"
+                    style={{ pointerEvents: "auto", zIndex: 1000 }}
+                  >
+                    Cancel Scan
+                  </button>
+                )}
 
                 <button
                   onClick={() => setHideMatches(!hideMatches)}

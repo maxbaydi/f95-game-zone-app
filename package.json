@@ -16,7 +16,11 @@
     "rebuild": "npx electron-rebuild --version=37.0.0",
     "structure": "node scripts/generate-structure.js > scripts/project-structure.txt",
     "publish": "npm run build:css && electron-builder --win -p always",
-    "format": "prettier --write src/**/*.{js,jsx,css} && prettier --write src/assets/**/*.{js,jsx,css}"
+    "format": "prettier --write src/**/*.{js,jsx,css} && prettier --write src/assets/**/*.{js,jsx,css}",
+    "lint": "eslint src/main.js src/database.js \"src/main/**/*.js\" \"src/shared/**/*.js\" \"test/**/*.test.js\"",
+    "typecheck": "tsc --project tsconfig.typecheck.json --noEmit",
+    "test": "node --test \"test/*.test.js\"",
+    "ci:check": "npm run build:css && npm run lint && npm run typecheck && npm run test"
   },
   "build": {
     "appId": "com.towerwatchman.atlas",
@@ -30,6 +34,7 @@
     },
     "files": [
       "src/main.js",
+      "src/main/**/*",
       "src/database.js",
       "src/index.html",
       "src/settings.html",
@@ -37,6 +42,7 @@
       "src/gamedetails.html",
       "src/renderer.js",
       "src/App.jsx",
+      "src/shared/**/*",
       "src/assets/**/*",
       "src/core/**/*",
       "src/core/scanners/**/*",
@@ -77,6 +83,7 @@
   "dependencies": {
     "@babel/standalone": "^7.25.6",
     "@npmcli/fs": "^3.1.0",
+    "@supabase/supabase-js": "^2.58.0",
     "adm-zip": "^0.5.10",
     "axios": "^1.7.2",
     "electron-updater": "^6.6.2",
@@ -95,13 +102,16 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
+    "@types/node": "^18.19.42",
     "autoprefixer": "^10.4.21",
     "debug": "^4.3.4",
     "electron": "^37.0.0",
     "electron-builder": "^26.0.12",
+    "eslint": "^8.57.0",
     "postcss": "^8.5.6",
     "postcss-cli": "^10.1.0",
     "prettier": "3.6.2",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.4.5"
   }
 }

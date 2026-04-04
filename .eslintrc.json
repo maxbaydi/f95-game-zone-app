@@ -1,0 +1,18 @@
+{
+  "root": true,
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "extends": ["eslint:recommended"],
+  "ignorePatterns": ["dist/", "node_modules/"],
+  "overrides": [
+    {
+      "files": ["src/main.js", "src/database.js", "src/main/**/*.js", "src/shared/**/*.js", "test/**/*.test.js"],
+      "rules": {
+        "no-console": "off",
+        "no-async-promise-executor": "off"
+      }
+    }
+  ]
+}

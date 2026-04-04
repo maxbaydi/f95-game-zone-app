@@ -6,11 +6,11 @@ const bannerStyles = `
     perspective: 1000px;
     transform-style: preserve-3d;
     transform: skewX(0.001deg);
-    transition: transform 0.35s ease-in-out;
+    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.38s ease;
   }
   .banner-root:hover {
-    transform: rotateX(7deg) translateY(-6px) scale(1.02);
-    transition: transform 0.35s ease-in-out 0.1s;
+    transform: rotateX(5deg) translateY(-8px) scale(1.02);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 32px rgba(44, 142, 169, 0.15);
   }
   .banner-root::before {
     content: '';
@@ -20,20 +20,37 @@ const bannerStyles = `
     left: 5%;
     width: 90%;
     height: 90%;
-    background: rgba(0,0,0,0.5);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    background: rgba(0,0,0,0.45);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.45);
     transform-origin: top center;
     transform: skewX(0.001deg);
-    transition: transform 0.35s ease-in-out 0.1s, opacity 0.5s ease-in-out 0.1s;
+    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.08s, opacity 0.45s ease 0.08s;
+    border-radius: 0.75rem;
   }
   .banner-root:hover::before {
-    opacity: 0.6;
-    transform: rotateX(7deg) translateY(-6px) scale(1.02);
+    opacity: 0.55;
+    transform: rotateX(5deg) translateY(-8px) scale(1.02);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .banner-root,
+    .banner-root::before {
+      transition: none;
+    }
+    .banner-root:hover {
+      transform: none;
+      box-shadow: none;
+    }
+    .banner-root:hover::before {
+      transform: none;
+      opacity: 0.5;
+    }
   }
 `;
 
-const GameBanner = ({ game, onSelect }) => {
+const GameBanner = ({ game, onSelect, onUpdateGame }) => {
   const [template, setTemplate] = useState(null);
+  const displayTitle = game.displayTitle || game.title || "Unknown";
+  const displayCreator = game.displayCreator || game.creator || "Unknown";
 
   useEffect(() => {
     // Log banner_url on mount or update
@@ -89,7 +106,12 @@ const GameBanner = ({ game, onSelect }) => {
       const ext = v.exec_path ? v.exec_path.split(".").pop().toLowerCase() : "";
       template.push({
         label: "Play",
-        data: { action: "launch", execPath: v.exec_path, extension: ext },
+        data: {
+          action: "launch",
+          execPath: v.exec_path,
+          extension: ext,
+          recordId: game.record_id,
+        },
       });
     } else {
       template.push({
@@ -100,7 +122,12 @@ const GameBanner = ({ game, onSelect }) => {
             : "";
           return {
             label: v.version,
-            data: { action: "launch", execPath: v.exec_path, extension: ext },
+            data: {
+              action: "launch",
+              execPath: v.exec_path,
+              extension: ext,
+              recordId: game.record_id,
+            },
           };
         }),
       });
@@ -194,6 +221,9 @@ const GameBanner = ({ game, onSelect }) => {
     return maxVersion || "V 1.0";
   };
 
+  const newestInstalledVersion =
+    game.newestInstalledVersion || getNewestVersion(game.versions);
+
   // Default template
   const DefaultBannerTemplate = ({ game, onSelect }) => {
     const children = [
@@ -228,7 +258,7 @@ const GameBanner = ({ game, onSelect }) => {
             key: `creator-${game.record_id}`,
             className:
               "absolute top-0 left-0 text-white text-xs ml-2.5 flex items-center h-[28px]",
-            children: game.creator || "Unknown",
+            children: displayCreator,
           }),
           // Update Available button at top-right, vertically centered
           game.isUpdateAvailable &&
@@ -237,21 +267,15 @@ const GameBanner = ({ game, onSelect }) => {
               {
                 key: `update-button-${game.record_id}`,
                 className:
-                  "absolute top-[4px] right-2.5 w-[90px] h-[20px] bg-transparent border border-yellow-400 text-yellow-400 text-[10px] rounded-sm z-30 pointer-events-auto",
+                  "absolute top-[4px] right-2.5 w-[116px] h-[20px] bg-transparent border border-yellow-400 text-yellow-400 text-[10px] rounded-sm z-30 pointer-events-auto",
                 onClick: (e) => {
                   e.stopPropagation();
-                  if (
-                    game.siteUrl &&
-                    typeof game.siteUrl === "string" &&
-                    game.siteUrl.startsWith("http")
-                  ) {
-                    window.electronAPI.openExternalUrl(game.siteUrl);
-                  } else {
-                    console.error(`Invalid siteUrl: ${game.siteUrl}`);
-                  }
+                  onUpdateGame?.(game);
                 },
               },
-              "Update Available!",
+              game.latestVersion
+                ? `Update ${game.latestVersion}`
+                : "Update Ready",
             ),
           // Bottom overlay content
           React.createElement(
@@ -276,7 +300,7 @@ const GameBanner = ({ game, onSelect }) => {
                 key: `title-${game.record_id}`,
                 className:
                   "text-white text-xs font-semibold flex-1 text-center",
-                children: game.title || "Unknown",
+                children: displayTitle,
               }),
               // Status and Newest Version at bottom-right
               React.createElement(
@@ -302,7 +326,7 @@ const GameBanner = ({ game, onSelect }) => {
                     key: `version-${game.record_id}`,
                     className: `text-white text-[10px] ${game.status ? "rounded-r-sm -ml-0.5" : "rounded-sm"} px-2 py-0.5`,
                     style: { backgroundColor: "#3F4043" },
-                    children: getNewestVersion(game.versions),
+                    children: newestInstalledVersion,
                   }),
                 ],
               ),
@@ -328,7 +352,7 @@ const GameBanner = ({ game, onSelect }) => {
             React.createElement("img", {
               key: `banner-image-${game.record_id}`,
               src: game.banner_url,
-              alt: game.title,
+              alt: displayTitle,
               className: "w-[537px] h-[251px] object-contain",
               onError: () =>
                 console.error(
@@ -356,7 +380,7 @@ const GameBanner = ({ game, onSelect }) => {
       {
         key: `banner-root-${game.record_id}`,
         className:
-          "relative w-[537px] h-[251px] border border-black cursor-pointer overflow-hidden banner-root",
+          "relative w-[537px] h-[251px] cursor-pointer overflow-hidden banner-root rounded-xl border border-white/15 bg-black/20 shadow-glass-sm ring-1 ring-white/5",
         onClick: onSelect,
         onContextMenu: handleContextMenu,
       },

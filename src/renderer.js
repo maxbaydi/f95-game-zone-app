@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   unzipGame: (zipPath, extractPath) =>
     ipcRenderer.invoke("unzip-game", { zipPath, extractPath }),
   checkUpdates: () => ipcRenderer.invoke("check-updates"),
+  getAppUpdateState: () => ipcRenderer.invoke("get-app-update-state"),
+  checkAppUpdate: () => ipcRenderer.invoke("check-app-update"),
+  downloadAppUpdate: () => ipcRenderer.invoke("download-app-update"),
+  installAppUpdate: () => ipcRenderer.invoke("install-app-update"),
   checkDbUpdates: () => ipcRenderer.invoke("check-db-updates"),
   minimizeWindow: () => ipcRenderer.invoke("minimize-window"),
   maximizeWindow: () => ipcRenderer.invoke("maximize-window"),
@@ -40,11 +44,48 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getConfig: () => ipcRenderer.invoke("get-settings"),
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
+  getCloudAuthState: () => ipcRenderer.invoke("get-cloud-auth-state"),
+  signInCloud: (payload) => ipcRenderer.invoke("sign-in-cloud", payload),
+  signUpCloud: (payload) => ipcRenderer.invoke("sign-up-cloud", payload),
+  signOutCloud: () => ipcRenderer.invoke("sign-out-cloud"),
+  getSaveProfileSnapshot: (recordId) =>
+    ipcRenderer.invoke("get-save-profile-snapshot", recordId),
+  refreshSaveProfiles: (recordId) =>
+    ipcRenderer.invoke("refresh-save-profiles", recordId),
+  uploadCloudSaves: (recordId) =>
+    ipcRenderer.invoke("upload-cloud-saves", recordId),
+  restoreCloudSaves: (recordId) =>
+    ipcRenderer.invoke("restore-cloud-saves", recordId),
+  getScanSources: () => ipcRenderer.invoke("get-scan-sources"),
+  addScanSource: (sourcePath) =>
+    ipcRenderer.invoke("add-scan-source", sourcePath),
+  updateScanSource: (params) =>
+    ipcRenderer.invoke("update-scan-source", params),
+  removeScanSource: (sourceId) =>
+    ipcRenderer.invoke("remove-scan-source", sourceId),
+  getScanJobs: (limit) => ipcRenderer.invoke("get-scan-jobs", limit),
+  getScanCandidates: (limit) =>
+    ipcRenderer.invoke("get-scan-candidates", limit),
   startScan: (params) => ipcRenderer.invoke("start-scan", params),
+  startScanSources: (params) =>
+    ipcRenderer.invoke("start-scan-sources", params),
+  cancelScan: () => ipcRenderer.invoke("cancel-scan"),
+  scanLibrary: () => ipcRenderer.invoke("scan-library"),
   searchAtlasByF95Id: (f95Id) =>
     ipcRenderer.invoke("search-atlas-by-f95-id", f95Id),
   searchAtlas: (title, creator) =>
     ipcRenderer.invoke("search-atlas", { title, creator }),
+  searchSiteCatalog: (filters, limit) =>
+    ipcRenderer.invoke("search-site-catalog", { filters, limit }),
+  getF95AuthStatus: () => ipcRenderer.invoke("get-f95-auth-status"),
+  getF95Downloads: () => ipcRenderer.invoke("get-f95-downloads"),
+  getF95ThreadInstallState: (payload) =>
+    ipcRenderer.invoke("get-f95-thread-install-state", payload),
+  inspectF95Thread: (payload) => ipcRenderer.invoke("inspect-f95-thread", payload),
+  openF95Login: () => ipcRenderer.invoke("open-f95-login"),
+  logoutF95: () => ipcRenderer.invoke("logout-f95"),
+  installF95Thread: (payload) =>
+    ipcRenderer.invoke("install-f95-thread", payload),
   addAtlasMapping: (recordId, atlasId) =>
     ipcRenderer.invoke("add-atlas-mapping", { recordId, atlasId }),
   findF95Id: (atlasId) => ipcRenderer.invoke("find-f95-id", atlasId),
@@ -127,6 +168,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("scan-complete", (event, game) => callback(game)),
   onScanCompleteFinal: (callback) =>
     ipcRenderer.on("scan-complete-final", (event, games) => callback(games)),
+  onScanWarning: (callback) =>
+    ipcRenderer.on("scan-warning", (event, warning) => callback(warning)),
   onUpdateProgress: (callback) =>
     ipcRenderer.on("update-progress", (event, progress) => callback(progress)),
   onImportProgress: (callback) =>
@@ -153,6 +196,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     console.log("Invoking openDirectory for path:", path);
     return ipcRenderer.invoke("open-directory", path);
   },
+  launchGame: (payload) => ipcRenderer.invoke("launch-game", payload),
   onGameDetailsImportProgress: (callback) => {
     console.log("Registering game-details-import-progress listener");
     ipcRenderer.on("game-details-import-progress", (event, progress) =>
@@ -202,5 +246,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onGameDeleted: (callback) => {
     ipcRenderer.on("game-deleted", (event, recordId) => callback(recordId));
   },
+  onF95AuthChanged: (callback) =>
+    ipcRenderer.on("f95-auth-changed", (event, payload) => callback(payload)),
+  onF95DownloadsChanged: (callback) =>
+    ipcRenderer.on("f95-downloads-changed", (event, payload) =>
+      callback(payload),
+    ),
+  onCloudAuthChanged: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("cloud-auth-changed", listener);
+    return () => ipcRenderer.removeListener("cloud-auth-changed", listener);
+  },
+  onF95DownloadProgress: (callback) =>
+    ipcRenderer.on("f95-download-progress", (event, payload) =>
+      callback(payload),
+    ),
   getUniqueFilterOptions: () => ipcRenderer.invoke("get-unique-filter-options"),
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
 });

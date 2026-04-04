@@ -1,249 +1,37 @@
-const sqlite3 = require("sqlite3").verbose();
+// @ts-nocheck
+
 const path = require("path");
 const fs = require("fs").promises;
+const { resolveStoredImagePath, toRendererPath } = require("./main/assetPaths");
+const { openDatabase } = require("./main/db/openDatabase");
+const {
+  splitDelimitedText,
+  filterSiteCatalogEntries,
+} = require("./shared/siteSearch");
+const { buildVersionUpdateState } = require("./shared/versionUpdate");
 
 let db;
 
-const initializeDatabase = (dataDir) => {
-  const dbPath = path.join(dataDir, "data.db");
-  db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error("Database error:", err);
-  });
-
-  db.serialize(() => {
-    // Table creation migrations from C#
-    db.run(`
-      CREATE TABLE IF NOT EXISTS games
-      (
-        record_id INTEGER PRIMARY KEY,
-        title TEXT NOT NULL,
-        creator TEXT NOT NULL,
-        engine TEXT,
-        last_played_r DATE DEFAULT 0,
-        total_playtime INTEGER DEFAULT 0,
-        description TEXT,
-        last_played_version TEXT,
-        UNIQUE (title, creator, engine)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS versions
-      (
-        record_id INTEGER REFERENCES games (record_id),
-        version TEXT,
-        game_path TEXT,
-        exec_path TEXT,
-        in_place BOOLEAN,
-        last_played DATE,
-        version_playtime INTEGER,
-        folder_size INTEGER,
-        date_added INTEGER,
-        UNIQUE (record_id, version)
-      );
-    `);
-    db.run(`
-      CREATE VIEW IF NOT EXISTS last_import_times (record_id, last_import) AS
-      SELECT DISTINCT record_id, versions.date_added
-      FROM games
-      NATURAL JOIN versions
-      ORDER BY versions.date_added DESC;
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS atlas_data
-      (
-        atlas_id INTEGER PRIMARY KEY,
-        id_name STRING UNIQUE,
-        short_name STRING,
-        title STRING,
-        original_name STRING,
-        category STRING,
-        engine STRING,
-        status STRING,
-        version STRING,
-        developer STRING,
-        creator STRING,
-        overview STRING,
-        censored STRING,
-        language STRING,
-        translations STRING,
-        genre STRING,
-        tags STRING,
-        voice STRING,
-        os STRING,
-        release_date DATE,
-        length STRING,
-        banner STRING,
-        banner_wide STRING,
-        cover STRING,
-        logo STRING,
-        wallpaper STRING,
-        previews STRING,
-        last_record_update STRING
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS atlas_previews
-      (
-        atlas_id INTEGER REFERENCES atlas_data (atlas_id),
-        preview_url STRING NOT NULL,
-        UNIQUE (atlas_id, preview_url)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS atlas_mappings
-      (
-        record_id INTEGER REFERENCES games (record_id) PRIMARY KEY,
-        atlas_id INTEGER REFERENCES atlas_data (atlas_id),
-        UNIQUE (record_id, atlas_id)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS f95_zone_data
-      (
-        f95_id INTEGER UNIQUE PRIMARY KEY,
-        atlas_id INTEGER REFERENCES atlas_data (atlas_id) UNIQUE,
-        banner_url STRING,
-        site_url STRING,
-        last_thread_comment STRING,
-        thread_publish_date STRING,
-        last_record_update STRING,
-        views STRING,
-        likes STRING,
-        tags STRING,
-        rating STRING,
-        screens STRING,
-        replies STRING
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS f95_zone_screens
-      (
-        f95_id INTEGER REFERENCES f95_zone_data (f95_id),
-        screen_url TEXT NOT NULL
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS updates
-      (
-        update_time INTEGER PRIMARY KEY,
-        processed_time INTEGER,
-        md5 BLOB
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS tags
-      (
-        tag_id INTEGER PRIMARY KEY,
-        tag TEXT UNIQUE
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS tag_mappings
-      (
-        record_id INTEGER REFERENCES games (record_id),
-        tag_id INTEGER REFERENCES tags (tag_id),
-        UNIQUE (record_id, tag_id)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS atlas_tags
-      (
-        tag_id INTEGER REFERENCES tags (tag_id),
-        atlas_id INTEGER REFERENCES atlas_data (atlas_id),
-        UNIQUE (atlas_id, tag_id)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS f95_zone_tags
-      (
-        f95_id INTEGER REFERENCES f95_zone_data (f95_id),
-        tag_id INTEGER REFERENCES tags (tag_id)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS previews
-      (
-        record_id INTEGER REFERENCES games (record_id),
-        path TEXT UNIQUE,
-        position INTEGER DEFAULT 256,
-        UNIQUE (record_id, path)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS banners
-      (
-        record_id INTEGER REFERENCES games (record_id),
-        path TEXT UNIQUE,
-        type INTEGER,
-        UNIQUE (record_id, path, type)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS data_change
-      (
-        timestamp INTEGER,
-        delta INTEGER
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS f95_zone_mappings
-      (
-        record_id INTEGER REFERENCES games(record_id),
-        f95_id INTEGER REFERENCES f95_zone_data(f95_id)
-      );
-    `);
-    db.run(`
-      CREATE TABLE IF NOT EXISTS emulators
-      (
-        extension TEXT PRIMARY KEY,
-        program_path TEXT NOT NULL,
-        parameters TEXT
-      );
-    `);
-    db.run(`
-  CREATE TABLE IF NOT EXISTS steam_data
-  (
-    steam_id INTEGER PRIMARY KEY,
-    atlas_id INTEGER REFERENCES atlas_data (atlas_id),
-    title TEXT,
-    category TEXT,
-    engine TEXT,
-    developer TEXT,
-    publisher TEXT,
-    overview TEXT,
-    censored TEXT,
-    language TEXT,
-    translations TEXT,
-    genre TEXT,
-    tags TEXT,
-    voice TEXT,
-    os TEXT,
-    release_state TEXT,
-    release_date TEXT,
-    header TEXT,
-    library_hero TEXT,
-    logo TEXT,
-    last_record_update TEXT
-  );
-`);
-    db.run(`
-  CREATE TABLE IF NOT EXISTS steam_screens
-  (
-    steam_id INTEGER REFERENCES steam_data (steam_id),
-    screen_url TEXT NOT NULL,
-    UNIQUE (steam_id, screen_url)
-  );
-`);
-    db.run(`
-  CREATE TABLE IF NOT EXISTS steam_mappings
-  (
-    record_id INTEGER REFERENCES games (record_id) PRIMARY KEY,
-    steam_id INTEGER REFERENCES steam_data (steam_id),
-    UNIQUE (record_id, steam_id)
-  );
-`);
+const initializeDatabase = (dataDirOrPaths, options = {}) => {
+  return openDatabase(dataDirOrPaths, options).then((database) => {
+    db = database;
+    return db;
   });
 };
+
+const resolveBannerPath = (appPaths, bannerPath) => {
+  if (!bannerPath) {
+    return null;
+  }
+
+  return toRendererPath(resolveStoredImagePath(appPaths, bannerPath));
+};
+
+const resolveBannerUrl = (appPaths, localBannerPath, remoteBannerUrl) =>
+  resolveBannerPath(appPaths, localBannerPath) || remoteBannerUrl || null;
+
+const buildDisplayText = (localValue, remoteValue) =>
+  remoteValue || localValue || "";
 
 const addGame = (game) => {
   return new Promise((resolve, reject) => {
@@ -322,7 +110,8 @@ const updateGame = (game) => {
 const addVersion = (game, recordId) => {
   const { version, folder, executables, folderSize = 0 } = game;
   const executable =
-    executables && executables.length > 0 ? executables[0].value : "";
+    game.selectedValue ||
+    (executables && executables.length > 0 ? executables[0].value : "");
   const escapedVersion = version.replace(/'/g, "''");
   const escapedFolder = folder.replace(/'/g, "''");
   const escapedExecPath = executable
@@ -377,11 +166,25 @@ const updateVersion = (version, record_id) => {
   });
 };
 
-const getGame = (recordId, appPath, isDev) => {
+const deleteVersionsForRecordPath = (recordId, gamePath) => {
   return new Promise((resolve, reject) => {
-    const baseImagePath = isDev
-      ? path.join(appPath, "src")
-      : path.resolve(appPath, "../../");
+    db.run(
+      `DELETE FROM versions WHERE record_id = ? AND game_path = ?`,
+      [recordId, gamePath],
+      function (err) {
+        if (err) {
+          console.error("Error deleting versions by game_path:", err);
+          reject(err);
+        } else {
+          resolve(this.changes || 0);
+        }
+      },
+    );
+  });
+};
+
+const getGame = (recordId, appPaths) => {
+  return new Promise((resolve, reject) => {
     const query = `
       SELECT
         games.record_id as record_id,
@@ -393,16 +196,16 @@ const getGame = (recordId, appPath, isDev) => {
         games.total_playtime,
         games.last_played_r,
         games.last_played_version,
-        CASE 
-          WHEN banners.path IS NOT NULL THEN REPLACE('${baseImagePath}/' || banners.path, '\\', '/')
-          ELSE NULL
-        END AS banner_url,
+        banners.path as banner_path,
+        f95_zone_data.banner_url as remote_banner_url,
         f95_zone_data.f95_id as f95_id,
         f95_zone_data.site_url as siteUrl,
         f95_zone_data.views as views,
         f95_zone_data.likes as likes,
         f95_zone_data.tags as f95_tags,
         f95_zone_data.rating as rating,
+        atlas_data.title as atlas_title,
+        atlas_data.creator as atlas_creator,
         atlas_data.status,
         atlas_data.version as latestVersion,
         atlas_data.category,
@@ -452,6 +255,13 @@ const getGame = (recordId, appPath, isDev) => {
           const game = {
             ...row,
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
+            banner_url: resolveBannerUrl(
+              appPaths,
+              row.banner_path,
+              row.remote_banner_url,
+            ),
+            displayTitle: buildDisplayText(row.title, row.atlas_title),
+            displayCreator: buildDisplayText(row.creator, row.atlas_creator),
             versions: versionRows.map((v) => ({
               version: v.version,
               game_path: v.game_path,
@@ -463,72 +273,13 @@ const getGame = (recordId, appPath, isDev) => {
               date_added: v.date_added,
             })),
             versionCount: versionRows.length,
-            isUpdateAvailable: false,
           };
-          // Compute isUpdateAvailable (new logic)
-          game.isUpdateAvailable = false;
-
-          if (row.latestVersion && game.versions.length > 0) {
-            const latestStr = (row.latestVersion || "").trim().toLowerCase();
-
-            // Rule 2: if ANY installed version contains "final" → no update
-            const hasFinal = game.versions.some((v) =>
-              (v.version || "").trim().toLowerCase().includes("final"),
-            );
-
-            if (hasFinal) {
-              game.isUpdateAvailable = false;
-            } else {
-              // Prepare cleaned latest version
-              const cleanLatest = latestStr
-                .replace(/\s+/g, "") // remove all spaces
-                .replace(/[^0-9.]/g, ""); // keep only digits and periods
-
-              // We'll compare each installed version against the cleaned latest
-              for (const v of game.versions) {
-                const verStr = (v.version || "").trim().toLowerCase();
-                const cleanVer = verStr
-                  .replace(/\s+/g, "") // remove all spaces
-                  .replace(/[^0-9.]/g, ""); // keep only digits and periods
-
-                // Skip invalid/empty versions
-                if (!cleanVer || !cleanLatest) continue;
-
-                // Compare as version tuples (better than simple string compare)
-                const latestParts = cleanLatest
-                  .split(".")
-                  .map((n) => parseInt(n, 10) || 0);
-                const currentParts = cleanVer
-                  .split(".")
-                  .map((n) => parseInt(n, 10) || 0);
-
-                // Pad the shorter array with zeros
-                const maxLen = Math.max(
-                  latestParts.length,
-                  currentParts.length,
-                );
-                while (latestParts.length < maxLen) latestParts.push(0);
-                while (currentParts.length < maxLen) currentParts.push(0);
-
-                // Compare part by part
-                let isOlder = false;
-                for (let i = 0; i < maxLen; i++) {
-                  if (currentParts[i] < latestParts[i]) {
-                    isOlder = true;
-                    break;
-                  }
-                  if (currentParts[i] > latestParts[i]) {
-                    break; // current is newer → no update needed from this version
-                  }
-                }
-
-                if (isOlder) {
-                  game.isUpdateAvailable = true;
-                  break; // as soon as we find one version that is older → update exists
-                }
-              }
-            }
-          }
+          const versionState = buildVersionUpdateState(
+            row.latestVersion,
+            game.versions,
+          );
+          game.isUpdateAvailable = versionState.hasUpdate;
+          game.newestInstalledVersion = versionState.newestInstalledVersion;
           resolve(game);
         },
       );
@@ -536,12 +287,8 @@ const getGame = (recordId, appPath, isDev) => {
   });
 };
 
-const getGames = (appPath, isDev, offset = 0, limit = null) => {
+const getGames = (appPaths, offset = 0, limit = null) => {
   return new Promise((resolve, reject) => {
-    const baseImagePath = isDev
-      ? path.join(appPath, "src")
-      : path.resolve(appPath, "../../");
-
     // Main query with OFFSET and LIMIT
     let mainQuery = `
       SELECT
@@ -554,16 +301,16 @@ const getGames = (appPath, isDev, offset = 0, limit = null) => {
         games.total_playtime,
         games.last_played_r,
         games.last_played_version,
-        CASE 
-          WHEN banners.path IS NOT NULL THEN REPLACE('${baseImagePath}/' || banners.path, '\\', '/')
-          ELSE NULL
-        END AS banner_url,
+        banners.path as banner_path,
+        f95_zone_data.banner_url as remote_banner_url,
         f95_zone_data.f95_id as f95_id,
         f95_zone_data.site_url as siteUrl,
         f95_zone_data.views as views,
         f95_zone_data.likes as likes,
         f95_zone_data.tags as f95_tags,
         f95_zone_data.rating as rating,
+        atlas_data.title as atlas_title,
+        atlas_data.creator as atlas_creator,
         atlas_data.status,
         atlas_data.version as latestVersion,
         atlas_data.category,
@@ -640,38 +387,26 @@ const getGames = (appPath, isDev, offset = 0, limit = null) => {
         // Map rows to include versions array and isUpdateAvailable
         const games = rows.map((row) => {
           const versions = versionsByRecordId[row.record_id] || [];
-          // Compute isUpdateAvailable based on C# logic
-          let isUpdateAvailable = false;
-          if (row.latestVersion && versions.length > 0) {
-            let latest;
-            try {
-              latest = parseInt(row.latestVersion.replace(/[^0-9]/g, ""), 10);
-            } catch {
-              latest = 0;
-            }
-            for (const version of versions) {
-              let current;
-              try {
-                current = parseInt(version.version.replace(/[^0-9]/g, ""), 10);
-              } catch {
-                current = 0;
-              }
-              if (latest > current) {
-                isUpdateAvailable = true;
-              } else {
-                isUpdateAvailable = false;
-                break;
-              }
-            }
-          }
+          const versionState = buildVersionUpdateState(
+            row.latestVersion,
+            versions,
+          );
 
           return {
             ...row,
             // Unescape engine to fix 'Ren''Py' issue
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
+            banner_url: resolveBannerUrl(
+              appPaths,
+              row.banner_path,
+              row.remote_banner_url,
+            ),
+            displayTitle: buildDisplayText(row.title, row.atlas_title),
+            displayCreator: buildDisplayText(row.creator, row.atlas_creator),
             versions,
             versionCount: versions.length, // Add versionCount
-            isUpdateAvailable,
+            isUpdateAvailable: versionState.hasUpdate,
+            newestInstalledVersion: versionState.newestInstalledVersion,
           };
         });
 
@@ -714,10 +449,10 @@ const deleteVersion = (recordId, version) =>
   });
 
 // Full cleanup (images + mappings + versions + game record)
-const deleteGameCompletely = async (recordId, appPath, isDev) => {
+const deleteGameCompletely = async (recordId, appPaths) => {
   try {
-    await deleteBanner(recordId, appPath, isDev);
-    await deletePreviews(recordId, appPath, isDev);
+    await deleteBanner(recordId, appPaths);
+    await deletePreviews(recordId, appPaths);
 
     const tables = [
       "atlas_mappings",
@@ -977,9 +712,7 @@ const searchAtlas = async (title, creator) => {
       }
       if (hasF95Id) {
         // Return results from this query if any have f95_id
-        const filteredRows = enrichedRows.filter((row) =>
-          findF95Id(row.atlas_id),
-        );
+        const filteredRows = enrichedRows.filter((row) => Boolean(row.f95_id));
         console.log(`Query found ${filteredRows.length} results with f95_id`);
         return filteredRows.length > 0 ? filteredRows : enrichedRows;
       }
@@ -994,6 +727,102 @@ const searchAtlas = async (title, creator) => {
     `Returning ${finalResults.length} unique results from all queries`,
   );
   return finalResults;
+};
+
+const searchSiteCatalog = (filters = {}, options = {}) => {
+  const limit = Math.max(1, Number(options.limit) || 120);
+
+  return new Promise((resolve, reject) => {
+    db.all(
+      `
+        SELECT
+          atlas_data.atlas_id as atlas_id,
+          f95_zone_data.f95_id as f95_id,
+          atlas_data.title as title,
+          atlas_data.creator as creator,
+          atlas_data.engine as engine,
+          atlas_data.version as version,
+          atlas_data.category as category,
+          atlas_data.status as status,
+          atlas_data.censored as censored,
+          atlas_data.language as language,
+          atlas_data.genre as genre,
+          atlas_data.voice as voice,
+          atlas_data.os as os,
+          atlas_data.overview as overview,
+          atlas_data.release_date as release_date,
+          atlas_data.banner as atlas_banner,
+          atlas_data.banner_wide as atlas_banner_wide,
+          atlas_data.cover as atlas_cover,
+          atlas_data.tags as atlas_tags,
+          f95_zone_data.banner_url as banner_url,
+          f95_zone_data.site_url as site_url,
+          f95_zone_data.thread_publish_date as thread_publish_date,
+          f95_zone_data.last_thread_comment as last_thread_comment,
+          f95_zone_data.views as views,
+          f95_zone_data.likes as likes,
+          f95_zone_data.rating as rating,
+          f95_zone_data.replies as replies,
+          f95_zone_data.tags as f95_tags,
+          games.record_id as library_record_id
+        FROM atlas_data
+        LEFT JOIN f95_zone_data ON atlas_data.atlas_id = f95_zone_data.atlas_id
+        LEFT JOIN atlas_mappings ON atlas_data.atlas_id = atlas_mappings.atlas_id
+        LEFT JOIN games ON atlas_mappings.record_id = games.record_id
+      `,
+      [],
+      (err, rows) => {
+        if (err) {
+          console.error("Error searching site catalog:", err);
+          reject(err);
+          return;
+        }
+
+        const entries = rows.map((row) => ({
+          atlasId: row.atlas_id,
+          f95Id: row.f95_id,
+          title: row.title || "",
+          creator: row.creator || "",
+          engine: row.engine || "",
+          version: row.version || "",
+          category: row.category || "",
+          status: row.status || "",
+          censored: row.censored || "",
+          language: row.language || "",
+          genre: row.genre || "",
+          voice: row.voice || "",
+          os: row.os || "",
+          overview: row.overview || "",
+          releaseDate: row.release_date || 0,
+          bannerUrl:
+            row.banner_url ||
+            row.atlas_banner_wide ||
+            row.atlas_banner ||
+            row.atlas_cover ||
+            null,
+          siteUrl: row.site_url || null,
+          threadPublishDate: row.thread_publish_date || null,
+          lastThreadComment: row.last_thread_comment || null,
+          views: row.views || "0",
+          likes: row.likes || "0",
+          rating: row.rating || "0",
+          replies: row.replies || "0",
+          tags: row.f95_tags || row.atlas_tags || "",
+          tagList: splitDelimitedText(row.f95_tags || row.atlas_tags || ""),
+          libraryRecordId: row.library_record_id || null,
+          isInstalled: Boolean(row.library_record_id),
+        }));
+
+        const filteredEntries = filterSiteCatalogEntries(entries, filters);
+        resolve({
+          results: filteredEntries.slice(0, limit),
+          total: filteredEntries.length,
+          limit,
+          limited: filteredEntries.length > limit,
+        });
+      },
+    );
+  });
 };
 
 const findF95Id = (atlasId) => {
@@ -1214,11 +1043,8 @@ const updatePreviews = (recordId, previewPath) => {
   });
 };
 
-const getPreviews = (recordId, appPath, isDev) => {
+const getPreviews = (recordId, appPaths) => {
   return new Promise((resolve, reject) => {
-    const baseImagePath = isDev
-      ? path.join(appPath, "src")
-      : path.resolve(appPath, "../../");
     db.all(
       `SELECT path FROM previews WHERE record_id = ?`,
       [recordId],
@@ -1227,24 +1053,52 @@ const getPreviews = (recordId, appPath, isDev) => {
           console.error("Error fetching previews:", err);
           reject(err);
         } else {
-          console.log(rows);
-          const previews = rows.map(
-            (row) =>
-              `${path.join(baseImagePath, row.path).replace(/\\/g, "/")}`,
+          const previews = rows.map((row) =>
+            toRendererPath(resolveStoredImagePath(appPaths, row.path)),
           );
-          console.log("Previews fetched for recordId:", recordId, previews);
-          resolve(previews);
+
+          if (previews.length > 0) {
+            console.log("Previews fetched for recordId:", recordId, previews);
+            resolve(previews);
+            return;
+          }
+
+          db.get(
+            `
+              SELECT f95_zone_data.screens as screens
+              FROM atlas_mappings
+              JOIN f95_zone_data ON atlas_mappings.atlas_id = f95_zone_data.atlas_id
+              WHERE atlas_mappings.record_id = ?
+            `,
+            [recordId],
+            (remoteErr, remoteRow) => {
+              if (remoteErr) {
+                console.error("Error fetching remote previews:", remoteErr);
+                reject(remoteErr);
+                return;
+              }
+
+              const remotePreviews =
+                remoteRow?.screens
+                  ?.split(",")
+                  .map((screen) => screen.trim())
+                  .filter(Boolean) || [];
+              console.log(
+                "Remote previews fetched for recordId:",
+                recordId,
+                remotePreviews,
+              );
+              resolve(remotePreviews);
+            },
+          );
         }
       },
     );
   });
 };
 
-const getBanners = (recordId, appPath, isDev) => {
+const getBanners = (recordId, appPaths) => {
   return new Promise((resolve, reject) => {
-    const baseImagePath = isDev
-      ? path.join(appPath, "src")
-      : path.resolve(appPath, "../../");
     db.all(
       `SELECT path FROM banners WHERE record_id = ?`,
       [recordId],
@@ -1253,9 +1107,8 @@ const getBanners = (recordId, appPath, isDev) => {
           console.error("Error fetching banners:", err);
           reject(err);
         } else {
-          const banners = rows.map(
-            (row) =>
-              `${path.join(baseImagePath, row.path).replace(/\\/g, "/")}`,
+          const banners = rows.map((row) =>
+            toRendererPath(resolveStoredImagePath(appPaths, row.path)),
           );
           console.log("Banners fetched for recordId:", recordId, banners);
           resolve(banners);
@@ -1265,11 +1118,8 @@ const getBanners = (recordId, appPath, isDev) => {
   });
 };
 
-const getBanner = (recordId, appPath, isDev, type) => {
+const getBanner = (recordId, appPaths, type) => {
   return new Promise((resolve, reject) => {
-    const baseImagePath = isDev
-      ? path.join(appPath, "src")
-      : path.resolve(appPath, "../../");
     db.all(
       `SELECT path FROM banners WHERE record_id = ? AND type=?`,
       [recordId, type],
@@ -1278,9 +1128,8 @@ const getBanner = (recordId, appPath, isDev, type) => {
           console.error("Error fetching banners:", err);
           reject(err);
         } else {
-          const banners = rows.map(
-            (row) =>
-              `${path.join(baseImagePath, row.path).replace(/\\/g, "/")}`,
+          const banners = rows.map((row) =>
+            toRendererPath(resolveStoredImagePath(appPaths, row.path)),
           );
           console.log("Banners fetched for recordId:", recordId, banners);
           resolve(banners);
@@ -1293,7 +1142,7 @@ const getBanner = (recordId, appPath, isDev, type) => {
 const getAtlasData = (atlasId) => {
   return new Promise((resolve, reject) => {
     db.get(
-      `SELECT title, creator, engine FROM atlas_data WHERE atlas_id = ?`,
+      `SELECT title, creator, engine, version FROM atlas_data WHERE atlas_id = ?`,
       [atlasId],
       (err, row) => {
         if (err) reject(err);
@@ -1384,10 +1233,10 @@ const removeEmulatorConfig = (extension) => {
   });
 };
 
-const deleteBanner = (recordId, appPath, isDev) => {
+const deleteBanner = (recordId, appPaths) => {
   return new Promise(async (resolve, reject) => {
     try {
-      const banners = await getBanners(recordId, appPath, isDev);
+      const banners = await getBanners(recordId, appPaths);
       for (const banner_path of banners) {
         const filePath = banner_path.replace("file://", ""); // Adjust to data/images
         console.log("Attempting to delete preview file:", filePath);
@@ -1424,10 +1273,10 @@ const deleteBanner = (recordId, appPath, isDev) => {
   });
 };
 
-const deletePreviews = (recordId, appPath, isDev) => {
+const deletePreviews = (recordId, appPaths) => {
   return new Promise(async (resolve, reject) => {
     try {
-      const previews = await getPreviews(recordId, appPath, isDev);
+      const previews = await getPreviews(recordId, appPaths);
       for (const previewUrl of previews) {
         const filePath = previewUrl.replace("file://", ""); // Adjust to data/images
         console.log("Attempting to delete preview file:", filePath);
@@ -1586,7 +1435,13 @@ const getUniqueFilterOptions = () => {
                       [],
                       (err, rows) => {
                         if (err) return reject(err);
-                        options.languages = rows.map((r) => r.language);
+                        options.languages = Array.from(
+                          new Set(
+                            rows.flatMap((row) =>
+                              splitDelimitedText(row.language),
+                            ),
+                          ),
+                        );
 
                         // Tags from f95_zone_data
                         db.all(
@@ -1596,11 +1451,9 @@ const getUniqueFilterOptions = () => {
                             if (err) return reject(err);
                             const tagsSet = new Set();
                             rows.forEach((row) => {
-                              if (row.tags) {
-                                row.tags
-                                  .split(",")
-                                  .forEach((tag) => tagsSet.add(tag.trim()));
-                              }
+                              splitDelimitedText(row.tags).forEach((tag) =>
+                                tagsSet.add(tag),
+                              );
                             });
                             options.tags = Array.from(tagsSet);
 
@@ -1629,6 +1482,7 @@ module.exports = {
   checkDbUpdates,
   insertJsonData,
   searchAtlas,
+  searchSiteCatalog,
   findF95Id,
   checkRecordExist,
   checkPathExist,
@@ -1652,6 +1506,7 @@ module.exports = {
   getBanner,
   updateGame,
   updateVersion,
+  deleteVersionsForRecordPath,
   getSteamIDbyRecord,
   addSteamMapping,
   getSteamBannerUrl,

@@ -1,0 +1,1688 @@
+# Tasks
+
+Last updated: 2026-04-04
+
+## How To Read This File
+
+- `Status`: `done`, `in_progress`, `partial`, `todo`, `blocked`
+- `Progress`: rough completion percent for the task itself, not fake precision
+- `TЗ coverage`: how much of the original spec this task meaningfully closes
+- Update this file after every non-trivial implementation slice
+
+## Overall TЗ Snapshot
+
+| Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------- | ----------- | -------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                |
+| Stage 1. Local core              | in_progress |      94% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, and Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall now exist. Scanner is still legacy, and the new F95 flow still needs manual end-to-end smoke with a real login. |
+| Stage 2. Save intelligence       | in_progress |      62% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app detects install-relative save roots plus `%AppData%/RenPy/*`, local save vault can now back up and restore profile-based roots, and the library details panel can inspect/refresh profile detection. Deeper conflict resolution and more engine-specific save adapters are still missing.                                                                                                                                                                                                  |
+| Stage 3. Supabase                | in_progress |      58% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. The service-role key is intentionally not used in the shipped app. First live bucket/auth smoke is still pending.                                                                                                                                                                                                                                                      |
+| Stage 4. Sync UX                 | in_progress |      54% | Settings now have a dedicated Cloud Saves page for config/auth, and the library details panel exposes refresh/upload/restore actions plus sync state. Rich conflict prompts, remote history browsing and background auto-sync are still missing.                                                                                                                                                                                                                                                                               |
+| Stage 5. Quality hardening       | partial     |      48% | CI/check foundation, migration tests, scan-source store tests, Ren'Py detector tests, scan-session tests, scan-candidate store tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, F95 download resolver tests including masked-link, countdown-host and gofile coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                                                                                                              |
+| MVP total                        | in_progress |      73% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### 2026-04-04 — Stage 1 mirror resolver expansion: countdown hosts + Gofile + explicit MEGA guard
+
+- Status: partial
+- Progress: 95%
+- ТЗ coverage: closes another real class of broken mirror installs where the app could only handle simple landing pages but not hosts that require a form handshake or API lookup before yielding the actual file
+
+What was done:
+
+- Added a generic countdown-host resolver for file hosts that expose a `download-countdown` component and expect a `download2` form POST before returning the real payload URL.
+- Confirmed the `datanodes` family behavior from the live site and implemented the same handshake in the Electron main process instead of trying to download the HTML page.
+- Added a defensive `gofile` resolver:
+  - bootstraps a guest token
+  - queries `https://api.gofile.io/contents/{id}`
+  - extracts the direct file URL from the API payload when available
+- Added an explicit `MEGA` guard so the app now fails honestly before queueing a bogus HTML page for a host that needs a dedicated crypto client path.
+
+How it was implemented:
+
+- Main download support:
+  - `src/main/f95/downloadSupport.js`
+  - added HTML tag parsing for:
+    - `download-countdown`
+    - `file-actions`
+  - added countdown-host handshake resolver:
+    - GET landing page
+    - parse `code` / `referer` / `rand` / captcha flags
+    - POST `op=download2`
+    - trust the returned JSON `url`
+  - added `gofile` content-id extraction and guest-token/API lookup
+  - added explicit user-facing `MEGA` unsupported guard
+- Tests:
+  - `test/f95DownloadSupport.test.js`
+  - added coverage for:
+    - countdown-host config parsing
+    - countdown-host final URL resolution
+    - `gofile` content-id parsing
+    - `gofile` API-driven direct URL lookup
+    - explicit `MEGA` rejection
+
+Files changed in this slice:
+
+- `src/main/f95/downloadSupport.js`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- this now covers another large class of mirrors, but it still does not mean every hoster is universally solved
+- `MEGA` is explicitly blocked for automatic install until a real dedicated implementation exists
+- real manual smoke is still needed for the exact failing mirrors from the user’s logged-in F95 session, especially `vikingfile` and the concrete `gofile` links seen in the wild
+
+### 2026-04-04 — Stage 1 download resolver hardening: masked F95 -> same-host landing page -> real file
+
+- Status: partial
+- Progress: 94%
+- ТЗ coverage: closes the concrete regression where masked F95 mirrors and host landing pages could still resolve to the wrong external payload instead of the actual game package
+
+What was done:
+
+- Hardened the F95 download resolver so the flow now explicitly handles:
+  - F95 masked warning pages
+  - host landing pages with an intermediate `Download` button
+  - same-host follow-up download endpoints
+- Fixed the dangerous generic resolver behavior that could follow unrelated external ad/download links from the landing page.
+- Added regression coverage for the exact real-world chain:
+  - `f95zone.to/masked/...`
+  - external host landing page
+  - final same-host `/download` endpoint
+- Added a guard that keeps external off-host download bait such as `torproject.org` out of resolver candidates.
+
+How it was implemented:
+
+- Main download support:
+  - `src/main/f95/downloadSupport.js`
+  - masked F95 links are resolved through the AJAX endpoint instead of treating the warning page itself as a payload
+  - host landing pages are parsed for same-host download affordances like `href`, `hx-get`, `formaction` and `action`
+  - candidate scoring now prefers explicit download endpoints and penalizes preview/help/pricing noise
+  - candidate URLs are constrained to the same host family as the current landing page, which is the real fix for the accidental Tor download class of bug
+- Tests:
+  - `test/f95DownloadSupport.test.js`
+  - added regression coverage for:
+    - generic landing-page extraction
+    - same-host landing-page resolution
+    - full masked-F95-to-final-download preparation
+
+Files changed in this slice:
+
+- `src/main/f95/downloadSupport.js`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- this path is now safer and more general, but some hosters still use captcha, timers or JS challenges that cannot be bypassed universally
+- real end-to-end smoke in the Electron app against a logged-in F95 session is still required for the exact host mix the user actually installs from
+
+### 2026-04-04 — Stage 2/3/4 save sync foundation: Ren'Py AppData intelligence + Supabase auth/storage
+
+- Status: partial
+- Progress: 63%
+- ТЗ coverage: closes the first real end-to-end slice of cloud save work instead of leaving save continuity trapped inside install folders only
+
+What was done:
+
+- Added persistent SQLite models for save detection and sync state:
+  - `save_profiles`
+  - `save_sync_state`
+- Added Ren'Py-oriented save detection that now covers:
+  - common install-relative save folders
+  - `%AppData%/RenPy/...` profiles matched against game title/install heuristics
+  - fallback Ren'Py detection from install markers even when engine metadata is missing
+- Reworked local save vault so it can back up and restore profile-based save roots, not just hardcoded `game/saves`
+- Added Supabase desktop client wiring with:
+  - publishable key
+  - desktop session persistence in app data
+  - email/password sign-up / sign-in / sign-out
+  - private storage archive upload / restore for game saves
+- Added a dedicated Cloud Saves settings page for config/auth
+- Added per-game save sync controls in the library details panel:
+  - refresh detected profiles
+  - upload to cloud
+  - restore from cloud
+  - view sync status and last error
+- Added ADR + SQL bootstrap for the private storage bucket and RLS policies
+
+How it was implemented:
+
+- Main / DB:
+  - `src/main/db/migrations/005_save_sync.js`
+  - `src/main/db/saveProfilesStore.js`
+  - `src/main/db/saveSyncStateStore.js`
+  - `src/main/saveProfiles.js`
+- Save detection / vault:
+  - `src/main/detectors/renpySaveDetector.js`
+  - `src/main/saveVault.js`
+  - `%AppData%/RenPy` restore paths now resolve through profile strategy instead of install-folder guesses
+- Supabase:
+  - `src/main/supabase/client.js`
+  - `src/main/cloudSaveSync.js`
+  - `src/main.js`
+  - auth and sync live entirely in the Electron main process via typed IPC
+  - only the publishable key is configured in the shipped app
+  - the provided secret key is intentionally ignored for runtime implementation because shipping it would be unprofessional and unsafe
+- Renderer / UI:
+  - `src/renderer.js`
+  - `src/core/settings/CloudSync.jsx`
+  - `src/core/settings/Settings.jsx`
+  - `src/core/settings/settingsIcons.js`
+  - `src/settings.html`
+  - `src/core/library/LibrarySaveSyncPanel.jsx`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - `src/index.html`
+- Docs:
+  - `docs/adr/0002-cloud-save-sync.md`
+  - `docs/supabase/cloud-save-setup.sql`
+
+Files changed in this slice:
+
+- `package.json`
+- `package-lock.json`
+- `src/main.js`
+- `src/renderer.js`
+- `src/main/db/migrations/005_save_sync.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/saveProfilesStore.js`
+- `src/main/db/saveSyncStateStore.js`
+- `src/main/detectors/renpySaveDetector.js`
+- `src/main/saveProfiles.js`
+- `src/main/saveVault.js`
+- `src/main/supabase/client.js`
+- `src/main/cloudSaveSync.js`
+- `src/shared/saveManifest.js`
+- `src/core/settings/CloudSync.jsx`
+- `src/core/settings/Settings.jsx`
+- `src/core/settings/settingsIcons.js`
+- `src/settings.html`
+- `src/core/library/LibrarySaveSyncPanel.jsx`
+- `src/core/library/LibraryDetailsPanel.jsx`
+- `src/index.html`
+- `docs/adr/0002-cloud-save-sync.md`
+- `docs/supabase/cloud-save-setup.sql`
+- `test/renpySaveDetector.test.js`
+- `test/saveManifest.test.js`
+- `test/saveProfilesStore.test.js`
+- `test/saveSyncStateStore.test.js`
+- `test/saveVault.test.js`
+- `test/migrations.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- the bucket/RLS bootstrap still has to be applied once in the target Supabase project
+- there is still no automatic background sync or cloud conflict dialog
+- `%AppData%/RenPy` coverage is now real, but full save intelligence for every engine/runtime is obviously not “done”
+- live manual smoke with a real Supabase user and real upload/restore is still required
+
+Operational note:
+
+- verified direct admin access to the target Supabase project with the provided secret key
+- created the private storage bucket `atlas-cloud-saves` in project `jlwxwjgnujkenanohypr`
+- bucket bootstrap is therefore no longer theoretical; the remaining project-side requirement is applying the `storage.objects` RLS policies so authenticated end users can use publishable-key client auth safely
+- cleaned the cloud-save UI back to product language:
+  - removed editable backend/project fields from user settings
+  - removed visible bucket/backend jargon from the account/save panels
+  - kept only user-facing actions such as sign in, create account, back up and restore
+
+### 2026-04-04 — Stage 1 install/launch correction: flatten update archives + honor selected executable + add Play button
+
+- Status: partial
+- Progress: 91%
+- ТЗ coverage: fixes a real update/install regression where archive updates were nesting a new game folder inside the old one, and closes the missing launch affordance in the details panel
+
+What was done:
+
+- Fixed archive update installs so single-root archives are flattened before merging into the existing game directory.
+- Stopped treating the first discovered executable as the launch target when a better selected executable already exists.
+- Added a direct `Play` action to the library details sidebar:
+  - top-level current-version play button
+  - per-version `Play` button inside installed versions
+- Added a dedicated main-side `launch-game` IPC so the details panel can launch games directly instead of relying on the banner context menu only.
+- Hardened context-menu launch handling so failed launches are logged instead of silently vanishing.
+
+How it was implemented:
+
+- Archive layout:
+  - `src/main/install/archiveLayout.js`
+  - new helper unwraps archives that contain exactly one top-level folder, so updates merge their contents into the target install directory instead of producing `Game\\UpdateFolder\\...`
+- Executable selection:
+  - `src/main/install/selectExecutable.js`
+  - new scoring prefers title-matching game executables and penalizes generic runtime files like `renpy.exe`, `pythonw.exe`, `unitycrashhandler*` and similar
+- Main install/launch flow:
+  - `src/main.js`
+  - F95 archive installs now use the unwrapped archive content root
+  - archive and importer executable choice now use the new preferred-executable selector
+  - added `launch-game` IPC
+  - `launchGame()` now returns real success/failure and surfaces missing-target errors
+- DB persistence:
+  - `src/database.js`
+  - `addVersion()` now respects `selectedValue` when writing `exec_path` instead of always storing the first executable in the array
+- Renderer/UI:
+  - `src/renderer.js`
+  - `src/App.jsx`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - `src/core/GameBanner.js`
+
+Files changed in this slice:
+
+- `src/main/install/archiveLayout.js`
+- `src/main/install/selectExecutable.js`
+- `src/main.js`
+- `src/database.js`
+- `src/renderer.js`
+- `src/App.jsx`
+- `src/core/library/LibraryDetailsPanel.jsx`
+- `src/core/GameBanner.js`
+- `test/archiveLayout.test.js`
+- `test/selectExecutable.test.js`
+- `test/databaseVersionSelection.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- this fixes the concrete nested-update-folder bug class, but it still assumes the archive has a sane single-root layout or direct root files
+- there is still no interactive executable picker for weird multi-launcher releases
+- save preservation is still best-effort via backup/restore; a full manual smoke on the exact Apartment #69 update path is still needed
+
+### 2026-04-04 — Stage 1 thread parsing correction: filter irrelevant links and group mirrors by platform
+
+- Status: partial
+- Progress: 93%
+- ТЗ coverage: fixes the broken F95 link parsing path where update/install modals treated every external URL in the starter post as a download candidate and dumped them into one flat list
+
+What was done:
+
+- Added proper F95 download-link classification instead of “every external link is a mirror”.
+- Social/media/store links are now filtered out of thread download parsing:
+  - Twitter / X
+  - Steam links
+  - similar non-download external URLs
+- Download links are now grouped by platform variant when the thread uses separate lines such as:
+  - `Win/Linux`
+  - `Mac`
+  - `Android`
+- Both the library update modal and the live F95 workspace install modal now render grouped download sections instead of one noisy mixed list.
+- The live F95 workspace no longer runs its own separate ad-hoc DOM parser for mirrors; it now reuses the main-side thread inspection IPC, so update/install parsing is consistent across both entry points.
+
+How it was implemented:
+
+- Main:
+  - added `src/main/f95/threadLinks.js`
+  - pure helper classifies raw anchor data, filters irrelevant links and groups candidates into platform variants
+  - `src/main/f95/threadInspector.js`
+    - hidden-page DOM script now extracts raw anchor/link context
+    - main process post-processes the raw links through the new classifier
+- Main IPC:
+  - `src/main.js`
+  - `inspect-f95-thread` failure payload now also returns `variants: []`
+- Renderer/UI:
+  - `src/core/updates/F95UpdateModal.jsx`
+  - `src/core/search/F95BrowserWorkspace.jsx`
+  - both modals now render grouped platform sections
+  - F95 browser workspace now uses the same main-side inspection flow instead of a separate renderer-only parser
+- Tests:
+  - `test/f95ThreadLinks.test.js`
+
+Files changed in this slice:
+
+- `src/main/f95/threadLinks.js`
+- `src/main/f95/threadInspector.js`
+- `src/main.js`
+- `src/core/updates/F95UpdateModal.jsx`
+- `src/core/search/F95BrowserWorkspace.jsx`
+- `test/f95ThreadLinks.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- the parser is now much saner, but F95 threads are messy and there will still be exotic layouts that need more examples
+- there is still no automatic OS-aware default selection between Windows/Mac/Android groups; the user still chooses the target file manually
+
+### 2026-04-04 — Stage 1 library launcher flow: in-app updates + local save vault
+
+- Status: partial
+- Progress: 88%
+- TЗ coverage: moves the product closer to the intended “Steam-lite for local builds” direction by making updates library-driven and by separating user save continuity from a single install folder
+
+What was done:
+
+- Replaced the dead “open thread in browser” update behavior with an in-app F95 update flow from the library UI.
+- Update buttons on library banners/details now:
+  - inspect the live F95 thread through the authenticated session
+  - show mirrors in an update modal
+  - remember the last successful mirror host and preselect it next time
+  - queue the selected update into the same download/install pipeline
+- Added the first local save-vault layer:
+  - save directories from common local layouts are copied into app-managed backup storage
+  - updates back up saves before writing into the install directory
+  - reinstall/update restores saved data back into the target install folder
+  - delete-from-library flow now backs up saves before removing the DB record
+- In-place update semantics are now product-oriented instead of browser-oriented:
+  - the update action starts from the library record
+  - the selected mirror is remembered as a user preference
+  - the install still targets the existing game folder
+
+How it was implemented:
+
+- Main F95 thread inspection:
+  - added `src/main/f95/threadInspector.js`
+  - uses a hidden authenticated Electron window on the dedicated F95 partition to load a thread and extract mirrors/title/version/creator
+  - new IPC:
+    - `inspect-f95-thread`
+- Mirror preference persistence:
+  - `src/main.js`
+  - stores last successful mirror selection in `config.ini` under `F95Mirrors`
+  - selection is reapplied by host/label when the next update modal opens
+- Renderer/UI:
+  - `src/App.jsx`
+  - added a dedicated update modal state/flow
+  - `src/core/updates/F95UpdateModal.jsx`
+  - `src/core/GameBanner.js`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - update buttons now route through the modal instead of `openExternalUrl`
+  - `src/index.html` now loads the update modal component
+- Local save vault:
+  - added `src/main/saveVault.js`
+  - current tracked layouts focus on common local save folders such as:
+    - `game/saves`
+    - `saves`
+    - `save`
+    - `www/save`
+  - `src/main.js` now backs up and restores these directories around update/reinstall flows
+- Preload:
+  - `src/renderer.js`
+  - added `inspectF95Thread()`
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/main/f95/threadInspector.js`
+- `src/main/saveVault.js`
+- `src/renderer.js`
+- `src/App.jsx`
+- `src/core/GameBanner.js`
+- `src/core/library/LibraryDetailsPanel.jsx`
+- `src/core/updates/F95UpdateModal.jsx`
+- `src/index.html`
+- `test/saveVault.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/saveVault.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- mirror inspection/update flow has code coverage via checks, but not a real manual smoke yet against a live logged-in update scenario
+- save vault is still a first pass for common local save directories, not full Ren'Py save intelligence for `%AppData%/RenPy/*`
+- there is still no cloud save layer yet; this slice is intentionally local-first only
+
+### 2026-04-04 — Stage 1 workspace UX: disable install on already installed F95 threads
+
+- Status: partial
+- Progress: 86%
+- TЗ coverage: closes the UX gap where the live F95 workspace still offered `Install This Thread` even when the current thread already mapped to an installed game in the library
+
+What was done:
+
+- Added installed-thread detection for the current F95 thread page.
+- `Install This Thread` is now disabled when the game is already installed.
+- The button label switches from `Install This Thread` to `Already Installed`.
+- Added a visible installed-state banner in the workspace so the disabled button does not look like a random UI freeze.
+
+How it was implemented:
+
+- Main:
+  - `src/main.js`
+  - added a dedicated `get-f95-thread-install-state` IPC handler
+  - install-state matching reuses the same installed-game detection logic as the F95 install-target resolver
+  - matching prefers `f95_id` from the current thread URL and only falls back to normalized title/creator heuristics
+- Preload:
+  - `src/renderer.js`
+  - added `getF95ThreadInstallState()`
+- Renderer:
+  - `src/core/search/F95BrowserWorkspace.jsx`
+  - now requests install-state whenever the current thread changes
+  - updates the install button state/label and shows an installed banner
+- Parser hardening:
+  - `src/main/f95/downloadSupport.js`
+  - `parseF95ThreadTitle()` now strips trailing `| F95zone` browser-title suffix so title fallback matching is not poisoned by site chrome
+- Tests:
+  - extended `test/f95DownloadSupport.test.js` for the `| F95zone` browser-title case
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/renderer.js`
+- `src/core/search/F95BrowserWorkspace.jsx`
+- `src/main/f95/downloadSupport.js`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- installed-thread detection currently blocks install completely, as requested
+- there is still no separate `Update This Thread` action for already installed games
+- if a library entry has no F95 mapping and cannot be matched by normalized title/creator fallback, the workspace may still show the install button
+
+### 2026-04-04 — Stage 1 install flow correction: ZIP64 extraction + stable update target
+
+- Status: partial
+- Progress: 84%
+- TЗ coverage: fixes two real product failures in the F95 install pipeline:
+  - large ZIP packages were crashing on the old `adm-zip` path
+  - repeated installs/updates were creating new folders and duplicate library entries instead of reusing the existing install target
+
+What was done:
+
+- Replaced the Windows ZIP extraction path so large ZIP/ZIP64 archives are no longer blocked by the old 2 GiB limit from `adm-zip`.
+- Stopped F95 installs from always creating a fresh version-stamped folder.
+- F95 installs now resolve a stable target folder by title and reuse an existing installed folder when the game is already in the library.
+- In-place F95 updates now write back into the existing install directory instead of creating a second standalone game folder.
+- When updating in place, old version rows for that same `game_path` are removed before the new version row is stored, so the DB no longer accumulates multiple versions pointing at one physical directory.
+- Archive installs now extract into a staging directory first and only then move/merge into the final install location, so failed archive installs stop leaving behind half-created target folders quite as easily.
+
+How it was implemented:
+
+- Archive layer:
+  - `src/main/archive/extractArchive.js`
+  - on Windows, ZIP entry listing and extraction now use PowerShell + .NET `System.IO.Compression` instead of the old `adm-zip` extraction path
+  - archive-path validation still runs before extraction
+- DB:
+  - `src/database.js`
+  - added `deleteVersionsForRecordPath(recordId, gamePath)` for in-place update cleanup
+- Main F95 install flow:
+  - `src/main.js`
+  - added stable install-target resolution against the existing library snapshot
+  - new installs now default to a stable title-based folder instead of `Title [version]`
+  - existing installs reuse their current `game_path`
+  - F95 installs now try to resolve `atlasId` from `f95_id` before persistence
+  - existing library matches are updated in place instead of always going through the new-game import path
+  - standalone file installs can overwrite the existing file inside the reused install directory
+
+Files changed in this slice:
+
+- `src/main/archive/extractArchive.js`
+- `src/database.js`
+- `src/main.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/extractArchive.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- this closes the concrete `> 2 GiB ZIP` failure on Windows, but Linux/macOS ZIP extraction still uses the older JS fallback path
+- in-place update currently merges extracted files into the existing folder; there is still no rollback/backup transaction for failed mid-copy updates
+- automatic cleanup/migration of older duplicate F95 install folders already created by the broken logic is not done yet
+
+### 2026-04-04 — Stage 1 metadata hardening: F95 thread title cleanup for installs
+
+- Status: partial
+- Progress: 81%
+- TЗ coverage: fixes the broken metadata path where F95 install titles were polluted by forum badges like `VN` and `Ren'Py` before the game even reached the library
+
+What was done:
+
+- Traced the bad title back to the F95 thread parser instead of trying to patch the library UI after the fact.
+- Cleaned F95 install titles so badge/prefix noise is removed before queueing/install/import.
+- Kept version and creator extraction while stripping category/engine labels from the visible title.
+- Added a main-side normalization pass so the install pipeline no longer trusts the renderer blindly for thread metadata.
+
+How it was implemented:
+
+- Main:
+  - `src/main/f95/downloadSupport.js` now exposes `parseF95ThreadTitle()` / `sanitizeF95ThreadTitle()`
+  - the parser removes leading F95 badge noise such as `VN`, `Ren'Py`, `Unity`, platform/status tags, while keeping real title text
+  - `src/main.js` now normalizes incoming thread title/creator/version before building the install context
+- Renderer:
+  - `src/core/search/F95BrowserWorkspace.jsx` now extracts the thread title from `h1.p-title-value` more honestly:
+    - it removes XenForo label nodes from the cloned title element
+    - then applies the same prefix-cleaning heuristics before sending metadata into install flow
+- Tests:
+  - extended `test/f95DownloadSupport.test.js` with explicit assertions for:
+    - `VN Ren'Py Stained Blood [v0.2] [Obsidian Desire Labs]`
+    - plain titles without prefix noise
+
+Files changed in this slice:
+
+- `src/main/f95/downloadSupport.js`
+- `src/main.js`
+- `src/core/search/F95BrowserWorkspace.jsx`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- this fixes the concrete badge-noise case shown in the screenshots
+- older already-imported bad titles are not auto-migrated yet
+- some exotic F95 title formats may still need more examples before the parser can be called “done”
+
+### 2026-04-04 — Stage 1 F95 install hardening: masked-link resolution + bogus payload rejection
+
+- Status: partial
+- Progress: 79%
+- TЗ coverage: closes the real install bug where Atlas downloaded F95's anti-bot HTML page, marked it as installed, and polluted the library with fake entries
+
+What was done:
+
+- Stopped treating F95 `masked` pages as downloadable packages.
+- Added proper resolution of F95 masked mirrors before `downloadURL()` is started.
+- Added first direct-host normalization for Pixeldrain so viewer pages are converted into the official direct download endpoint instead of downloading the landing page HTML.
+- Added payload validation before install/import:
+  - HTML/text pages are now rejected;
+  - empty files are rejected;
+  - archive signatures are recognized even when the filename has no extension.
+- Invalid HTML/text payloads are no longer marked as `completed` and are cleaned up instead of landing in the library as fake installs.
+
+How it was implemented:
+
+- Main:
+  - added `src/main/f95/downloadSupport.js`
+  - this module now owns:
+    - masked-link POST resolution against F95;
+    - host-specific URL normalization;
+    - downloaded payload inspection/validation
+- `src/main.js` now:
+  - resolves the selected F95 mirror before queueing the Electron download
+  - stores the resolved host in the download context/UI
+  - validates the finished payload before install/import
+  - rejects bogus HTML/text payloads and marks the download as failed instead of installed
+  - preserves archive install behavior, including archive deletion after successful extraction
+- Renderer:
+  - `src/core/search/F95BrowserWorkspace.jsx` now surfaces the resolved host in the queued-install status text when available
+- Tests:
+  - added `test/f95DownloadSupport.test.js` for:
+    - Pixeldrain viewer URL normalization
+    - masked F95 HTML page rejection
+    - archive signature detection without a filename extension
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/main/f95/downloadSupport.js`
+- `src/core/search/F95BrowserWorkspace.jsx`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- this fixes the concrete broken case where F95 `masked` HTML was being saved as if it were the game
+- host automation is still not universal:
+  - Pixeldrain single-file links now have a real direct-download path
+  - more hosters still need explicit resolvers/flows
+- some mirrors will still require browser interaction or captcha and should fail honestly until those flows are implemented
+
+## Completed Work Log
+
+### 2026-04-04 — Stage 1 downloads UX: global footer downloads panel with active state and history
+
+- Status: partial
+- Progress: 76%
+- TЗ coverage: closes a missing operator-facing part of the new F95 install flow by making background downloads observable outside the search page
+
+What was done:
+
+- Turned the dead footer `Downloads` button into a real popup panel.
+- Added a global downloads list with:
+  - active queued/downloading/installing items
+  - completed and failed history
+  - percent
+  - transferred bytes
+  - current speed
+  - status text
+  - source host / file name
+  - last update timestamp
+- Added an active-download badge to the footer button.
+- Fixed a consistency bug where failed `downloadURL()` starts could otherwise leave a stuck queued item in the downloads list.
+
+How it was implemented:
+
+- Main:
+  - added `src/main/f95/downloadsStore.js` as the in-memory download state store for active items and recent history
+  - `src/main.js` now records lifecycle transitions for every F95 install request:
+    - queued
+    - downloading
+    - installing
+    - completed
+    - error
+  - each transition is broadcast through a dedicated renderer event instead of overloading the page-local progress banner
+- Preload:
+  - `src/renderer.js` now exposes:
+    - `getF95Downloads()`
+    - `onF95DownloadsChanged()`
+- Renderer:
+  - added `src/core/downloads/DownloadsPanel.jsx`
+  - `src/App.jsx` now:
+    - loads the initial downloads snapshot from main
+    - subscribes to global downloads updates
+    - opens/closes the popup from the footer `Downloads` button
+    - shows the active count badge in the footer
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/main/f95/downloadsStore.js`
+- `src/renderer.js`
+- `src/core/downloads/DownloadsPanel.jsx`
+- `src/index.html`
+- `src/App.jsx`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- the downloads list is in-memory history for the current app session, not persisted restart-to-restart
+- there is still no pause/resume/cancel control for individual downloads from the panel
+- mirror handling is still only as strong as the current direct-download path; complex hoster flows with timers/captchas still need separate work
+
+### 2026-04-04 — Stage 1 F95 integration: real auth-backed search workspace + download/install pipeline
+
+- Status: partial
+- Progress: 72%
+- TЗ coverage: replaces the fake third-page site search with a real F95 session flow and adds the first honest path from remote thread to installed local library entry
+
+What was done:
+
+- Replaced the third sidebar page with an embedded F95 browser workspace instead of cached local metadata cards.
+- Added a dedicated persistent F95 session:
+  - login window on its own Electron partition;
+  - auth state events pushed back into the renderer;
+  - logout support that clears only the dedicated F95 partition.
+- Enabled live search through the real `F95 Latest Updates alpha` page by loading the site itself in the third workspace.
+- Added thread install flow from the current F95 page:
+  - inspect current thread in the embedded browser;
+  - extract candidate download links from the starter post;
+  - choose a mirror;
+  - queue the download through the authenticated Electron session.
+- Added Electron-side download capture for the F95 partition:
+  - files are saved into centralized writable storage under app paths;
+  - progress is streamed back into the renderer;
+  - completed downloads are installed automatically.
+- Added install/import plumbing for downloaded packages:
+  - archives are extracted into the configured game library (or app-managed fallback);
+  - standalone downloaded executables/files are moved into a dedicated game folder;
+  - resulting installs are pushed through the existing import pipeline and land in the local library.
+- Tightened security around the external login window:
+  - the F95 login window no longer uses the app preload bridge, so the remote site does not get access to `electronAPI`.
+
+How it was implemented:
+
+- Main:
+  - `src/main/f95/session.js` introduces the dedicated `persist:f95-auth` session helpers and login window creation
+  - `src/main.js` now:
+    - enables `webviewTag` only for the main app window
+    - initializes the dedicated F95 session only after `app.whenReady()` so Electron does not crash on boot
+    - publishes F95 auth IPC endpoints
+    - registers `will-download` on the dedicated F95 session
+    - installs downloaded archives/files into the library via the existing import flow
+    - broadcasts auth and download progress events back to the renderer
+- Writable storage:
+  - `src/main/appPaths.js` now exposes a dedicated downloads directory through centralized app paths
+- Preload:
+  - `src/renderer.js` now exposes:
+    - F95 auth status/login/logout methods
+    - install request IPC
+    - F95 auth/download progress event subscriptions
+- Renderer:
+  - `src/core/search/F95BrowserWorkspace.jsx` is the new live search workspace
+  - it embeds the real F95 page, tracks navigation, opens login when needed, extracts download mirrors from the current thread and starts installs
+  - after the first runtime smoke exposed a post-login black screen, the workspace was reworked to mount `webview` imperatively instead of letting React own the guest element directly
+  - after the next smoke exposed `getURL()/canGoBack()` calls before `dom-ready`, guest state syncing was guarded so browser methods are only used after the embedded page is actually ready
+  - after the next UX smoke showed thread links opening throwaway popup windows, same-host F95 links are now forced to stay inside the embedded workspace instead of spawning useless secondary windows
+  - the workspace now also surfaces explicit guest load/crash errors instead of failing as a silent black rectangle
+  - `src/App.jsx` now routes the third section into this workspace instead of local catalog results
+  - `src/index.html` loads the new workspace component
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/main/appPaths.js`
+- `src/main/f95/session.js`
+- `src/renderer.js`
+- `src/core/search/F95BrowserWorkspace.jsx`
+- `src/App.jsx`
+- `src/index.html`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+- `npx prettier --check src/App.jsx src/core/search/F95BrowserWorkspace.jsx src/renderer.js src/main.js src/main/f95/session.js src/main/appPaths.js src/index.html`
+
+What is still missing here:
+
+- no real end-to-end smoke was run with a live F95 account, so auth success, mirror extraction and actual downloads are still unproven against the current site
+- thread parsing is intentionally heuristic right now:
+  - title/version/creator extraction is best-effort from the current thread page
+  - some threads will need stricter parsing once real examples are tested
+- the install path currently targets the configured game folder or the managed fallback, but there is still no advanced per-install destination picker in the main renderer flow
+- the older cached catalog search code still exists in the codebase, but it is no longer the active third-page UX
+
+### 2026-04-04 — Stage 1 renderer correction: search page now targets site catalog, not local library
+
+- Status: partial
+- Progress: 67%
+- TЗ coverage: fixes a wrong renderer interpretation and brings the third sidebar section in line with the requested product flow
+
+What was done:
+
+- Split local-library search from site-catalog search instead of pretending one filter state can serve both.
+- Kept local search on the main library/update views through the header search box.
+- Reworked the third sidebar page into actual site search over cached Atlas/F95 metadata.
+- Added dedicated site-result cards with:
+  - remote banner;
+  - F95 id;
+  - likes/views/replies/rating;
+  - tags and overview;
+  - direct open of the F95 thread;
+  - jump back into the local library when the entry is already mapped.
+- Fixed site-filter option quality so languages are now split into real language values instead of raw comma-joined strings.
+
+How it was implemented:
+
+- Shared:
+  - added `src/shared/siteSearch.js` with pure helpers for site-filter normalization, splitting, filtering and sorting
+- Main/database:
+  - added `searchSiteCatalog()` in `src/database.js`
+  - search reads from `atlas_data` + `f95_zone_data` and enriches entries with installed-library linkage through `atlas_mappings`
+  - `getUniqueFilterOptions()` now normalizes language/tag options more honestly for site search
+- IPC/preload:
+  - new `search-site-catalog` IPC in `src/main.js`
+  - new `searchSiteCatalog()` preload bridge in `src/renderer.js`
+- Renderer:
+  - `src/App.jsx` now has separate state for:
+    - local library query
+    - site search filters/results/loading/error
+  - `src/core/search/SiteSearchResults.jsx` renders the site-search result list
+  - `src/core/SearchSidebar.jsx` now supports default filter presets and hiding irrelevant filters such as local update-only mode
+  - `src/core/SearchBox.jsx` no longer auto-routes every keystroke into the search page; context now decides whether the header box searches local library or site catalog
+
+Files changed in this slice:
+
+- `src/App.jsx`
+- `src/core/SearchBox.jsx`
+- `src/core/SearchSidebar.jsx`
+- `src/core/search/SiteSearchResults.jsx`
+- `src/database.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/shared/siteSearch.js`
+- `src/index.html`
+- `test/siteSearch.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- site search is powered by the locally cached Atlas/F95 dataset, not live network scraping from the F95 site
+- the search page is now functionally correct, but it still lacks richer actions like import/match from site result directly into library flow
+- no manual renderer smoke was run yet for the corrected search/page switching behavior
+
+### 2026-04-04 — Stage 1 renderer UX: real sidebar sections + dedicated search workspace
+
+- Status: partial
+- Progress: 63%
+- TЗ coverage: advances the roadmap item for a proper library UI on top of SQLite-backed data instead of decorative toggles and half-dead search controls
+
+What was done:
+
+- Reworked the left sidebar into actual section navigation:
+  - full library as the default landing page;
+  - a dedicated updates page;
+  - a dedicated search page;
+  - settings still opens the existing settings window for now.
+- Replaced the old update-only toggle in the sidebar with a real updates view backed by `isUpdateAvailable`.
+- Promoted search from an overlay-only filter panel to a full workspace with docked filters and result grid.
+- Wired the header search box to real app state so typing now opens the search section and updates the search query instead of doing almost nothing.
+- Expanded renderer-side search controls that were either missing or misleading before:
+  - title/creator search scope;
+  - release-window filter;
+  - language filter;
+  - censorship filter;
+  - working sort modes for `name`, `date`, `likes`, `views`, `rating`.
+
+How it was implemented:
+
+- Renderer boundary only:
+  - no IPC contract changes;
+  - no preload changes;
+  - no main-process changes required for this slice.
+- `src/App.jsx` now owns explicit section state:
+  - `library`
+  - `updates`
+  - `search`
+- `src/App.jsx` also now separates the three data views cleanly:
+  - full library list;
+  - updates-only list;
+  - search-result list based on the active filter stack.
+- `src/core/Sidebar.js` was simplified into a navigation component instead of mixing navigation with side-effect buttons.
+- `src/core/SearchBox.jsx` is now controlled by app state and acts as an entry point into the full search workspace.
+- `src/core/SearchSidebar.jsx` now supports a docked mode and syncs with app-level filter state instead of pretending the overlay itself is the whole search UX.
+
+Files changed in this slice:
+
+- `src/App.jsx`
+- `src/core/Sidebar.js`
+- `src/core/SearchBox.jsx`
+- `src/core/SearchSidebar.jsx`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- there is still no embedded settings page inside the main renderer; the sidebar settings item still opens the separate settings window
+- this slice improves navigation/search UX, but it does not replace the legacy scanner/importer architecture
+- no manual Electron smoke was run yet specifically for this new sidebar/search flow
+- there is still no UI automation coverage for renderer navigation
+
+### 2026-04-04 — Stage 0 foundation: fork bootstrap and writable storage
+
+- Status: partial
+- Progress: 82%
+- TЗ coverage: fixes the first mandatory bug and lays the base for later scanner/save/sync work
+
+What was done:
+
+- Initialized the workspace as a git repo and checked out upstream `towerwatchman/Atlas`.
+- Moved writable storage to `app.getPath('userData')` through a single path module.
+- Added one-shot legacy migration from old Atlas layouts:
+  - development legacy source: `src/data`, `src/launchers`
+  - packaged legacy source: `app.getAppPath()/../../data`, `.../launchers`
+- Switched writable image storage from old `data/images` semantics to `cache/images`, while keeping backward resolution for old DB rows.
+- Removed main/database dependence on install/resource-relative writable paths.
+- Added focused local quality floor:
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm run test`
+  - `npm run ci:check`
+- Added a non-release GitHub Actions check workflow.
+
+How it was implemented:
+
+- New modules:
+  - `src/main/appPaths.js`
+  - `src/main/assetPaths.js`
+  - `src/main/databasePaths.js`
+- Main integration:
+  - `src/main.js` now resolves `appPaths` once and passes normalized paths down into DB/file consumers
+  - banner conversion, image download, launcher/game storage, config and DB access now route through `appPaths`
+- Database integration:
+  - `src/database.js` now resolves DB path from normalized app paths
+  - banner/preview read/delete functions now resolve file paths through `assetPaths` instead of `app.getAppPath()`
+- Verification:
+  - tests in `test/appPaths.test.js`
+  - tests in `test/databasePaths.test.js`
+
+Files changed in this slice:
+
+- `package.json`
+- `package-lock.json`
+- `src/main.js`
+- `src/database.js`
+- `.github/workflows/check.yml`
+- `.eslintrc.json`
+- `tsconfig.typecheck.json`
+- `src/main/appPaths.js`
+- `src/main/assetPaths.js`
+- `src/main/databasePaths.js`
+- `test/appPaths.test.js`
+- `test/databasePaths.test.js`
+
+Checks run:
+
+- `npm install`
+- `npm run build:css`
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+
+Remaining before Stage 0 can be called done:
+
+- Run manual Electron smoke in dev mode
+- Run packaged smoke to confirm nothing writes into install directory
+- Document manual verification steps in a dedicated place or in this file
+
+### 2026-04-04 — Stage 0.5: SQLite migrations skeleton
+
+- Status: partial
+- Progress: 88%
+- TЗ coverage: begins the next mandatory roadmap item after `appPaths`
+
+What was done:
+
+- Added migration infrastructure for SQLite instead of relying only on startup `CREATE TABLE IF NOT EXISTS` calls.
+- Converted the existing schema bootstrap into migration `001_initial`.
+- Switched DB initialization to apply migrations and record them in `schema_migrations`.
+- Made DB initialization idempotent for the active DB path instead of reopening the same database blindly.
+- Added a migration test that checks first-run application and verifies the migration is persisted.
+
+How it was implemented:
+
+- New modules:
+  - `src/main/db/migrations/001_initial.js`
+  - `src/main/db/migrations/index.js`
+  - `src/main/db/runMigrations.js`
+- `src/database.js` now resolves DB path and applies migrations during initialization.
+
+Files changed in this slice:
+
+- `src/database.js`
+- `src/main/db/openDatabase.js`
+- `src/main/db/migrations/001_initial.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/runMigrations.js`
+- `test/migrations.test.js`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+
+What is still missing here:
+
+- Add next migration(s) instead of a single bootstrap migration once local schema starts changing
+- Decide whether to split `database.js` into `db/query` and `db/service` slices before Stage 1 grows further
+
+### 2026-04-04 — Stage 1 start: `scan_sources`
+
+- Status: partial
+- Progress: 58%
+- TЗ coverage: closes the first missing local-core entity after storage and migrations
+
+What was done:
+
+- Added `scan_sources` as a real SQLite model through migration `002_scan_sources`.
+- Added typed main-side store and service for scan source CRUD.
+- Added IPC endpoints for listing, creating, updating and deleting scan sources.
+- Added a dedicated Settings UI page for scan sources.
+- Added runtime tests for scan source CRUD and migration coverage.
+
+How it was implemented:
+
+- DB schema:
+  - migration `src/main/db/migrations/002_scan_sources.js`
+  - table fields: `id`, `path`, `is_enabled`, `created_at`, `updated_at`
+- Main-side logic:
+  - `src/main/db/scanSourcesStore.js` for DB CRUD
+  - `src/main/scanSources.js` for validation, normalization and user-facing error payloads
+  - `src/main.js` IPC handlers:
+    - `get-scan-sources`
+    - `add-scan-source`
+    - `update-scan-source`
+    - `remove-scan-source`
+- Preload:
+  - `src/renderer.js` now exposes scan-source methods
+- Renderer:
+  - `src/core/settings/ScanSources.jsx`
+  - `src/core/settings/Settings.jsx`
+  - `src/core/settings/settingsIcons.js`
+  - `src/settings.html`
+
+Files changed in this slice:
+
+- `AGENTS.md`
+- `src/main/db/migrations/002_scan_sources.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/scanSourcesStore.js`
+- `src/main/scanSources.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/core/settings/ScanSources.jsx`
+- `src/core/settings/Settings.jsx`
+- `src/core/settings/settingsIcons.js`
+- `src/settings.html`
+- `test/migrations.test.js`
+- `test/scanSourcesStore.test.js`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+
+What is still missing here:
+
+- Wire recursive scan execution to all enabled scan sources instead of manual single-folder scan only
+- Add `scan_jobs` table and job history/progress persistence
+- Add UI entry points from the main library for launching rescan of configured sources
+- Move current folder-scanner logic out of the legacy importer flow into a proper library scan workflow
+
+### 2026-04-04 — Stage 1 extension: `scan_jobs` and enabled-source scan runner
+
+- Status: partial
+- Progress: 54%
+- TЗ coverage: moves scanning one step closer to a real multi-source workflow instead of a single manually selected folder
+
+What was done:
+
+- Added `scan_jobs` migration and store.
+- Added a main-side scan runner that iterates enabled `scan_sources` and records a scan job.
+- Added IPC for recent scan job history.
+- Extended importer UI with a `Scan Enabled Sources` action.
+- Extended scan-sources settings UI with recent job history.
+- Fixed missing preload `removeAllListeners` bridge used by importer cleanup.
+
+How it was implemented:
+
+- DB schema:
+  - `src/main/db/migrations/003_scan_jobs.js`
+- DB stores:
+  - `src/main/db/scanJobsStore.js`
+- Main-side runner:
+  - `src/main/scanRunner.js`
+  - current strategy wraps the legacy `f95scanner` and aggregates progress/results across enabled sources
+  - current mode is still importer-oriented candidate discovery, not final local-library persistence
+- IPC:
+  - `get-scan-jobs`
+  - `start-scan-sources`
+- Renderer/UI:
+  - `src/renderer.js`
+  - `src/core/importer/importer.jsx`
+  - `src/core/settings/ScanSources.jsx`
+
+Files changed in this slice:
+
+- `src/main/db/migrations/003_scan_jobs.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/scanJobsStore.js`
+- `src/main/scanRunner.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/core/importer/importer.jsx`
+- `src/core/settings/ScanSources.jsx`
+- `test/migrations.test.js`
+- `test/scanJobsStore.test.js`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+
+What is still missing here:
+
+- Move from importer candidate scan to true library scan that persists discovered local games
+- Persist per-source/per-run progress and richer scan diagnostics
+- Add cancellation and resilient partial-failure handling instead of best-effort looping
+- Connect scan execution entry points into the main library UX instead of settings/importer only
+
+### 2026-04-04 — UX pass inspired by YAM entry flow
+
+- Status: partial
+- Progress: 62%
+- TЗ coverage: improves usability of adding/scanning games without inheriting YAM's folder-name detection limitations
+
+What was done:
+
+- Changed importer entry flow to start from explicit action selection instead of dumping the user directly into raw scan settings.
+- Added clear actions:
+  - `Scan Enabled Sources`
+  - `Import From Folder`
+  - `Import Steam Games`
+- Added `Back` navigation between source selection, settings and scan results.
+- Exposed scan mode in scan results so the user can understand whether the current run is manual folder import, steam import or enabled-source scan.
+
+How it was implemented:
+
+- `src/core/importer/importer.jsx`
+  - initial view changed from `settings` to `source`
+  - added explicit handlers for folder import, steam import and enabled-source scan
+  - source screen now displays configured scan sources and disables automatic scan if none are enabled
+- This was intentionally borrowed from YAM only at the UX level:
+  - explicit choice-first add flow
+  - clearer entry into import/update actions
+  - but not their folder-name-based detection model
+
+Files changed in this slice:
+
+- `src/core/importer/importer.jsx`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+
+What is still missing here:
+
+- better in-app diagnostics during library scan/import
+- a non-importer library scan screen in the main app itself
+- replacement of legacy importer candidate semantics with detector-backed library entities
+
+### 2026-04-04 — Stage 1 hardening: cancellable scans, warnings and Ren'Py confidence
+
+- Status: partial
+- Progress: 68%
+- TЗ coverage: closes three missing scanner requirements at once: cancellation, resilience to unreadable folders and classifier confidence/reasons visibility
+
+What was done:
+
+- Added renderer-bound scan sessions so the app can reject duplicate scans per window and cancel an active recursive scan.
+- Hardened the legacy recursive scanner against unreadable directories instead of letting a single `EACCES`/`EPERM` path kill the whole run.
+- Added warning diagnostics flow from scanner to renderer and into stored `scan_jobs` notes.
+- Added first real detector scoring surface for Ren'Py and exposed detection confidence/reasons in importer results.
+- Added cancel controls in importer scan UI and in the main library rescan entry point.
+- Fixed a real main-process bug where `createImporterWindow()` shadowed the global `importerWindow`, which made directory dialogs rely on bad ownership state.
+
+How it was implemented:
+
+- New main module:
+  - `src/main/scanSessions.js`
+- Scanner changes:
+  - `src/core/scanners/f95scanner.js`
+  - added cancellation checks via `scanSession`
+  - wrapped directory reads in a safe helper that records warnings instead of hard-failing the run
+  - kept sending incremental progress/results while collecting diagnostics
+  - enriched candidates with generic detection score + Ren'Py-specific reasons
+- Runner/main integration:
+  - `src/main/scanRunner.js`
+  - `src/main.js`
+  - `src/renderer.js`
+  - added `cancel-scan` IPC
+  - `start-scan`, `start-scan-sources` and `scan-library` now run through scan sessions
+  - `scan_jobs` completion notes now include warnings and a diagnostics sample
+- Renderer/UI:
+  - `src/core/importer/importer.jsx`
+  - `src/App.jsx`
+  - `src/core/settings/ScanSources.jsx`
+  - importer now shows detection score/reasons and recent warnings
+  - importer and library rescan now expose a real cancel action while scanning is in progress
+  - recent scan jobs now surface warning counts and the latest issue summary
+- Tests:
+  - `test/renpyDetector.test.js`
+  - `test/scanSessions.test.js`
+
+Files changed in this slice:
+
+- `src/main/scanSessions.js`
+- `src/core/scanners/f95scanner.js`
+- `src/main/scanRunner.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/core/importer/importer.jsx`
+- `src/App.jsx`
+- `src/core/settings/ScanSources.jsx`
+- `test/renpyDetector.test.js`
+- `test/scanSessions.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npx prettier --check src/App.jsx src/core/importer/importer.jsx src/core/settings/ScanSources.jsx`
+
+What is still missing here:
+
+- scanner persistence now exists for enabled-source scans, but scan review still feeds importer-oriented candidates instead of a dedicated discovery model
+- cancellation currently covers the recursive scan phase, not the later import phase
+- there is still no per-directory or per-source persistent progress timeline, only recent job summaries
+- engine detection is still primitive outside of Ren'Py and executable signature heuristics
+
+### 2026-04-04 — Stage 1 persistence: `scan_candidates` + ADR for scan engine direction
+
+- Status: partial
+- Progress: 57%
+- TЗ coverage: replaces ephemeral enabled-source scan output with a real persisted SQLite model and records the design decision explicitly as required for scan engine changes
+
+What was done:
+
+- Added migration `004_scan_candidates` so enabled-source scans now persist discovered candidates locally.
+- Added a dedicated scan-candidate store instead of dumping this into `games`/`versions`.
+- Enabled-source scans now enrich candidates with source/job linkage before persistence.
+- Import flow now marks persisted candidates as `imported` when they are successfully added to the library.
+- Added a recent detected candidates section to scan-source settings so the new persistence layer is visible in the UI immediately.
+- Added an ADR documenting why scan candidates live in their own table instead of polluting installed-library entities.
+
+How it was implemented:
+
+- DB schema:
+  - `src/main/db/migrations/004_scan_candidates.js`
+- DB/store/service:
+  - `src/main/db/scanCandidatesStore.js`
+  - `src/main/scanCandidates.js`
+  - stores `folder_path`, source/job linkage, ids, detection score/reasons, match count, status and imported linkage
+- Runner/main integration:
+  - `src/main/scanRunner.js`
+  - `src/main.js`
+  - enabled-source scans now persist candidates after each job
+  - successful imports now attempt to mark candidate rows as `imported`
+  - new IPC: `get-scan-candidates`
+- Renderer/UI:
+  - `src/renderer.js`
+  - `src/core/settings/ScanSources.jsx`
+  - settings now show recent persisted candidates with confidence, reasons and import status
+- Architecture note:
+  - `docs/adr/0001-scan-candidate-persistence.md`
+
+Files changed in this slice:
+
+- `src/main/db/migrations/004_scan_candidates.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/scanCandidatesStore.js`
+- `src/main/scanCandidates.js`
+- `src/main/scanRunner.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/core/settings/ScanSources.jsx`
+- `docs/adr/0001-scan-candidate-persistence.md`
+- `test/migrations.test.js`
+- `test/scanCandidatesStore.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+- `npx prettier --check src/App.jsx src/core/importer/importer.jsx src/core/settings/ScanSources.jsx tasks.md docs/adr/0001-scan-candidate-persistence.md`
+
+What is still missing here:
+
+- `scan_candidates` is a transitional persistence layer, not the final discovery/library model
+- there is still no dedicated review/import workflow on top of the main-app discovery layer
+- importer semantics still dominate the scan-review flow
+- candidate dedupe/matching is still path-based and not yet a richer identity model
+
+### 2026-04-04 — Stage 1 UI follow-through: main-app discovery panel
+
+- Status: partial
+- Progress: 44%
+- TЗ coverage: moves persisted scan output out of settings-only storage and into the main app, which is the first real step away from importer-only scan UX
+
+What was done:
+
+- Added a main-app `Discovery` panel backed by persisted `scan_candidates`.
+- Discovery panel can refresh recent candidates, show confidence/reasons/status and open the detected folder.
+- Library rescan now refreshes discovery data after completion.
+- Fixed `open-directory` so it opens the directory itself when the provided path is already a directory instead of always jumping to its parent.
+
+How it was implemented:
+
+- Main/IPC:
+  - `src/main.js`
+  - `open-directory` now checks whether the target path is already a directory
+- Renderer:
+  - `src/App.jsx`
+  - added `Discovery` footer action
+  - added overlay panel with recent scan candidates
+  - added refresh and close controls
+  - panel reads from persisted SQLite state via `get-scan-candidates`
+
+Files changed in this slice:
+
+- `src/main.js`
+- `src/App.jsx`
+- `tasks.md`
+
+Checks run:
+
+- `npm run ci:check`
+- `npx prettier --check src/App.jsx src/core/importer/importer.jsx src/core/settings/ScanSources.jsx tasks.md docs/adr/0001-scan-candidate-persistence.md`
+
+What is still missing here:
+
+- discovery panel is currently read-only; it does not yet provide a proper review/import queue
+- there is still no explicit candidate decision state such as `approved`, `ignored`, `needs_review`
+- importer window still remains the only place where ambiguous matches can be edited before import
+
+### 2026-04-04 — Stage 1 UX pass: scan hub + richer in-library game details
+
+- Status: partial
+- Progress: 61%
+- TЗ coverage: makes repeat scan usable from the main library UI and brings version/update visibility plus site screenshots/details closer to the YAM/F95Checker direction without shoving more logic into renderer
+
+What was done:
+
+- Added a shared pure version-comparison utility so update availability is now computed consistently in both `getGames()` and `getGame()`.
+- Exposed `newestInstalledVersion` alongside `isUpdateAvailable` for library cards and details UI.
+- Wired the sidebar `Updates` entry to a real update-only library filter with a badge count instead of leaving it decorative.
+- Replaced the old read-only discovery overlay with a broader `Scan Hub`:
+  - configured scan sources;
+  - recent scan jobs;
+  - persisted discovery candidates;
+  - repeat rescan and cancel actions from the same place.
+- Added a right-side selected-game details panel in the main app:
+  - banner;
+  - installed/current/latest version status;
+  - installed versions list with quick folder open;
+  - site metadata summary;
+  - cached screenshots with fullscreen preview.
+- Tightened main-library selection refresh so the selected game panel updates when imports/rescans refresh the underlying record.
+
+How it was implemented:
+
+- Shared logic:
+  - `src/shared/versionUpdate.js`
+  - version parsing/comparison and newest-installed selection are now centralized
+- Main/database integration:
+  - `src/database.js`
+  - both list/detail queries now use the shared version state instead of two conflicting heuristics
+- Renderer/UI:
+  - `src/App.jsx`
+  - `src/core/Sidebar.js`
+  - `src/core/GameBanner.js`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - `src/core/library/ScanHubPanel.jsx`
+  - `src/index.html`
+- Quality:
+  - `test/versionUpdate.test.js`
+  - lint/typecheck coverage extended to `src/shared/**/*.js`
+
+Files changed in this slice:
+
+- `package.json`
+- `.eslintrc.json`
+- `tsconfig.typecheck.json`
+- `src/shared/versionUpdate.js`
+- `src/database.js`
+- `src/App.jsx`
+- `src/core/Sidebar.js`
+- `src/core/GameBanner.js`
+- `src/core/library/LibraryDetailsPanel.jsx`
+- `src/core/library/ScanHubPanel.jsx`
+- `src/index.html`
+- `test/versionUpdate.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npx prettier --check src/App.jsx src/core/GameBanner.js src/core/Sidebar.js src/core/library/LibraryDetailsPanel.jsx src/core/library/ScanHubPanel.jsx`
+
+What is still missing here:
+
+- repeat scan still relies on the legacy scanner/importer core instead of a dedicated local-library scan model
+- `Scan Hub` still does not persist explicit review states like `ignored` / `approved` / `needs_review`
+- the selected-game details panel uses cached DB/site data; it does not yet perform live F95 fetching
+- there is still no automatic version-update workflow beyond surfacing the update status and opening the source page
+
+### 2026-04-04 — Stage 1 metadata follow-through: prettier titles + site media fallback
+
+- Status: partial
+- Progress: 68%
+- TЗ coverage: fixes the main usability gap where auto-scanned library entries looked worse than the site metadata already stored locally
+
+What was done:
+
+- Fixed library-card/media behavior so games can now show site banner/screenshot URLs even when local cached copies are not downloaded yet.
+- Switched library rescan defaults to fetch banner and screenshot media instead of hard-disabling them during auto-import.
+- Added import-side metadata merge so matched games prefer Atlas/F95 title/creator/engine and only keep local version when it is actually known.
+- Stopped the scanner from silently inventing `1.0` as a fake version when parsing fails; unresolved local versions are now marked honestly as `Unknown`.
+- Fixed the `searchAtlas()` preference for entries with `f95_id`:
+  - before this slice it filtered with a Promise instead of a boolean and could keep noisy ambiguous matches;
+  - now it actually narrows to rows that already have linked F95 metadata.
+- Added display-level title/creator fields in the main library UI so already imported mapped games stop showing ugly local folder names on cards and in the list.
+
+How it was implemented:
+
+- Main/database:
+  - `src/database.js`
+  - added remote banner fallback from `f95_zone_data.banner_url`
+  - added remote preview fallback from `f95_zone_data.screens`
+  - added `displayTitle` / `displayCreator` in list/detail payloads
+  - fixed `searchAtlas()` F95-preference filtering
+  - extended `getAtlasData()` to include `version`
+- Import pipeline:
+  - `src/main/importMetadata.js`
+  - `src/main.js`
+  - import now merges Atlas metadata before storing a matched game/version
+  - library rescan now uses media-enabled defaults instead of overriding them back to `false`
+- Scanner:
+  - `src/core/scanners/f95scanner.js`
+  - unresolved parsed versions now become `Unknown` instead of fake `1.0`
+- Renderer:
+  - `src/App.jsx`
+  - `src/core/GameBanner.js`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - main-library filtering and card/details rendering now prefer display metadata when available
+- Quality:
+  - `test/importMetadata.test.js`
+
+Files changed in this slice:
+
+- `src/database.js`
+- `src/main.js`
+- `src/main/importMetadata.js`
+- `src/core/scanners/f95scanner.js`
+- `src/App.jsx`
+- `src/core/GameBanner.js`
+- `src/core/library/LibraryDetailsPanel.jsx`
+- `test/importMetadata.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+- `npx prettier --check src/main.js src/database.js src/App.jsx src/core/GameBanner.js src/core/scanners/f95scanner.js src/core/library/LibraryDetailsPanel.jsx src/main/importMetadata.js test/importMetadata.test.js tasks.md`
+
+What is still missing here:
+
+- if a game still has no reliable Atlas/F95 match, its title will remain local because inventing a fake site match would be worse
+- current version detection is still mostly filename/path-based; there is no dedicated parser for common VN naming conventions yet
+- old entries with no mapping still need either a better auto-match pass or an explicit review queue in `Scan Hub`
+
+### 2026-04-04 — Stage 1 detection pass: F95-style folder name parsing
+
+- Status: partial
+- Progress: 64%
+- TЗ coverage: reduces a real class of false negatives where games existed on disk but the scanner searched Atlas using dirty scene/F95 folder names
+
+What was done:
+
+- Added a dedicated F95-style folder-name parser for scan-time title/version extraction.
+- Parser now strips common junk from folder names before Atlas lookup:
+  - engine/status/platform tags;
+  - `f95zone.to`-style prefixes;
+  - underscore/dash separators;
+  - inline version markers like `v0.5.1`, `Episode 3`, `Final`.
+- Scanner now uses that parser instead of the old naive `split("-")` logic.
+- Added focused tests for the parser on representative F95-style names.
+
+How it was implemented:
+
+- Shared logic:
+  - `src/shared/scanTitleParser.js`
+  - pure parser that returns normalized `title` + extracted `version`
+- Scanner integration:
+  - `src/core/scanners/f95scanner.js`
+  - filename-based fallback parsing now runs through `parseScanTitle()`
+- Quality:
+  - `test/scanTitleParser.test.js`
+
+Files changed in this slice:
+
+- `src/shared/scanTitleParser.js`
+- `src/core/scanners/f95scanner.js`
+- `test/scanTitleParser.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node -e "require('./src/core/scanners/f95scanner.js'); console.log('scanner ok')"`
+- `npm run test`
+- `npm run ci:check`
+- `npx prettier --check src/shared/scanTitleParser.js test/scanTitleParser.test.js src/core/scanners/f95scanner.js tasks.md`
+
+What is still missing here:
+
+- parser-based cleanup improves matching, but it still cannot infer the exact F95 thread for genuinely ambiguous or heavily renamed folders
+- scan engine recursion/orchestration is still legacy and may need a separate pass if some directories are being skipped structurally rather than misnamed
+- creator extraction from folder names is still weak by design; right now the biggest win is title cleanup, not author inference
+
+### 2026-04-04 — Update subsystem pass: explicit app updater flow + safe archive extraction
+
+- Status: partial
+- Progress: 61%
+- TЗ coverage: replaces the old “check something and immediately restart on download” behavior with a controllable updater flow, and moves archive unpacking into a reusable main-side module that is suitable for future game-update install work
+
+What was done:
+
+- Replaced inline `electron-updater` wiring in `main.js` with a dedicated controller module.
+- Removed automatic `quitAndInstall()` immediately after download; install is now an explicit action.
+- Added packaged-build app update flow:
+  - check for updates
+  - download update
+  - install downloaded update
+- Added dev-mode fallback that checks GitHub releases without pretending auto-download/install works in an unpackaged app.
+- Added footer-level app update controls in the main UI instead of alert spam.
+- Replaced inline archive extraction logic with a main-only archive module.
+- Added archive entry validation to block path traversal and absolute-path extraction.
+- Fixed a real reliability issue in the old codepath: current `rar` extraction logic was not something we should trust as a production base, so unpacking is now centralized and explicit.
+
+How it was implemented:
+
+- Shared:
+  - `src/shared/appUpdate.js`
+- Main updater:
+  - `src/main/appUpdater.js`
+  - keeps updater state
+  - supports startup check, explicit download and explicit install
+  - sends normalized `update-status` payloads to renderer
+- Main archive layer:
+  - `src/main/archive/extractArchive.js`
+  - supports entry listing, safety validation and extraction dispatch by archive type
+- Main integration:
+  - `src/main.js`
+  - new IPC:
+    - `get-app-update-state`
+    - `check-app-update`
+    - `download-app-update`
+    - `install-app-update`
+  - `unzip-game` and archive import now use `extractArchiveSafely()`
+- Renderer/UI:
+  - `src/renderer.js`
+  - `src/App.jsx`
+  - main footer now exposes `Check App Update` / `Download App Update` / `Install App Update` depending on updater state
+- Quality:
+  - `test/appUpdater.test.js`
+  - `test/extractArchive.test.js`
+
+Files changed in this slice:
+
+- `src/shared/appUpdate.js`
+- `src/main/appUpdater.js`
+- `src/main/archive/extractArchive.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/App.jsx`
+- `test/appUpdater.test.js`
+- `test/extractArchive.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run ci:check`
+- `npx prettier --check src/App.jsx src/main.js src/renderer.js src/main/appUpdater.js src/main/archive/extractArchive.js src/shared/appUpdate.js test/appUpdater.test.js test/extractArchive.test.js tasks.md`
+
+What is still missing here:
+
+- this is a solid app-updater flow, but it is not yet a full game-update installer workflow
+- the new archive module is the base for update install/unpack, not the final game-update wizard itself
+- packaged manual smoke for updater behavior still has to be run; unit tests do not prove installer UX end-to-end
+- Linux/macOS updater behavior was not manually verified in this workspace
+
+## Current Next Tasks
+
+### 1. Finish Stage 0 verification
+
+- Status: todo
+- Progress: 0%
+- Why next: storage-path work is not truly done until it survives real Electron launch paths
+- Concrete work:
+  - run dev Electron smoke
+  - run packaged smoke
+  - confirm no writes inside install/resources tree
+  - record exact manual steps and results here
+
+### 2. Replace importer-oriented scan with real local-library scan
+
+- Status: todo
+- Progress: 51%
+- Why next: enabled-source scan now exists, but it still feeds the old importer candidate flow instead of persisting library entities from recursive discovery
+- Concrete work:
+  - decide whether `scan_candidates` evolves into the permanent discovery model or whether a second `local_games`/review table is still needed
+  - finish moving scan orchestration and review actions out of importer UX
+  - turn `Scan Hub` into a real review/import screen with explicit decisions
+  - persist richer match/review state in SQLite
+  - keep renderer as presentation/query layer only
+
+### 3. Split DB responsibilities before scanner work grows further
+
+- Status: todo
+- Progress: 18%
+- Why next: migration and scan-source logic have started moving out, but `src/database.js` is still too large
+- Concrete work:
+- continue extracting focused stores/services from `src/database.js`
+- isolate legacy Atlas/F95 query concerns from local-library concerns
+- prepare a smaller DB boundary for `local_games`, `save_profiles` and `sync_state`
+
+## Risks / Notes
+
+- `src/database.js` remains a legacy-heavy module. It is safer than before, but still oversized.
+- Existing Atlas dependency tree has inherited security warnings and deprecated packages. I did not mix that cleanup into the storage/migration slice on purpose.
+- `AGENTS.md` and `ТЗ.md` are local workspace files and are intentionally left untracked relative to upstream Atlas.
