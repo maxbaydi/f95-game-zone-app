@@ -59,6 +59,7 @@
     "asar": true,
     "nodeGypRebuild": false,
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ],

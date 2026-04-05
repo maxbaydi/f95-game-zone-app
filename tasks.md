@@ -2262,7 +2262,59 @@ Checks run:
 What is still missing here:
 
 - manual smoke for branded window titles and updater target was not run yet
-- the actual standalone GitHub repo creation/push still needs to be executed after local changes are committed
+- standalone repo creation/push was completed, but the release build process still needed explicit verification on Windows
+
+## 2026-04-05 — First standalone release build for F95 Game Zone App
+
+Progress: 92% of the current productization stage
+Overall roadmap impact: turns the renamed project into a real releasable application with a published standalone repository and Windows release artifacts
+
+What was done:
+
+- verified that the standalone repository now exists at:
+  - `maxbaydi/f95-game-zone-app`
+- verified that `origin` points to the standalone repo and `upstream` keeps the old Atlas repository
+- built the first Windows release artifact locally
+- confirmed the GitHub release `v1.1.0` contains release assets for the standalone app
+- added a Windows build config fix so future local NSIS builds do not depend on the broken `winCodeSign` symlink extraction path on this machine
+
+How it was implemented:
+
+- local Windows build:
+  - normal `npm run build` initially failed for environment reasons:
+    - `winCodeSign` extraction hit Windows symlink privilege errors
+    - later packaging retried into a locked `dist/win-unpacked`
+- applied a durable fix in `package.json`:
+  - `build.win.signAndEditExecutable = false`
+- then built the installer from the already prepared unpacked app using:
+  - `npx electron-builder --prepackaged dist/win-unpacked --win nsis --x64`
+
+Release state:
+
+- GitHub release:
+  - `https://github.com/maxbaydi/f95-game-zone-app/releases/tag/v1.1.0`
+- verified assets include:
+  - Windows installer
+  - Windows blockmap / `latest.yml`
+  - Linux AppImage
+  - Linux `.deb`
+
+Rationale:
+
+- The failure was not in application code. It was in the Windows release environment and electron-builder’s helper tooling.
+- Pretending the release was "done" after only pushing the repo would have been wrong.
+- Using the prepackaged path was the cleanest recovery because it avoided re-entering the file-lock phase after packaging had already succeeded once.
+
+Checks run:
+
+- `npm run ci:check`
+- local Windows NSIS build via prepackaged flow
+- GitHub release asset verification through `gh release view`
+
+What is still missing here:
+
+- no manual install smoke was run yet against the freshly built Windows installer
+- auto-update behavior from the packaged Windows build still needs a real end-to-end smoke test
 
 ## Current Next Tasks
 
