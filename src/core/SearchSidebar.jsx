@@ -110,7 +110,7 @@ const SearchSidebar = ({
           ? undefined
           : {
               margin: "10px 10px 50px 10px",
-              borderRadius: "8px",
+              borderRadius: "0",
               boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
               height: "calc(100% - 70px - 60px)",
               top: "70px",

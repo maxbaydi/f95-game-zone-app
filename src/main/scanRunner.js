@@ -4,6 +4,7 @@ const { openDatabase } = require("./db/openDatabase");
 const { getScanSources } = require("./db/scanSourcesStore");
 const { createScanJob, finishScanJob, listScanJobs } = require("./db/scanJobsStore");
 const { upsertScanCandidates } = require("./db/scanCandidatesStore");
+const { createAtlasScanMatcher } = require("./scanAtlasMatcher");
 const { isScanCancelled } = require("./scanSessions");
 
 /**
@@ -147,6 +148,7 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
   const db = await openDatabase(appPaths);
   const allSources = await getScanSources(db);
   const enabledSources = allSources.filter((source) => source.isEnabled);
+  let atlasMatcher = null;
 
   if (enabledSources.length === 0) {
     return {
@@ -164,7 +166,18 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
     },
   });
 
-  const result = await runScanAcrossSources(window, enabledSources, baseParams);
+  try {
+    atlasMatcher = await createAtlasScanMatcher(db);
+  } catch (error) {
+    console.error("[scan.runner] failed to build Atlas matcher index", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  const result = await runScanAcrossSources(window, enabledSources, {
+    ...baseParams,
+    atlasMatcher,
+  });
   const storedCandidates =
     result.games.length > 0
       ? await upsertScanCandidates(
@@ -184,11 +197,22 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
             isArchive: Boolean(game.isArchive),
             detectionScore: game.detectionScore || 0,
             detectionReasons: game.detectionReasons || [],
+            matchStatus: game.matchStatus || "unmatched",
+            matchScore: game.matchScore || 0,
+            matchReasons: game.matchReasons || [],
             matchCount: Array.isArray(game.results) ? game.results.length : 0,
             status: "detected",
           })),
         )
       : [];
+
+  const matchedCount = result.games.filter((game) => game.autoMatched).length;
+  const ambiguousCount = result.games.filter(
+    (game) => game.matchStatus === "ambiguous",
+  ).length;
+  const unmatchedCount = result.games.filter(
+    (game) => !game.matchStatus || game.matchStatus === "unmatched",
+  ).length;
 
   await finishScanJob(db, job.id, {
     status: result.cancelled ? "cancelled" : result.success ? "success" : "partial",
@@ -200,6 +224,9 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
       warningsCount: result.warningsCount,
       cancelled: result.cancelled,
       persistedCandidates: storedCandidates.length,
+      matchedCount,
+      ambiguousCount,
+      unmatchedCount,
       diagnosticsSample: result.diagnostics.slice(0, 10),
     },
   });

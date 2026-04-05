@@ -5,6 +5,9 @@ const path = require("path");
 const { buildSaveVaultIdentity, backupGameSaves } = require("./saveVault");
 const { getPrimaryInstallPath } = require("./saveProfiles");
 const {
+  getKnownFolderRoot,
+} = require("./saveProfileStrategies");
+const {
   GAME_REMOVAL_MODES,
   normalizeGameRemovalRequest,
 } = require("../shared/gameRemoval");
@@ -176,9 +179,11 @@ async function validateRemovableInstallDirectory(input) {
 }
 
 function collectExternalSaveDirectories(saveSnapshot, installDirectories) {
-  const renpyRoot = process.env.APPDATA
-    ? path.resolve(path.join(process.env.APPDATA, "RenPy"))
-    : "";
+  const knownRoots = {
+    appdata: getKnownFolderRoot("appdata"),
+    localAppData: getKnownFolderRoot("localAppData"),
+    localLow: getKnownFolderRoot("localLow"),
+  };
   const seenPaths = new Set();
   const deletePaths = [];
   const unsupportedPaths = [];
@@ -208,12 +213,22 @@ function collectExternalSaveDirectories(saveSnapshot, installDirectories) {
     const strategyType = String(profile?.strategy?.type || "");
     if (
       strategyType === "renpy-appdata" &&
-      renpyRoot &&
-      isPathWithin(renpyRoot, resolvedRootPath)
+      knownRoots.appdata &&
+      isPathWithin(path.join(knownRoots.appdata, "RenPy"), resolvedRootPath)
     ) {
       seenPaths.add(comparisonToken);
       deletePaths.push(resolvedRootPath);
       continue;
+    }
+
+    if (strategyType === "windows-known-folder") {
+      const baseFolder = String(profile?.strategy?.payload?.baseFolder || "");
+      const baseRoot = knownRoots[baseFolder];
+      if (baseRoot && isPathWithin(baseRoot, resolvedRootPath)) {
+        seenPaths.add(comparisonToken);
+        deletePaths.push(resolvedRootPath);
+        continue;
+      }
     }
 
     unsupportedPaths.push(resolvedRootPath);

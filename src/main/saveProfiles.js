@@ -1,5 +1,5 @@
 const { getGame } = require("../database");
-const { detectRenpySaveProfiles } = require("./detectors/renpySaveDetector");
+const { detectSaveProfiles } = require("./detectors/saveProfileDetector");
 const {
   getSaveProfiles,
   replaceSaveProfiles,
@@ -33,7 +33,7 @@ async function refreshSaveProfiles(appPaths, db, recordId) {
     };
   }
 
-  const detectedProfiles = detectRenpySaveProfiles({
+  const detectedProfiles = detectSaveProfiles({
     ...game,
     primaryPath: getPrimaryInstallPath(game),
   });

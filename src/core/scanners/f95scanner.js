@@ -1,9 +1,9 @@
 const fs = require("fs");
 const path = require("path");
-const { searchAtlas, findF95Id, checkRecordExist } = require("../../database");
+const { checkRecordExist } = require("../../database");
 const { detectRenpyGame } = require("../../main/detectors/renpyDetector");
+const { extractScanCandidateIdentity } = require("../../main/scanIdentity");
 const { isScanCancelled } = require("../../main/scanSessions");
-const { parseScanTitle } = require("../../shared/scanTitleParser");
 
 const engineMap = {
   rpgm: [
@@ -35,15 +35,89 @@ const blacklist = [
   "python.exe",
   "dxwebsetup.exe",
   "README.html",
+  "readme.html",
+  "readme.htm",
+  "readme.txt",
   "manual.htm",
+  "manual.html",
   "unins000.exe",
   "UE4PrereqSetup_X64.exe",
   "UEPrereqSetup_x64.exe",
   "credits.html",
+  "license.html",
+  "license.txt",
+  "Common.ExtProtocol.Executor.exe",
+  "ReiPatcher.exe",
   "LICENSES.chromium.html",
   "Uninstall.exe",
   "CONFIG_dl.exe",
 ];
+
+const INFRASTRUCTURE_SEGMENTS = new Set([
+  "audio",
+  "bepinex",
+  "bin",
+  "css",
+  "fonts",
+  "fullnet",
+  "game",
+  "images",
+  "img",
+  "js",
+  "lib",
+  "libs",
+  "locales",
+  "managed",
+  "monobleedingedge",
+  "plugins",
+  "renpy",
+  "resources",
+  "streamingassets",
+  "translators",
+  "www",
+]);
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizePathSegment(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9_()-]+/g, "");
+}
+
+/**
+ * @param {string} candidatePath
+ * @param {string} rootPath
+ * @returns {boolean}
+ */
+function shouldIgnoreCandidateDirectory(candidatePath, rootPath) {
+  const relativePath = path.relative(rootPath, candidatePath);
+  const relativeParts = relativePath
+    .split(/[\\/]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (relativeParts.length <= 1) {
+    return false;
+  }
+
+  return relativeParts.some((part, index) => {
+    if (index === 0) {
+      return false;
+    }
+
+    const normalized = normalizePathSegment(part);
+    return (
+      INFRASTRUCTURE_SEGMENTS.has(normalized) ||
+      normalized.endsWith("_data") ||
+      normalized.endsWith(".app") ||
+      normalized === "data"
+    );
+  });
+}
 
 /**
  * @param {string} code
@@ -71,6 +145,13 @@ function emitScanWarning(window, diagnostic) {
   if (window?.webContents?.send) {
     window.webContents.send("scan-warning", diagnostic);
   }
+}
+
+/**
+ * @param {{ recordExist: boolean, forceRescan?: boolean }} params
+ */
+function shouldQueueScannedGame(params) {
+  return Boolean(params?.forceRescan) || !params?.recordExist;
 }
 
 /**
@@ -105,6 +186,73 @@ function safeReadDirEntries(directoryPath, params, window, diagnostics) {
     diagnostics.push(diagnostic);
     emitScanWarning(window, diagnostic);
     return [];
+  }
+}
+
+/**
+ * @param {{ atlasId: number | string, f95Id?: string | number, title: string, creator: string, score: number }} match
+ */
+function buildAtlasMatchOption(match) {
+  return `${match.atlasId} | ${match.f95Id || ""} | ${match.title} | ${match.creator} | score ${match.score}`;
+}
+
+/**
+ * @param {Record<string, any>} params
+ * @param {{
+ *   titleVariants: Array<{ value: string, source: string, weight: number }>,
+ *   creatorHints: string[],
+ *   versionHints: string[],
+ *   engine: string
+ * }} input
+ * @param {string} candidatePath
+ * @param {Array<ReturnType<typeof createScanDiagnostic>>} diagnostics
+ * @returns {{
+ *   status: string,
+ *   autoMatch: boolean,
+ *   matches: Array<any>,
+ *   bestMatch: any,
+ *   matchScore: number,
+ *   matchReasons: string[],
+ *   margin?: number
+ * }}
+ */
+function resolveAtlasMatch(params, input, candidatePath, diagnostics) {
+  if (!params?.atlasMatcher || typeof params.atlasMatcher.matchCandidate !== "function") {
+    return {
+      status: "unmatched",
+      autoMatch: false,
+      matches: [],
+      bestMatch: null,
+      matchScore: 0,
+      matchReasons: [],
+      margin: 0,
+    };
+  }
+
+  try {
+    return params.atlasMatcher.matchCandidate(input);
+  } catch (error) {
+    diagnostics.push(
+      createScanDiagnostic(
+        "SCAN_ATLAS_MATCH_FAILED",
+        candidatePath,
+        `Atlas matching failed for ${candidatePath}`,
+        error && error.code ? error.code : undefined,
+      ),
+    );
+    console.error("[scan.matcher] failed to match atlas candidate", {
+      candidatePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      status: "unmatched",
+      autoMatch: false,
+      matches: [],
+      bestMatch: null,
+      matchScore: 0,
+      matchReasons: [],
+      margin: 0,
+    };
   }
 }
 
@@ -252,6 +400,15 @@ async function startScan(params, window) {
               !blacklist.includes(path.basename(f)),
           );
           if (dirExecutables.length > 0) {
+            if (shouldIgnoreCandidateDirectory(dir, folder)) {
+              console.log(`Skipping infrastructure-like directory: ${dir}`);
+              window.webContents.send("scan-warning", {
+                code: "SCAN_SKIPPED_INFRA_DIR",
+                path: dir,
+                message: `Skipped nested infrastructure directory: ${dir}`,
+              });
+              continue;
+            }
             console.log(
               `Scanning directory with executables: ${dir} (isFile: false)`,
             );
@@ -306,6 +463,10 @@ async function startScan(params, window) {
             );
             for (const t of versionDirs) {
               throwIfCancelled(params);
+              if (shouldIgnoreCandidateDirectory(t, folder)) {
+                console.log(`Skipping infrastructure-like nested directory: ${t}`);
+                continue;
+              }
               console.log(`Processing version directory: ${t}`);
               const subdirEntries = safeReadDirEntries(
                 t,
@@ -464,6 +625,10 @@ async function findGame(
   let isArchive = false;
   let detectionScore = 0;
   let detectionReasons = [];
+  let matchStatus = "unmatched";
+  let matchScore = 0;
+  let matchReasons = [];
+  let autoMatched = false;
 
   try {
     throwIfCancelled(params);
@@ -552,47 +717,26 @@ async function findGame(
         : [];
     }
 
-    let title = "";
-    let creator = "Unknown";
-    let version = "";
-
-    const relativePath = t.replace(`${rootPath}${path.sep}`, "");
+    const relativePath =
+      path.relative(rootPath, isFile ? path.dirname(t) : t) ||
+      path.basename(isFile ? path.dirname(t) : t);
     console.log(`Relative path: ${relativePath}, Format: ${format}`);
-    if (format && format.trim() !== "") {
-      const parsePath = isFile ? path.dirname(relativePath) : relativePath;
-      const pathParts = parsePath.split(path.sep);
-      console.log(`Path parts: ${pathParts.join(", ")}`);
-      const formatParts = format
-        .split("/")
-        .map((part) => part.replace(/\{|\}/g, ""));
-      if (pathParts.length >= formatParts.length) {
-        const mapping = {};
-        formatParts.forEach((part, index) => {
-          mapping[part] = pathParts[index] || "";
-        });
-        creator = mapping.creator || "Unknown";
-        title = mapping.title || "";
-        version = mapping.version || "";
-        console.log(
-          `Structured match: creator=${creator}, title=${title}, version=${version}`,
-        );
-      }
-    }
+    const localIdentity = extractScanCandidateIdentity({
+      targetPath: t,
+      rootPath,
+      relativePath,
+      isFile,
+      format,
+      executables: potentialExecutables,
+      engine: gameEngine,
+    });
+    let title = localIdentity.title || path.basename(t);
+    let creator = localIdentity.creator || "Unknown";
+    let version = localIdentity.version || "Unknown";
 
-    if (!title || title.trim() === "") {
-      let filename = isFile
-        ? path.basename(t, path.extname(t))
-        : path.basename(t);
-      console.log(`Parsing filename: ${filename}`);
-      const parsedName = parseScanTitle(filename);
-      title = parsedName.title;
-      version = parsedName.version;
-      console.log(`Parsed: title=${title}, version=${version}`);
-      if (!title || title.trim() === "") {
-        title = filename;
-        version = "Unknown";
-      }
-    }
+    detectionReasons = Array.from(
+      new Set([...detectionReasons, ...(localIdentity.reasons || [])].filter(Boolean)),
+    );
 
     if (!title || title.trim() === "") {
       console.log(`No valid title extracted from ${t}, parsing failed`);
@@ -602,39 +746,55 @@ async function findGame(
     console.log(
       `Processing game: ${title}, Creator: ${creator}, Version: ${version}, Engine: ${gameEngine}`,
     );
-    let data;
-    try {
-      data = await searchAtlas(title, creator);
-      console.log(`searchAtlas returned: ${JSON.stringify(data)}`);
-    } catch (err) {
-      console.error(`searchAtlas error for ${title}: ${err.message}`);
-      diagnostics.push(
-        createScanDiagnostic(
-          "SCAN_ATLAS_LOOKUP_FAILED",
-          t,
-          `Atlas lookup failed for ${title || path.basename(t)}`,
-          err && err.code ? err.code : undefined,
-        ),
-      );
-      data = [];
-    }
+    const atlasMatch = resolveAtlasMatch(
+      params,
+      {
+        titleVariants: localIdentity.titleVariants,
+        creatorHints: localIdentity.creatorHints,
+        versionHints: localIdentity.versionHints,
+        engine: gameEngine,
+      },
+      t,
+      diagnostics,
+    );
 
     let atlasId = "";
     let f95Id = "";
     let results = [];
-    if (data.length === 1) {
-      atlasId = data[0].atlas_id;
-      f95Id = data[0].f95_id || "";
-      title = data[0].title;
-      creator = data[0].creator;
-      gameEngine = data[0].engine || gameEngine;
-      results = [{ key: "match", value: "Match Found" }];
-    } else if (data.length > 1) {
-      results = data.map((d) => ({
-        key: String(d.atlas_id),
-        value: `${d.atlas_id} | ${d.f95_id || ""} | ${d.title} | ${d.creator}`,
+    let resultSelectedValue = "";
+    let resultVisibility = "hidden";
+
+    matchStatus = atlasMatch.status || "unmatched";
+    matchScore = atlasMatch.matchScore || 0;
+    matchReasons = atlasMatch.matchReasons || [];
+    autoMatched = Boolean(atlasMatch.autoMatch && atlasMatch.bestMatch);
+
+    if (autoMatched && atlasMatch.bestMatch) {
+      atlasId = String(atlasMatch.bestMatch.atlasId || "");
+      f95Id = String(atlasMatch.bestMatch.f95Id || "");
+      title = atlasMatch.bestMatch.title || title;
+      creator = atlasMatch.bestMatch.creator || creator;
+      version =
+        version && version !== "Unknown"
+          ? version
+          : atlasMatch.bestMatch.version || version;
+      gameEngine = atlasMatch.bestMatch.engine || gameEngine;
+      results = [
+        {
+          key: "match",
+          value: `Confident match (${atlasMatch.bestMatch.score})`,
+        },
+      ];
+      resultSelectedValue = "match";
+      resultVisibility = "visible";
+    } else if (Array.isArray(atlasMatch.matches) && atlasMatch.matches.length > 0) {
+      results = atlasMatch.matches.map((match) => ({
+        key: String(match.atlasId),
+        value: buildAtlasMatchOption(match),
       }));
+      resultVisibility = "visible";
     }
+
     const engine = gameEngine || "Unknown";
     let recordExist = false;
     try {
@@ -655,7 +815,12 @@ async function findGame(
       return false;
     }
 
-    if (!recordExist) {
+    if (
+      shouldQueueScannedGame({
+        recordExist,
+        forceRescan: Boolean(params?.forceRescan),
+      })
+    ) {
       const gd = {
         atlasId,
         f95Id,
@@ -670,18 +835,22 @@ async function findGame(
         multipleVisible,
         folder: isFile ? path.dirname(t) : t,
         results,
-        resultSelectedValue: results[0]?.key || "",
-        resultVisibility: results.length > 0 ? "visible" : "hidden",
+        resultSelectedValue,
+        resultVisibility,
         recordExist,
         isArchive,
         detectionScore,
         detectionReasons: Array.from(new Set(detectionReasons.filter(Boolean))),
+        matchStatus,
+        matchScore,
+        matchReasons,
+        autoMatched,
       };
       console.log(`Adding game to list: ${JSON.stringify(gd)}`);
       games.push(gd);
       return true;
     }
-    console.log(`Game ${title} already exists or failed to add`);
+    console.log(`Game ${title} already exists or was skipped by scan policy`);
     return false;
   } catch (err) {
     if (err && err.code === "SCAN_CANCELLED") {
@@ -701,4 +870,8 @@ async function findGame(
   }
 }
 
-module.exports = { startScan };
+module.exports = {
+  startScan,
+  shouldQueueScannedGame,
+  shouldIgnoreCandidateDirectory,
+};

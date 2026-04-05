@@ -1,5 +1,11 @@
 const fs = require("fs");
 const path = require("path");
+const {
+  buildTrackedProfileDescriptor,
+  listSaveProfileFiles,
+  normalizeIdentityToken,
+  resolveSaveProfileDestinationPath,
+} = require("./saveProfileStrategies");
 
 const COMMON_SAVE_PATHS = [
   "game/saves",
@@ -10,16 +16,6 @@ const COMMON_SAVE_PATHS = [
   "userdata/save",
   "userdata/saves",
 ];
-
-function normalizeIdentityToken(value, fallback = "unknown") {
-  const normalized = String(value || "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  return normalized || fallback;
-}
 
 function extractThreadId(threadUrl) {
   const match = String(threadUrl || "").match(/\/threads\/[^./]+?\.(\d+)(?:\/|$)/i);
@@ -47,123 +43,6 @@ function getVaultRoot(appPaths) {
 
 function getVaultGameRoot(appPaths, identity) {
   return path.join(getVaultRoot(appPaths), identity);
-}
-
-function normalizeRelativeSegments(value) {
-  const rawSegments = String(value || "")
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-
-  if (
-    rawSegments.length === 0 ||
-    rawSegments.some(
-      (segment) =>
-        segment === "." ||
-        segment === ".." ||
-        segment.includes(":") ||
-        segment.includes("\0"),
-    )
-  ) {
-    return [];
-  }
-
-  return rawSegments;
-}
-
-function resolveSaveProfileDestinationPath(profile, installDirectory) {
-  const strategyType = String(profile?.strategy?.type || "");
-  const payload = profile?.strategy?.payload || {};
-
-  if (strategyType === "install-relative") {
-    const relativeSegments = normalizeRelativeSegments(payload.relativePath);
-    if (!installDirectory || relativeSegments.length === 0) {
-      return "";
-    }
-
-    return path.join(installDirectory, ...relativeSegments);
-  }
-
-  if (strategyType === "renpy-appdata") {
-    const folderSegments = normalizeRelativeSegments(payload.folderName);
-    if (folderSegments.length !== 1) {
-      return "";
-    }
-
-    const appDataRoot = process.env.APPDATA || "";
-    if (!appDataRoot) {
-      return "";
-    }
-
-    return path.join(appDataRoot, "RenPy", folderSegments[0]);
-  }
-
-  return "";
-}
-
-function buildTrackedProfileDescriptor(profile, fallbackIndex) {
-  const strategyType = String(profile?.strategy?.type || "");
-  const payload = profile?.strategy?.payload || {};
-
-  if (strategyType === "install-relative") {
-    const relativeSegments = normalizeRelativeSegments(payload.relativePath);
-    if (relativeSegments.length === 0) {
-      return null;
-    }
-
-    return {
-      provider: profile.provider || "local",
-      rootPath: profile.rootPath,
-      strategy: {
-        type: "install-relative",
-        payload: {
-          relativePath: relativeSegments.join("/"),
-        },
-      },
-      confidence: Number(profile.confidence) || 0,
-      reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
-      vaultRelativePath: path.join("profiles", "local", ...relativeSegments),
-    };
-  }
-
-  if (strategyType === "renpy-appdata") {
-    const folderSegments = normalizeRelativeSegments(payload.folderName);
-    if (folderSegments.length !== 1) {
-      return null;
-    }
-
-    return {
-      provider: profile.provider || "renpy_appdata",
-      rootPath: profile.rootPath,
-      strategy: {
-        type: "renpy-appdata",
-        payload: {
-          folderName: folderSegments[0],
-        },
-      },
-      confidence: Number(profile.confidence) || 0,
-      reasons: Array.isArray(profile.reasons) ? profile.reasons : [],
-      vaultRelativePath: path.join("profiles", "renpy", folderSegments[0]),
-    };
-  }
-
-  const fallbackToken = normalizeIdentityToken(
-    path.basename(profile?.rootPath || "") || `profile-${fallbackIndex}`,
-    `profile-${fallbackIndex}`,
-  );
-
-  return {
-    provider: profile?.provider || "local",
-    rootPath: profile?.rootPath || "",
-    strategy: {
-      type: strategyType || "unknown",
-      payload,
-    },
-    confidence: Number(profile?.confidence) || 0,
-    reasons: Array.isArray(profile?.reasons) ? profile.reasons : [],
-    vaultRelativePath: path.join("profiles", "misc", fallbackToken),
-  };
 }
 
 async function pathExists(targetPath) {
@@ -258,6 +137,19 @@ async function copyPathRecursive(sourcePath, destinationPath, overwrite) {
   await fs.promises.copyFile(sourcePath, destinationPath);
 }
 
+async function copyProfileToVault(profile, destinationRoot) {
+  await fs.promises.mkdir(destinationRoot, { recursive: true });
+  const files = await listSaveProfileFiles(profile);
+
+  for (const file of files) {
+    await copyPathRecursive(
+      file.filePath,
+      path.join(destinationRoot, ...String(file.relativePath || "").split("/")),
+      true,
+    );
+  }
+}
+
 async function backupGameSaves(input) {
   const identity = buildSaveVaultIdentity(input);
   const trackedProfiles = await resolveTrackedProfiles(input);
@@ -276,7 +168,7 @@ async function backupGameSaves(input) {
 
   for (const trackedProfile of trackedProfiles) {
     const destinationPath = path.join(vaultRoot, trackedProfile.vaultRelativePath);
-    await copyPathRecursive(trackedProfile.rootPath, destinationPath, true);
+    await copyProfileToVault(trackedProfile, destinationPath);
   }
 
   await fs.promises.writeFile(
@@ -314,8 +206,17 @@ async function backupGameSaves(input) {
       strategy: entry.strategy,
     })),
     backedUpPaths: trackedProfiles
-      .filter((entry) => entry.strategy?.type === "install-relative")
-      .map((entry) => entry.strategy.payload.relativePath),
+      .map((entry) => {
+        if (entry.strategy?.type === "install-relative") {
+          return entry.strategy.payload.relativePath;
+        }
+
+        if (entry.strategy?.type === "install-file-patterns") {
+          return entry.strategy.payload.relativePath || entry.rootPath;
+        }
+
+        return entry.rootPath;
+      }),
   };
 }
 

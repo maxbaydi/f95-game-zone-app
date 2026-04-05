@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   LIBRARY_SORT_MODES,
   getInstalledAtTimestamp,
+  getLibrarySortDescription,
   getStatusSortLabel,
   normalizeLibraryStatus,
   sortLibraryGames,
@@ -33,6 +34,17 @@ test("normalizeLibraryStatus treats blank and ongoing statuses as in development
 
 test("getStatusSortLabel turns blank status into a user-facing in-development label", () => {
   assert.equal(getStatusSortLabel({ status: "" }), "In development");
+});
+
+test("getLibrarySortDescription explains engine and status ordering", () => {
+  assert.equal(
+    getLibrarySortDescription(LIBRARY_SORT_MODES.ENGINE),
+    "Alphabetical by engine. Unknown engines stay last.",
+  );
+  assert.equal(
+    getLibrarySortDescription(LIBRARY_SORT_MODES.STATUS),
+    "Orders games by status: In development, On hold, Completed, Abandoned, then other statuses.",
+  );
 });
 
 test("sortLibraryGames sorts by newest install date first", () => {

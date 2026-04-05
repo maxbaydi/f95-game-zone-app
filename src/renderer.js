@@ -70,7 +70,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startScanSources: (params) =>
     ipcRenderer.invoke("start-scan-sources", params),
   cancelScan: () => ipcRenderer.invoke("cancel-scan"),
-  scanLibrary: () => ipcRenderer.invoke("scan-library"),
+  scanLibrary: (options) => ipcRenderer.invoke("scan-library", options),
+  refreshLibraryPreviews: () => ipcRenderer.invoke("refresh-library-previews"),
   searchAtlasByF95Id: (f95Id) =>
     ipcRenderer.invoke("search-atlas-by-f95-id", f95Id),
   searchAtlas: (title, creator) =>
@@ -217,7 +218,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   onPromptSteamDirectory: (callback) => {
     console.log("Registering onPromptSteamDirectory listener");
-    ipcRenderer.on("prompt-steam-directory", (event) => callback());
+    ipcRenderer.on("prompt-steam-directory", () => callback());
   },
   openSteamImportWindow: () => {
     console.log("Invoking openSteamImportWindow");

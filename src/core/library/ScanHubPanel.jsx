@@ -1,3 +1,5 @@
+const { useEffect, useState } = window.React;
+
 const formatScanHubDate = (value) => {
   if (!value) {
     return "Never";
@@ -11,22 +13,39 @@ const formatScanHubDate = (value) => {
   return date.toLocaleString();
 };
 
-const ScanHubSummaryCard = ({ label, value, tone = "neutral" }) => {
+const ScanHubStatCell = ({ label, value, tone = "neutral" }) => {
   const toneClass =
     tone === "accent"
-      ? "border-accent/35 bg-accent/12 shadow-glow-accent"
+      ? "text-accentBar"
       : tone === "warning"
-        ? "border-amber-500/35 bg-amber-500/10"
-        : "border-border bg-white/5 backdrop-blur-sm";
+        ? "text-amber-200/90"
+        : "text-text";
 
   return (
-    <div className={`rounded-2xl border p-3 shadow-glass-sm ${toneClass}`}>
-      <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
+    <div className="min-w-0 px-2 py-2 text-center">
+      <div className="text-[10px] uppercase tracking-[0.16em] opacity-55">
         {label}
       </div>
-      <div className="mt-2 text-2xl font-semibold text-text">{value}</div>
+      <div className={`mt-0.5 text-xl font-semibold tabular-nums ${toneClass}`}>
+        {value}
+      </div>
     </div>
   );
+};
+
+const getScanHubErrorMessage = (result, fallbackMessage) => {
+  if (typeof result?.error === "string" && result.error.trim()) {
+    return result.error.trim();
+  }
+
+  if (
+    typeof result?.error?.message === "string" &&
+    result.error.message.trim()
+  ) {
+    return result.error.message.trim();
+  }
+
+  return fallbackMessage;
 };
 
 const ScanHubPanel = ({
@@ -36,271 +55,460 @@ const ScanHubPanel = ({
   jobs,
   candidates,
   isScanRunning,
+  defaultGameFolder,
   onRefresh,
   onClose,
   onRescan,
   onCancelScan,
   onOpenFolder,
+  onAddSource,
+  onToggleSource,
+  onReplaceSource,
+  onRemoveSource,
+  onChooseLibraryFolder,
 }) => {
+  const [feedback, setFeedback] = useState({
+    tone: "",
+    text: "",
+  });
+  const [busyAction, setBusyAction] = useState("");
+
+  useEffect(() => {
+    if (!isVisible) {
+      setFeedback({ tone: "", text: "" });
+      setBusyAction("");
+    }
+  }, [isVisible]);
+
   if (!isVisible) {
     return null;
   }
 
   const enabledSources = sources.filter((source) => source.isEnabled);
   const latestJob = jobs[0];
+  const hasLibraryFolder = Boolean(String(defaultGameFolder || "").trim());
+  const runAction = async (actionKey, action, successMessage) => {
+    setBusyAction(actionKey);
+    setFeedback({ tone: "", text: "" });
+
+    try {
+      const result = await action();
+      if (result?.cancelled) {
+        return result;
+      }
+
+      if (!result?.success) {
+        setFeedback({
+          tone: "error",
+          text: getScanHubErrorMessage(result, "Action failed."),
+        });
+        return result;
+      }
+
+      setFeedback({
+        tone: "success",
+        text:
+          typeof successMessage === "function"
+            ? successMessage(result)
+            : successMessage,
+      });
+      return result;
+    } catch (error) {
+      console.error("Scan Hub action failed:", error);
+      setFeedback({
+        tone: "error",
+        text:
+          (typeof error?.message === "string" && error.message.trim()) ||
+          "Action failed.",
+      });
+      return { success: false, error };
+    } finally {
+      setBusyAction((previous) => (previous === actionKey ? "" : previous));
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[1200] bg-black/55 backdrop-blur-sm">
-      <div className="absolute bottom-[44px] right-0 top-[70px] w-[540px] border-l border-border bg-primary/85 shadow-glass backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border bg-black/20 px-4 py-4 backdrop-blur-md">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.2em] opacity-55">
+      <div className="absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary/85 shadow-glass backdrop-blur-xl">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-black/20 px-3 py-2 backdrop-blur-md">
+          <div className="min-w-0">
+            <div className="text-[10px] uppercase tracking-[0.2em] opacity-55">
               Library Scan
             </div>
-            <div className="text-lg font-semibold text-text">
-              Sources, jobs and discovery queue
-            </div>
-            <div className="text-xs opacity-65">
-              Repeat scans live here now. No reason to hunt through importer UI.
+            <div className="text-base font-semibold leading-tight text-text">
+              Scan Hub
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                runAction("add-source", onAddSource, "Scan source added.")
+              }
+              disabled={busyAction === "add-source"}
+              className="bg-secondary px-2 py-1 text-xs hover:bg-selected disabled:opacity-60"
+            >
+              {busyAction === "add-source" ? "Adding…" : "Add Source"}
+            </button>
             {isScanRunning ? (
               <button
+                type="button"
                 onClick={onCancelScan}
-                className="rounded bg-red-700 px-3 py-2 text-sm text-white hover:bg-red-800"
+                className="bg-red-700 px-2 py-1 text-xs text-white hover:bg-red-800"
               >
                 Cancel Scan
               </button>
             ) : (
               <button
+                type="button"
                 onClick={onRescan}
-                className="rounded bg-accent px-3 py-2 text-sm text-text hover:bg-selected"
+                className="bg-accent px-2 py-1 text-xs text-text hover:bg-selected"
               >
                 Rescan Library
               </button>
             )}
             <button
+              type="button"
               onClick={onRefresh}
-              className="rounded bg-secondary px-3 py-2 text-sm hover:bg-selected"
+              className="bg-secondary px-2 py-1 text-xs hover:bg-selected"
             >
               Refresh
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="rounded bg-secondary px-3 py-2 text-sm hover:bg-selected"
+              className="bg-secondary px-2 py-1 text-xs hover:bg-selected"
             >
               Close
             </button>
           </div>
         </div>
 
-        <div className="h-full overflow-y-auto px-4 py-4 pb-10">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-8">
           {isLoading ? (
-            <div className="space-y-3">
-              <div className="h-24 animate-pulse rounded-2xl bg-secondary/40" />
-              <div className="h-40 animate-pulse rounded-2xl bg-secondary/30" />
-              <div className="h-52 animate-pulse rounded-2xl bg-secondary/20" />
+            <div className="space-y-2">
+              <div className="h-14 animate-pulse bg-secondary/40" />
+              <div className="h-28 animate-pulse bg-secondary/30" />
+              <div className="h-36 animate-pulse bg-secondary/20" />
             </div>
           ) : (
-            <div className="space-y-5">
-              <div className="grid grid-cols-3 gap-3">
-                <ScanHubSummaryCard
-                  label="Enabled Sources"
-                  value={enabledSources.length}
-                  tone="accent"
-                />
-                <ScanHubSummaryCard
-                  label="Recent Jobs"
-                  value={jobs.length}
-                  tone="neutral"
-                />
-                <ScanHubSummaryCard
-                  label="Detected Candidates"
-                  value={candidates.length}
-                  tone={candidates.length > 0 ? "warning" : "neutral"}
-                />
-              </div>
+            <div className="space-y-3">
+              {feedback.text && (
+                <div
+                  className={`border p-2 text-sm ${
+                    feedback.tone === "error"
+                      ? "border-red-500/35 bg-red-500/10 text-red-100"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                  }`}
+                >
+                  {feedback.text}
+                </div>
+              )}
 
-              <section className="rounded-2xl border border-border bg-secondary/10 p-4">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
-                      Scan Sources
-                    </div>
-                    <div className="text-sm opacity-70">
-                      Configured folders used for repeat library scans
-                    </div>
-                  </div>
+              <div className="border border-border/70 bg-secondary/5">
+                <div className="grid grid-cols-3 divide-x divide-border/40">
+                  <ScanHubStatCell
+                    label="Enabled sources"
+                    value={enabledSources.length}
+                    tone="accent"
+                  />
+                  <ScanHubStatCell
+                    label="Recent jobs"
+                    value={jobs.length}
+                    tone="neutral"
+                  />
+                  <ScanHubStatCell
+                    label="Candidates"
+                    value={candidates.length}
+                    tone={candidates.length > 0 ? "warning" : "neutral"}
+                  />
                 </div>
 
-                {sources.length === 0 ? (
-                  <div className="text-sm opacity-60">
-                    No scan sources configured yet.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {sources.map((source) => (
-                      <div
-                        key={source.id}
-                        className="rounded-xl border border-border/70 bg-canvas/40 p-3"
+                <div className="border-t border-border/40 px-2 py-2">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
+                      Library folder
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          runAction(
+                            "library-folder",
+                            onChooseLibraryFolder,
+                            (result) =>
+                              `Library folder set to ${result.path || defaultGameFolder}.`,
+                          )
+                        }
+                        disabled={busyAction === "library-folder"}
+                        className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-60"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-medium text-text">
-                              {source.isEnabled ? "Enabled" : "Disabled"}
+                        {busyAction === "library-folder"
+                          ? "Saving…"
+                          : hasLibraryFolder
+                            ? "Change folder"
+                            : "Choose folder"}
+                      </button>
+                      {hasLibraryFolder && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenFolder(defaultGameFolder)}
+                          className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
+                        >
+                          Open
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {hasLibraryFolder ? (
+                    <>
+                      <div className="mt-1 break-all font-mono text-[11px] opacity-80">
+                        {defaultGameFolder}
+                      </div>
+                      <div className="mt-1 text-[10px] leading-snug opacity-50">
+                        Profile data stays in the app profile; this path is for
+                        installs only.
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-1 text-xs opacity-60">
+                      No default library folder selected.
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-border/40 px-2 py-2">
+                  <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
+                    Scan sources
+                  </div>
+                  {sources.length === 0 ? (
+                    <div className="mt-1 text-xs opacity-60">
+                      No scan sources configured.
+                    </div>
+                  ) : (
+                    <div className="mt-2 divide-y divide-border/30">
+                      {sources.map((source) => (
+                        <div
+                          key={source.id}
+                          className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-medium text-text">
+                                {source.isEnabled ? "Enabled" : "Disabled"}
+                              </span>
+                              <span
+                                className={`border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] ${
+                                  source.isEnabled
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                                    : "border-border/70 bg-white/5 text-text/70"
+                                }`}
+                              >
+                                {source.isEnabled ? "Active" : "Paused"}
+                              </span>
                             </div>
-                            <div className="mt-1 break-all text-xs opacity-65">
+                            <div className="mt-0.5 break-all text-[11px] opacity-65">
                               {source.path}
                             </div>
                           </div>
-                          <button
-                            onClick={() => onOpenFolder(source.path)}
-                            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-selected"
-                          >
-                            Open
-                          </button>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => onOpenFolder(source.path)}
+                              className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction(
+                                  `toggle-source-${source.id}`,
+                                  () => onToggleSource(source),
+                                  source.isEnabled
+                                    ? "Source paused."
+                                    : "Source enabled.",
+                                )
+                              }
+                              disabled={
+                                busyAction === `toggle-source-${source.id}`
+                              }
+                              className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected disabled:opacity-60"
+                            >
+                              {busyAction === `toggle-source-${source.id}`
+                                ? "…"
+                                : source.isEnabled
+                                  ? "Disable"
+                                  : "Enable"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction(
+                                  `replace-source-${source.id}`,
+                                  () => onReplaceSource(source),
+                                  "Source path updated.",
+                                )
+                              }
+                              disabled={
+                                busyAction === `replace-source-${source.id}`
+                              }
+                              className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected disabled:opacity-60"
+                            >
+                              {busyAction === `replace-source-${source.id}`
+                                ? "…"
+                                : "Replace"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                runAction(
+                                  `remove-source-${source.id}`,
+                                  () => onRemoveSource(source.id),
+                                  "Source removed.",
+                                )
+                              }
+                              disabled={
+                                busyAction === `remove-source-${source.id}`
+                              }
+                              className="bg-red-700/70 px-2 py-0.5 text-xs text-white hover:bg-red-700 disabled:opacity-60"
+                            >
+                              {busyAction === `remove-source-${source.id}`
+                                ? "…"
+                                : "Remove"}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-border bg-secondary/10 p-4">
-                <div className="mb-3">
-                  <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
-                    Recent Jobs
-                  </div>
-                  <div className="text-sm opacity-70">
-                    Latest known scan results across configured sources
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {jobs.length === 0 ? (
-                  <div className="text-sm opacity-60">
-                    No scan jobs recorded yet.
+                <div className="border-t border-border/40 px-2 py-2">
+                  <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
+                    Recent jobs
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {jobs.map((job) => (
-                      <div
-                        key={job.id}
-                        className="rounded-xl border border-border/70 bg-canvas/40 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
+                  {jobs.length === 0 ? (
+                    <div className="mt-1 text-xs opacity-60">
+                      No scan jobs recorded.
+                    </div>
+                  ) : (
+                    <div className="mt-2 divide-y divide-border/30">
+                      {jobs.map((job) => (
+                        <div
+                          key={job.id}
+                          className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                        >
                           <div>
                             <div className="font-medium capitalize text-text">
                               {job.status}
                             </div>
-                            <div className="mt-1 text-xs opacity-65">
+                            <div className="text-[11px] opacity-65">
                               {formatScanHubDate(
                                 job.finishedAt || job.startedAt,
                               )}
                             </div>
                           </div>
-                          <div className="text-right text-xs opacity-70">
+                          <div className="text-right text-[11px] opacity-70">
                             <div>{job.gamesFound || 0} detected</div>
                             <div>{job.errorsCount || 0} errors</div>
                           </div>
-                        </div>
-                        {job.notes?.sourcePaths?.length > 0 && (
-                          <div className="mt-3 space-y-1 text-xs opacity-65">
-                            {job.notes.sourcePaths
-                              .slice(0, 3)
-                              .map((sourcePath) => (
-                                <div
-                                  key={`${job.id}-${sourcePath}`}
-                                  className="break-all"
-                                >
-                                  {sourcePath}
-                                </div>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {latestJob && (
-                  <div className="mt-3 text-xs opacity-60">
-                    Last completed activity:{" "}
-                    {formatScanHubDate(
-                      latestJob.finishedAt || latestJob.startedAt,
-                    )}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-border bg-secondary/10 p-4">
-                <div className="mb-3">
-                  <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
-                    Discovery Queue
-                  </div>
-                  <div className="text-sm opacity-70">
-                    Recent detections waiting for review or already imported
-                  </div>
-                </div>
-
-                {candidates.length === 0 ? (
-                  <div className="text-sm opacity-60">
-                    No persisted scan candidates yet.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {candidates.map((candidate) => (
-                      <div
-                        key={candidate.id}
-                        className="rounded-xl border border-border/70 bg-canvas/40 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-medium text-text">
-                              {candidate.title}
+                          {job.notes?.sourcePaths?.length > 0 && (
+                            <div className="basis-full space-y-0.5 text-[11px] opacity-60">
+                              {job.notes.sourcePaths
+                                .slice(0, 3)
+                                .map((sourcePath) => (
+                                  <div
+                                    key={`${job.id}-${sourcePath}`}
+                                    className="break-all"
+                                  >
+                                    {sourcePath}
+                                  </div>
+                                ))}
                             </div>
-                            <div className="text-sm opacity-70">
-                              {candidate.creator || "Unknown creator"}
-                            </div>
-                            <div className="mt-1 text-xs opacity-60">
-                              {candidate.engine || "Unknown engine"} | v
-                              {candidate.version || "?"} |{" "}
-                              {candidate.detectionScore || 0}% confidence
-                            </div>
-                            <div className="mt-2 break-all text-xs opacity-60">
-                              {candidate.folderPath}
-                            </div>
-                            {candidate.detectionReasons?.length > 0 && (
-                              <div className="mt-2 text-xs opacity-60">
-                                {candidate.detectionReasons
-                                  .slice(0, 3)
-                                  .join(" | ")}
-                              </div>
-                            )}
-                          </div>
-                          <div className="shrink-0 text-right text-xs opacity-70">
-                            <div className="capitalize">{candidate.status}</div>
-                            <div>{formatScanHubDate(candidate.lastSeenAt)}</div>
-                          </div>
-                        </div>
-                        <div className="mt-3 flex items-center gap-2">
-                          <button
-                            onClick={() => onOpenFolder(candidate.folderPath)}
-                            className="rounded bg-secondary px-3 py-1 text-sm hover:bg-selected"
-                          >
-                            Open Folder
-                          </button>
-                          {candidate.libraryRecordId && (
-                            <span className="text-xs opacity-60">
-                              Linked to record #{candidate.libraryRecordId}
-                            </span>
                           )}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  )}
+                  {latestJob && (
+                    <div className="mt-2 border-t border-border/30 pt-2 text-[10px] opacity-50">
+                      Last activity:{" "}
+                      {formatScanHubDate(
+                        latestJob.finishedAt || latestJob.startedAt,
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-border/40 px-2 py-2">
+                  <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
+                    Discovery queue
                   </div>
-                )}
-              </section>
+                  {candidates.length === 0 ? (
+                    <div className="mt-1 text-xs opacity-60">
+                      No scan candidates stored.
+                    </div>
+                  ) : (
+                    <div className="mt-2 divide-y divide-border/30">
+                      {candidates.map((candidate) => (
+                        <div
+                          key={candidate.id}
+                          className="py-2 first:pt-0 last:pb-0"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium text-text">
+                                {candidate.title}
+                              </div>
+                              <div className="text-xs opacity-70">
+                                {candidate.creator || "Unknown creator"}
+                              </div>
+                              <div className="mt-0.5 text-[11px] opacity-60">
+                                {candidate.engine || "Unknown engine"} · v
+                                {candidate.version || "?"} ·{" "}
+                                {candidate.detectionScore || 0}%
+                              </div>
+                              <div className="mt-1 break-all text-[11px] opacity-55">
+                                {candidate.folderPath}
+                              </div>
+                              {candidate.detectionReasons?.length > 0 && (
+                                <div className="mt-1 text-[11px] opacity-55">
+                                  {candidate.detectionReasons
+                                    .slice(0, 3)
+                                    .join(" · ")}
+                                </div>
+                              )}
+                            </div>
+                            <div className="shrink-0 text-right text-[11px] opacity-70">
+                              <div className="capitalize">{candidate.status}</div>
+                              <div>
+                                {formatScanHubDate(candidate.lastSeenAt)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onOpenFolder(candidate.folderPath)
+                              }
+                              className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
+                            >
+                              Open folder
+                            </button>
+                            {candidate.libraryRecordId && (
+                              <span className="text-[11px] opacity-50">
+                                #{candidate.libraryRecordId}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

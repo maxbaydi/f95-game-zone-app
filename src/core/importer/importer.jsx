@@ -1,6 +1,7 @@
 const { useState, useEffect } = window.React;
 const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
+const DEFAULT_PREVIEW_LIMIT = "20";
 
 const Importer = () => {
   const [view, setView] = useState("source");
@@ -16,8 +17,8 @@ const Importer = () => {
   const [archiveExt, setArchiveExt] = useState("zip,7z,rar");
   const [isCompressed, setIsCompressed] = useState(false);
   const [downloadBannerImages, setDownloadBannerImages] = useState(false);
-  const [downloadPreviewImages, setDownloadPreviewImages] = useState(false);
-  const [previewLimit, setPreviewLimit] = useState("5");
+  const [downloadPreviewImages, setDownloadPreviewImages] = useState(true);
+  const [previewLimit] = useState(DEFAULT_PREVIEW_LIMIT);
   const [downloadVideos, setDownloadVideos] = useState(false);
   const [scanSize, setScanSize] = useState(false);
   const [deleteAfter, setDeleteAfter] = useState(false);
@@ -268,7 +269,7 @@ const Importer = () => {
       .startSteamScan({
         downloadBannerImages: false,
         downloadPreviewImages: false,
-        previewLimit: "5",
+        previewLimit: DEFAULT_PREVIEW_LIMIT,
         downloadVideos: false,
       })
       .catch((err) => {
@@ -486,38 +487,45 @@ const Importer = () => {
 
         const current = game.resultSelectedValue;
         const valid = results.find((r) => r.key === current);
-        const selectedKey = valid ? current : results[0].key;
-
-        const selected =
-          results.find((r) => r.key === selectedKey) || results[0];
-        const parts = selected.value.split(" | ");
+        const selectedKey = valid ? current : "";
 
         game = {
           ...game,
           results,
           resultSelectedValue: selectedKey,
           resultVisibility: "visible",
-          atlasId: parts[0],
-          f95Id: parts[1] || "",
-          title: parts[2],
-          creator: parts[3],
+          atlasId: valid ? game.atlasId : "",
+          f95Id: valid ? game.f95Id : "",
         };
 
-        try {
-          const atlasData = await window.electronAPI.getAtlasData(parts[0]);
+        if (valid) {
+          const selected = results.find((r) => r.key === selectedKey) || results[0];
+          const parts = selected.value.split(" | ");
+
           game = {
             ...game,
-            engine: atlasData.engine || game.engine || "Unknown",
+            atlasId: parts[0],
+            f95Id: parts[1] || "",
+            title: parts[2],
+            creator: parts[3],
           };
-        } catch (atlasErr) {
-          console.error(
-            `Failed to fetch atlas data for game ${i + 1} (atlas ${parts[0]}):`,
-            atlasErr,
-          );
-          window.electronAPI.log(
-            `Failed to fetch atlas data for game ${i + 1}: ${atlasErr.message}`,
-          );
-          // Continue without engine update
+
+          try {
+            const atlasData = await window.electronAPI.getAtlasData(parts[0]);
+            game = {
+              ...game,
+              engine: atlasData.engine || game.engine || "Unknown",
+            };
+          } catch (atlasErr) {
+            console.error(
+              `Failed to fetch atlas data for game ${i + 1} (atlas ${parts[0]}):`,
+              atlasErr,
+            );
+            window.electronAPI.log(
+              `Failed to fetch atlas data for game ${i + 1}: ${atlasErr.message}`,
+            );
+            // Continue without engine update
+          }
         }
       } else {
         game = {
@@ -1070,18 +1078,19 @@ const Importer = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {gamesList.map((game, originalIndex) => {
-                    if (
-                      hideMatches &&
-                      game.results.length === 1 &&
-                      game.results[0].value === "Match Found"
-                    ) {
-                      return null;
-                    }
+                    {gamesList.map((game, originalIndex) => {
+                      if (
+                        hideMatches &&
+                        game.results.length === 1 &&
+                        game.results[0].key === "match"
+                      ) {
+                        return null;
+                      }
                     return (
                       <tr key={originalIndex} className="bg-primary">
                         <td className="border border-border p-1 min-w-[100px]">
-                          {game.results.length > 1 && (
+                          {game.results.length > 0 &&
+                            game.results[0].key !== "match" && (
                             <i className="fa-solid fa-triangle-exclamation text-yellow-400 mr-1"></i>
                           )}
                           {game.atlasId}
@@ -1187,7 +1196,7 @@ const Importer = () => {
                               {game.results[0].value}
                             </span>
                           ) : (
-                            game.results.length > 1 && (
+                            game.results.length > 0 && (
                               <select
                                 value={game.resultSelectedValue}
                                 onChange={(e) =>
@@ -1198,6 +1207,9 @@ const Importer = () => {
                                 }
                                 className="w-full bg-secondary border border-border p-1"
                               >
+                                <option value="">
+                                  Select database match
+                                </option>
                                 {game.results.map((opt) => (
                                   <option key={opt.key} value={opt.key}>
                                     {opt.value}

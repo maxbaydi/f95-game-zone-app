@@ -54,6 +54,19 @@ const {
   getRecentScanCandidates,
   markImportedCandidate,
 } = require("./main/scanCandidates");
+const { resetScanCache } = require("./main/scanCache");
+const { createAtlasScanMatcher } = require("./main/scanAtlasMatcher");
+const {
+  splitAutoImportableScanGames,
+} = require("./main/scanCandidateImportPolicy");
+const {
+  buildLibraryPreviewRefreshTargets,
+  shouldRefreshCachedPreviews,
+} = require("./main/libraryPreviewRefresh");
+const {
+  DEFAULT_PREVIEW_LIMIT,
+  resolvePreviewDownloadCount,
+} = require("./main/previewLimit");
 const {
   startEnabledSourcesScan,
   getRecentScanJobs,
@@ -1633,7 +1646,7 @@ const defaultConfig = {
     gameFolder: "",
   },
   Metadata: {
-    downloadPreviews: false,
+    downloadPreviews: true,
   },
   Performance: {
     maxHeapSize: 4096,
@@ -2280,9 +2293,22 @@ ipcMain.handle("start-scan", async (event, params) => {
   }
 
   try {
+    let atlasMatcher = null;
+    try {
+      if (databaseConnection) {
+        atlasMatcher = await createAtlasScanMatcher(databaseConnection);
+      }
+    } catch (matcherError) {
+      console.error(
+        "Failed to build Atlas matcher for importer scan:",
+        matcherError,
+      );
+    }
+
     return await startScan(
       {
         ...params,
+        atlasMatcher,
         scanSession: sessionResult.session,
       },
       window,
@@ -2647,7 +2673,7 @@ ipcMain.handle("update-previews", async (event, recordId) => {
       },
       false,
       true,
-      100,
+      DEFAULT_PREVIEW_LIMIT,
       false,
     );
 
@@ -2663,6 +2689,23 @@ ipcMain.handle("update-previews", async (event, recordId) => {
   } catch (err) {
     console.error("Error downloading previews:", err);
     throw err;
+  }
+});
+
+ipcMain.handle("refresh-library-previews", async (event) => {
+  try {
+    return await refreshLibraryPreviewsInternal(event.sender);
+  } catch (error) {
+    console.error("Error refreshing library screenshots:", error);
+    return {
+      success: false,
+      totalGames: 0,
+      processed: 0,
+      refreshed: 0,
+      skipped: 0,
+      failed: 0,
+      error: error.message,
+    };
   }
 });
 
@@ -3290,11 +3333,9 @@ const importGamesInternal = async (params) => {
       try {
         const bannerUrl = await getBannerUrl(game.atlasId);
         const screenUrls = await getScreensUrlList(game.atlasId);
-        const previewCount = downloadPreviewImages
-          ? previewLimit === "Unlimited"
-            ? screenUrls.length
-            : Math.min(parseInt(previewLimit), screenUrls.length)
-          : 0;
+    const previewCount = downloadPreviewImages
+      ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
+      : 0;
         const totalImages =
           (downloadBannerImages && bannerUrl ? 2 : 0) + previewCount;
 
@@ -3374,17 +3415,30 @@ function getDefaultLibraryScanParams() {
     scanSize: false,
     downloadBannerImages: true,
     downloadPreviewImages: true,
-    previewLimit: "5",
+    previewLimit: DEFAULT_PREVIEW_LIMIT,
     downloadVideos: false,
   };
 }
 
-ipcMain.handle("scan-library", async (event) => {
+function normalizeScanLibraryRequest(request) {
+  const normalizedRequest =
+    request && typeof request === "object" ? request : {};
+  const resetCache = Boolean(normalizedRequest.resetCache);
+
+  return {
+    resetCache,
+    forceRescan: resetCache || Boolean(normalizedRequest.forceRescan),
+  };
+}
+
+ipcMain.handle("scan-library", async (event, request) => {
   const sessionResult = beginScanSession(event.sender, "library_scan");
 
   if (!sessionResult.success) {
     return sessionResult;
   }
+
+  const scanRequest = normalizeScanLibraryRequest(request);
 
   const scanRelay = {
     webContents: {
@@ -3419,9 +3473,35 @@ ipcMain.handle("scan-library", async (event) => {
   };
 
   try {
+    if (scanRequest.resetCache) {
+      mainWindow.webContents.send("import-progress", {
+        text: "Resetting library scan cache...",
+        progress: 0,
+        total: 1,
+      });
+
+      const resetResult = await resetScanCache(appPaths);
+      if (!resetResult.success) {
+        return {
+          success: false,
+          error: resetResult.error.message,
+          warningsCount: 0,
+          imported: 0,
+          scanned: 0,
+        };
+      }
+
+      mainWindow.webContents.send("import-progress", {
+        text: `Library scan cache reset: ${resetResult.clearedCandidates} candidates and ${resetResult.clearedJobs} jobs cleared`,
+        progress: 0,
+        total: 1,
+      });
+    }
+
     const defaultLibraryScanParams = getDefaultLibraryScanParams();
     const scanResult = await startEnabledSourcesScan(scanRelay, appPaths, {
       ...defaultLibraryScanParams,
+      forceRescan: scanRequest.forceRescan,
       scanSession: sessionResult.session,
     });
 
@@ -3464,8 +3544,40 @@ ipcMain.handle("scan-library", async (event) => {
       };
     }
 
+    const { importableGames, reviewGames } = splitAutoImportableScanGames(
+      scanResult.games,
+    );
+
+    if (importableGames.length === 0) {
+      mainWindow.webContents.send("import-progress", {
+        text:
+          reviewGames.length > 0
+            ? `Scan complete. ${reviewGames.length} candidate(s) need review before import.`
+            : "Scan complete. No auto-importable games found.",
+        progress: 0,
+        total: scanResult.games.length || 0,
+      });
+
+      return {
+        success: true,
+        warningsCount: scanResult.warningsCount || 0,
+        scanned: scanResult.games.length,
+        imported: 0,
+        reviewQueued: reviewGames.length,
+        errorsCount: scanResult.errorsCount || 0,
+      };
+    }
+
+    if (reviewGames.length > 0) {
+      mainWindow.webContents.send("import-progress", {
+        text: `${reviewGames.length} candidate(s) need review and will not be auto-imported.`,
+        progress: 0,
+        total: scanResult.games.length || 0,
+      });
+    }
+
     const importResults = await importGamesInternal({
-      games: scanResult.games,
+      games: importableGames,
       deleteAfter: false,
       scanSize: false,
       downloadBannerImages: defaultLibraryScanParams.downloadBannerImages,
@@ -3482,6 +3594,7 @@ ipcMain.handle("scan-library", async (event) => {
       warningsCount: scanResult.warningsCount || 0,
       scanned: scanResult.games.length,
       imported: importResults.filter((item) => item.success).length,
+      reviewQueued: reviewGames.length,
       errorsCount: scanResult.errorsCount || 0,
     };
   } finally {
@@ -3545,6 +3658,7 @@ function loadConfig() {
         ...(appConfig?.F95Mirrors || {}),
       },
     };
+    appConfig.Metadata.downloadPreviews = true;
   } catch (err) {
     console.error("Error loading config.ini:", err);
     appConfig = defaultConfig;
@@ -3684,9 +3798,7 @@ async function downloadImages(
     ? await getScreensUrlList(atlasId)
     : [];
   const previewCount = downloadPreviewImages
-    ? previewLimit === "Unlimited"
-      ? screenUrls.length
-      : Math.min(parseInt(previewLimit), screenUrls.length)
+    ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
     : 0;
   const totalImages = (bannerUrl ? 3 : 0) + previewCount;
 
@@ -3847,6 +3959,142 @@ async function downloadImages(
   }
 }
 
+function getCachedPreviewCount(recordId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT COUNT(*) as preview_count FROM previews WHERE record_id = ?`,
+      [recordId],
+      (err, row) => {
+        if (err) {
+          console.error("Error counting cached previews:", err);
+          reject(err);
+          return;
+        }
+
+        resolve(Number(row?.preview_count) || 0);
+      },
+    );
+  });
+}
+
+async function refreshLibraryPreviewsInternal(sender) {
+  const installedGames = await getGames(appPaths, 0, null);
+  const targets = buildLibraryPreviewRefreshTargets(installedGames);
+  const totalGames = targets.length;
+
+  if (totalGames === 0) {
+    sender.send("import-progress", {
+      text: "No library games with site screenshots were found.",
+      progress: 0,
+      total: 1,
+    });
+    return {
+      success: true,
+      totalGames: 0,
+      processed: 0,
+      refreshed: 0,
+      skipped: 0,
+      failed: 0,
+    };
+  }
+
+  let processed = 0;
+  let refreshed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  sender.send("import-progress", {
+    text: `Starting screenshot refresh for ${totalGames} games...`,
+    progress: 0,
+    total: totalGames,
+  });
+
+  for (const target of targets) {
+    try {
+      const remoteScreens = await getScreensUrlList(target.atlasId);
+      const cachedPreviewCount = await getCachedPreviewCount(target.recordId);
+
+      if (
+        !shouldRefreshCachedPreviews({
+          cachedPreviewCount,
+          remotePreviewCount: remoteScreens.length,
+        })
+      ) {
+        skipped++;
+        processed++;
+        sender.send("import-progress", {
+          text: `Screenshots already complete for '${target.title}' ${processed}/${totalGames}`,
+          progress: processed,
+          total: totalGames,
+        });
+        continue;
+      }
+
+      sender.send("import-progress", {
+        text: `Refreshing screenshots for '${target.title}' ${processed + 1}/${totalGames}`,
+        progress: processed,
+        total: totalGames,
+      });
+
+      await downloadImages(
+        target.recordId,
+        target.atlasId,
+        (current, totalImages) => {
+          sender.send("import-progress", {
+            text: `Refreshing screenshots for '${target.title}' ${processed + 1}/${totalGames}, ${current}/${totalImages}`,
+            progress: processed,
+            total: totalGames,
+          });
+        },
+        false,
+        true,
+        DEFAULT_PREVIEW_LIMIT,
+        false,
+      );
+
+      sender.send("game-updated", target.recordId);
+      refreshed++;
+      processed++;
+      sender.send("import-progress", {
+        text: `Refreshed screenshots for '${target.title}' ${processed}/${totalGames}`,
+        progress: processed,
+        total: totalGames,
+      });
+    } catch (error) {
+      console.error("Error refreshing library previews:", error);
+      failed++;
+      processed++;
+      sender.send("import-progress", {
+        text: `Failed to refresh screenshots for '${target.title}' ${processed}/${totalGames}: ${error.message}`,
+        progress: processed,
+        total: totalGames,
+      });
+    }
+  }
+
+  sender.send("import-progress", {
+    text:
+      failed > 0
+        ? `Screenshot refresh finished: ${refreshed} updated, ${skipped} skipped, ${failed} failed`
+        : `Screenshot refresh complete: ${refreshed} updated, ${skipped} already complete`,
+    progress: processed,
+    total: totalGames,
+  });
+
+  return {
+    success: failed === 0,
+    totalGames,
+    processed,
+    refreshed,
+    skipped,
+    failed,
+    error:
+      failed > 0
+        ? `${failed} game${failed === 1 ? "" : "s"} failed during screenshot refresh`
+        : "",
+  };
+}
+
 async function launchGame({ execPath, extension, recordId }) {
   if (recordId) {
     const steamId = await getSteamIDbyRecord(recordId);
@@ -3911,6 +4159,8 @@ async function handleContextAction(targetWebContents, data) {
       break;
     case "removeGame":
     case "updateGame":
+    case "rescanLibrary":
+    case "resetCacheAndRescanLibrary":
       forwardContextMenuCommand(targetWebContents, data);
       break;
     default:

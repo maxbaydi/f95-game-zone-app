@@ -100,7 +100,7 @@ html.atlas-scrollbar-reveal *,
 
 *::-webkit-scrollbar-thumb {
   background-color: var(--atlas-scrollbar-thumb-hidden);
-  border-radius: 9999px;
+  border-radius: 0;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -112,4 +112,12 @@ html.atlas-scrollbar-reveal *::-webkit-scrollbar-thumb,
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--atlas-scrollbar-thumb-hover);
+}
+
+details.tags-spoiler > summary .tag-chevron {
+  transition: transform 200ms ease;
+}
+
+details.tags-spoiler[open] > summary .tag-chevron {
+  transform: rotate(180deg);
 }

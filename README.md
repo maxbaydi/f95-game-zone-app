@@ -18,6 +18,7 @@ This project started from Atlas foundations, but it is now being shipped as its 
 - detects save locations in both the game folder and common `%AppData%/RenPy/...` paths
 - backs up saves before destructive operations
 - supports account-based cloud saves through Supabase
+- keeps cloud account access in the main header and scan-source management inside Scan Hub instead of burying both in a generic settings window
 
 ## Cloud saves
 

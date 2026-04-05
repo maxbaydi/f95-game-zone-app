@@ -155,7 +155,7 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
   const anchors = Array.from(firstPostRoot.querySelectorAll("a[href]"));
 
   const getLineContainer = (anchor) =>
-    anchor.closest("p, li, td, blockquote, div") || anchor.parentElement;
+    anchor.closest("p, li, td, blockquote") || anchor.parentElement;
 
   const getLineText = (anchor) => {
     const lineContainer = getLineContainer(anchor);
@@ -212,9 +212,13 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
       lineText: getLineText(anchor),
       contextText: cleanText(
         getLineContainer(anchor)?.innerText ||
-          getLineContainer(anchor)?.textContent ||
+        getLineContainer(anchor)?.textContent ||
           "",
       ),
+      isLightboxImage:
+        anchor.classList.contains("js-lbImage") ||
+        anchor.hasAttribute("data-sub-html") ||
+        Boolean(anchor.querySelector("img.bbImage")),
       order: links.length,
     });
   }

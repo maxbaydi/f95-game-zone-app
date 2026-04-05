@@ -49,6 +49,9 @@ test("scan candidate store upserts and marks imported candidates", async () => {
       isArchive: false,
       detectionScore: 85,
       detectionReasons: ["found game directory", "matched renpy runtime signature"],
+      matchStatus: "matched",
+      matchScore: 182,
+      matchReasons: ["exact Ren'Py metadata matches Atlas title", "creator matches Atlas creator"],
       matchCount: 1,
       status: "detected",
     },
@@ -57,6 +60,8 @@ test("scan candidate store upserts and marks imported candidates", async () => {
   assert.equal(created.length, 1);
   assert.equal(created[0].status, "detected");
   assert.equal(created[0].detectionScore, 85);
+  assert.equal(created[0].matchStatus, "matched");
+  assert.equal(created[0].matchScore, 182);
 
   const updated = await upsertScanCandidates(db, [
     {
@@ -70,6 +75,9 @@ test("scan candidate store upserts and marks imported candidates", async () => {
       executableName: "example.exe",
       detectionScore: 90,
       detectionReasons: ["found typical Ren'Py files inside game directory"],
+      matchStatus: "ambiguous",
+      matchScore: 121,
+      matchReasons: ["title is close to Atlas title"],
       matchCount: 2,
       status: "detected",
     },
@@ -77,6 +85,7 @@ test("scan candidate store upserts and marks imported candidates", async () => {
 
   assert.equal(updated[0].sourceId, 2);
   assert.equal(updated[0].version, "0.2");
+  assert.equal(updated[0].matchStatus, "ambiguous");
   assert.equal(updated[0].matchCount, 2);
 
   const imported = await markScanCandidateImported(db, "C:/games/example", 42);

@@ -124,6 +124,12 @@ function looksLikeDownloadableAttachment(parsedUrl) {
   return /\.(zip|7z|rar|apk|exe|tar|gz|bz2|xz)$/i.test(parsedUrl.pathname);
 }
 
+function looksLikePreviewAttachment(parsedUrl) {
+  return /(?:\.|[-_])(avif|bmp|gif|jpe?g|png|webp|mp4|webm)(?:$|[./_-])/i.test(
+    parsedUrl.pathname,
+  );
+}
+
 function isSocialHost(hostname) {
   return SOCIAL_HOST_PATTERNS.some((pattern) => pattern.test(hostname));
 }
@@ -204,10 +210,15 @@ function classifyThreadDownloadLink(rawLink) {
   const contextText = cleanText(rawLink?.contextText || "");
   const isF95Host = /(^|\.)f95zone\.to$/i.test(hostname);
   const isF95Download = isF95Host && looksLikeF95DownloadPath(parsedUrl);
+  const isPreviewAttachment = isF95Host && looksLikePreviewAttachment(parsedUrl);
   const hasContext = hasDownloadContext(lineText, contextText);
   const isExternalDownloadHost = !isF95Host && isKnownFileHost(hostname);
   const lineLabel = extractLineLabel(lineText, label);
   const variant = detectVariant(lineLabel, lineText, contextText);
+
+  if (rawLink?.isLightboxImage || isPreviewAttachment) {
+    return null;
+  }
 
   if (isSocialHost(hostname) || shouldIgnoreByText({ label, lineText, contextText })) {
     return null;

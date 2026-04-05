@@ -35,17 +35,7 @@ const formatDetailBytes = (value) => {
   return `${scaled.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 };
 
-const getPrimaryVersion = (game) => {
-  if (!game?.versions?.length) {
-    return null;
-  }
-
-  return (
-    game.versions.find(
-      (version) => version.version === game.newestInstalledVersion,
-    ) || game.versions[0]
-  );
-};
+const SCREENSHOTS_GRID_MAX_HEIGHT_PX = 420;
 
 const splitGameTags = (value) => {
   if (!value || typeof value !== "string") {
@@ -69,7 +59,7 @@ const DetailPill = ({ children, tone = "neutral" }) => {
 
   return (
     <span
-      className={`rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] ${toneClass}`}
+      className={`border px-1.5 py-0.5 text-[10px] uppercase tracking-[0.12em] ${toneClass}`}
     >
       {children}
     </span>
@@ -96,8 +86,8 @@ const LibraryDetailsPanel = ({
   onOpenFolder,
   onRemoveGame,
   onPreviewSelect,
+  onOpenCloudAuth,
 }) => {
-  const primaryVersion = useMemo(() => getPrimaryVersion(game), [game]);
   const versionList = useMemo(() => {
     if (!game?.versions?.length) {
       return [];
@@ -137,7 +127,7 @@ const LibraryDetailsPanel = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-sm text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10"
+            className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10"
           >
             Close
           </button>
@@ -180,86 +170,57 @@ const LibraryDetailsPanel = ({
                         <DetailPill>{game.category}</DetailPill>
                       )}
                       {game.rating && (
-                        <DetailPill>{`Rating ${game.rating}`}</DetailPill>
-                      )}
-                    </div>
-
-                    <div className="rounded-xl border border-border/70 bg-canvas/40 p-3">
-                      <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
-                        Version Status
-                      </div>
-                      <div className="mt-2 flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium text-text">
-                            {game.isUpdateAvailable
-                              ? "Update available"
-                              : "Installed version is current"}
-                          </div>
-                          <div className="mt-1 text-xs opacity-70">
-                            Installed:{" "}
-                            {game.newestInstalledVersion || "Unknown"}
-                          </div>
-                          <div className="text-xs opacity-70">
-                            Site latest: {game.latestVersion || "Unknown"}
-                          </div>
-                        </div>
-                        {game.isUpdateAvailable && (
-                          <DetailPill tone="warning">Needs update</DetailPill>
-                        )}
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            primaryVersion && onPlayGame?.(primaryVersion, game)
-                          }
-                          className="rounded bg-accent px-3 py-2 text-sm text-text hover:bg-selected"
-                          disabled={!primaryVersion?.exec_path}
-                        >
-                          Play
-                        </button>
-                        <button
-                          onClick={() =>
-                            primaryVersion &&
-                            onOpenFolder(primaryVersion.game_path)
-                          }
-                          className="rounded bg-secondary px-3 py-2 text-sm hover:bg-selected"
-                          disabled={!primaryVersion?.game_path}
-                        >
-                          Open Installed Folder
-                        </button>
-                        {game.isUpdateAvailable && (
-                          <button
-                            onClick={() => onUpdateGame?.(game)}
-                            className="rounded bg-accent px-3 py-2 text-sm text-text hover:bg-selected"
-                            disabled={!game.siteUrl}
+                        <span className="inline-flex items-center gap-0.5 border border-border/85 bg-white/5 px-1.5 py-0.5 text-[10px] text-text backdrop-blur-sm">
+                          <span
+                            className="material-symbols-outlined text-[14px] leading-none text-glam"
+                            style={{ fontVariationSettings: "'FILL' 1" }}
+                            aria-hidden
                           >
-                            {game.latestVersion
-                              ? `Update To ${game.latestVersion}`
-                              : "Update Now"}
-                          </button>
-                        )}
-                        <button
-                          onClick={onOpenPage}
-                          className="rounded bg-accent px-3 py-2 text-sm text-text hover:bg-selected"
-                          disabled={!game.siteUrl}
-                        >
-                          Open Game Page
-                        </button>
-                        <button
-                          onClick={() => onRemoveGame?.(game)}
-                          className="rounded border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-100 transition hover:bg-red-500/20"
-                        >
-                          Remove Game
-                        </button>
-                      </div>
+                            star
+                          </span>
+                          <span className="tabular-nums tracking-normal">
+                            {game.rating}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-border bg-secondary/10 p-4">
+                <section className="border border-border bg-secondary/10 p-4">
                   <div className="mb-3 text-[11px] uppercase tracking-[0.18em] opacity-55">
-                    Installed Versions
+                    Installed versions
                   </div>
+
+                  <div className="mb-3 border border-border/70 bg-canvas/40 p-3">
+                    <div className="text-sm font-medium text-text">
+                      {game.isUpdateAvailable
+                        ? "Update available"
+                        : "Installed version is current"}
+                    </div>
+                    <div className="mt-1 text-xs opacity-70">
+                      Installed: {game.newestInstalledVersion || "Unknown"}
+                    </div>
+                    <div className="text-xs opacity-70">
+                      Site latest: {game.latestVersion || "Unknown"}
+                    </div>
+                    {game.isUpdateAvailable && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <DetailPill tone="warning">Needs update</DetailPill>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateGame?.(game)}
+                          className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-40"
+                          disabled={!game.siteUrl}
+                        >
+                          {game.latestVersion
+                            ? `Update to ${game.latestVersion}`
+                            : "Update now"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {versionList.length === 0 ? (
                     <div className="text-sm opacity-60">
                       No installed versions stored yet.
@@ -269,11 +230,11 @@ const LibraryDetailsPanel = ({
                       {versionList.map((version) => (
                         <div
                           key={`${version.version}-${version.game_path}`}
-                          className="rounded-xl border border-border/70 bg-canvas/40 p-3"
+                          className="border border-border/70 bg-canvas/40 p-3"
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="font-medium text-text">
                                   {version.version || "Unknown"}
                                 </span>
@@ -286,19 +247,23 @@ const LibraryDetailsPanel = ({
                                 {version.game_path}
                               </div>
                             </div>
-                            <button
-                              onClick={() => onPlayGame?.(version, game)}
-                              className="rounded bg-accent px-3 py-1 text-sm text-text hover:bg-selected disabled:opacity-60"
-                              disabled={!version.exec_path}
-                            >
-                              Play
-                            </button>
-                            <button
-                              onClick={() => onOpenFolder(version.game_path)}
-                              className="rounded bg-secondary px-3 py-1 text-sm hover:bg-selected"
-                            >
-                              Open
-                            </button>
+                            <div className="flex shrink-0 items-start gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => onPlayGame?.(version, game)}
+                                className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-60"
+                                disabled={!version.exec_path}
+                              >
+                                Play
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onOpenFolder(version.game_path)}
+                                className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
+                              >
+                                Open
+                              </button>
+                            </div>
                           </div>
 
                           <div className="mt-3 grid grid-cols-2 gap-2 text-xs opacity-75">
@@ -313,6 +278,32 @@ const LibraryDetailsPanel = ({
                       ))}
                     </div>
                   )}
+
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-border/40 pt-3">
+                    <button
+                      type="button"
+                      onClick={onOpenPage}
+                      disabled={!game.siteUrl}
+                      className="inline-flex h-8 w-8 items-center justify-center border border-border bg-secondary text-text hover:bg-selected disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Open game page"
+                      title="Open game page"
+                    >
+                      <span className="material-symbols-outlined text-[20px] leading-none">
+                        open_in_new
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveGame?.(game)}
+                      className="inline-flex h-8 w-8 items-center justify-center border border-red-500/40 bg-red-500/10 text-red-100 hover:bg-red-500/20"
+                      aria-label="Remove game"
+                      title="Remove game"
+                    >
+                      <span className="material-symbols-outlined text-[20px] leading-none">
+                        delete
+                      </span>
+                    </button>
+                  </div>
                 </section>
 
                 <section className="rounded-2xl border border-border bg-secondary/10 p-4">
@@ -328,21 +319,30 @@ const LibraryDetailsPanel = ({
                     value={formatDetailDate(game.release_date)}
                   />
                   {tags.length > 0 && (
-                    <div className="pt-3">
-                      <div className="mb-2 text-[11px] uppercase tracking-[0.18em] opacity-55">
+                    <details className="tags-spoiler pt-3">
+                      <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] uppercase tracking-[0.18em] opacity-55 [&::-webkit-details-marker]:hidden">
+                        <span
+                          className="tag-chevron material-symbols-outlined text-[16px] transition-transform duration-200"
+                          aria-hidden
+                        >
+                          expand_more
+                        </span>
                         Tags
-                      </div>
-                      <div className="flex flex-wrap gap-2">
+                        <span className="normal-case tracking-normal text-text/45">
+                          ({tags.length})
+                        </span>
+                      </summary>
+                      <div className="mt-2 flex flex-wrap gap-2">
                         {tags.map((tag) => (
                           <span
                             key={tag}
-                            className="rounded-full border border-border bg-canvas/40 px-2 py-1 text-xs"
+                            className="border border-border bg-canvas/40 px-1.5 py-0.5 text-[11px]"
                           >
                             {tag}
                           </span>
                         ))}
                       </div>
-                    </div>
+                    </details>
                   )}
                   <div className="pt-4">
                     <div className="mb-2 text-[11px] uppercase tracking-[0.18em] opacity-55">
@@ -354,7 +354,10 @@ const LibraryDetailsPanel = ({
                   </div>
                 </section>
 
-                <window.LibrarySaveSyncPanel game={game} />
+                <window.LibrarySaveSyncPanel
+                  game={game}
+                  onOpenCloudAuth={onOpenCloudAuth}
+                />
 
                 <section className="rounded-2xl border border-border bg-secondary/10 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -372,20 +375,26 @@ const LibraryDetailsPanel = ({
                       No screenshots downloaded for this game yet.
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      {previews.map((previewUrl, index) => (
-                        <button
-                          key={`${previewUrl}-${index}`}
-                          onClick={() => onPreviewSelect(previewUrl)}
-                          className="overflow-hidden rounded-xl border border-border bg-canvas/40 transition-transform hover:scale-[1.01]"
-                        >
-                          <img
-                            src={previewUrl}
-                            alt={`${displayTitle} screenshot ${index + 1}`}
-                            className="h-[120px] w-full object-cover"
-                          />
-                        </button>
-                      ))}
+                    <div
+                      className="overflow-y-auto overflow-x-hidden pr-0.5"
+                      style={{ maxHeight: SCREENSHOTS_GRID_MAX_HEIGHT_PX }}
+                    >
+                      <div className="grid grid-cols-2 gap-3 pb-1">
+                        {previews.map((previewUrl, index) => (
+                          <button
+                            key={`${previewUrl}-${index}`}
+                            type="button"
+                            onClick={() => onPreviewSelect(index)}
+                            className="overflow-hidden rounded-xl border border-border bg-canvas/40 transition-transform hover:scale-[1.01]"
+                          >
+                            <img
+                              src={previewUrl}
+                              alt={`${displayTitle} screenshot ${index + 1}`}
+                              className="h-[120px] w-full object-cover"
+                            />
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </section>

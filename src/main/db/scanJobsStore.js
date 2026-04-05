@@ -140,8 +140,28 @@ function listScanJobs(db, limit = 10) {
   });
 }
 
+/**
+ * @param {import("sqlite3").Database} db
+ * @returns {Promise<{ deleted: number }>}
+ */
+function clearScanJobs(db) {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM scan_jobs`, [], function onDelete(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve({
+        deleted: this.changes || 0,
+      });
+    });
+  });
+}
+
 module.exports = {
   createScanJob,
   finishScanJob,
   listScanJobs,
+  clearScanJobs,
 };

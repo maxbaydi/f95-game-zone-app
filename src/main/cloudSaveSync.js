@@ -11,8 +11,13 @@ const {
 } = require("./supabase/client");
 const {
   backupGameSaves,
-  resolveSaveProfileDestinationPath,
 } = require("./saveVault");
+const {
+  buildTrackedProfileDescriptor,
+  listSaveProfileFiles,
+  normalizeIdentityToken,
+  resolveSaveProfileDestinationPath,
+} = require("./saveProfileStrategies");
 
 function createTempPath(appPaths, name) {
   const targetPath = path.join(
@@ -34,40 +39,13 @@ async function hashFile(filePath) {
   });
 }
 
-async function walkFiles(rootPath, prefixPath = "") {
-  const stat = await fs.promises.stat(rootPath);
-  if (stat.isFile()) {
-    return [
-      {
-        filePath: rootPath,
-        relativePath: prefixPath,
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-      },
-    ];
-  }
-
-  const entries = await fs.promises.readdir(rootPath, { withFileTypes: true });
-  const collected = [];
-
-  for (const entry of entries) {
-    const nextRelativePath = prefixPath
-      ? `${prefixPath}/${entry.name}`
-      : entry.name;
-    collected.push(
-      ...(await walkFiles(path.join(rootPath, entry.name), nextRelativePath)),
-    );
-  }
-
-  return collected;
-}
-
 function getArchiveRoot(profile, index) {
-  const suffix =
-    profile.strategy?.type === "renpy-appdata"
-      ? `renpy-${profile.strategy?.payload?.folderName || index}`
-      : `local-${index}`;
-  return `profiles/${suffix}`;
+  const descriptor = buildTrackedProfileDescriptor(profile, index);
+  if (descriptor?.vaultRelativePath) {
+    return descriptor.vaultRelativePath.replace(/\\/g, "/");
+  }
+
+  return `profiles/misc/${normalizeIdentityToken(profile?.provider || "", `profile-${index}`)}`;
 }
 
 function getRemotePaths(authUserId, cloudIdentity) {
@@ -98,7 +76,7 @@ async function buildLocalSaveManifest(identity, profiles) {
 
   for (const [index, profile] of profiles.entries()) {
     const archiveRoot = getArchiveRoot(profile, index);
-    const files = await walkFiles(profile.rootPath);
+    const files = await listSaveProfileFiles(profile);
 
     for (const file of files) {
       const archivePath = `${archiveRoot}/${file.relativePath}`.replace(/\\/g, "/");
@@ -173,7 +151,7 @@ async function buildCloudSaveArchive(appPaths, identity, profiles) {
 
   for (const [index, profile] of profiles.entries()) {
     const archiveRoot = getArchiveRoot(profile, index);
-    const files = await walkFiles(profile.rootPath);
+    const files = await listSaveProfileFiles(profile);
 
     for (const file of files) {
       const archivePath = `${archiveRoot}/${file.relativePath}`.replace(/\\/g, "/");

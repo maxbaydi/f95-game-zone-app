@@ -1,46 +1,14 @@
-const Metadata = () => {
-  const [downloadPreviews, setDownloadPreviews] = React.useState(false);
-
-  React.useEffect(() => {
-    window.electronAPI.getConfig().then((config) => {
-      const metadataSettings = config.Metadata || {};
-      setDownloadPreviews(metadataSettings.downloadPreviews || false);
-    });
-  }, []);
-
-  const saveSettings = (updatedSettings) => {
-    window.electronAPI.getConfig().then((config) => {
-      const newConfig = {
-        ...config,
-        Metadata: { ...config.Metadata, ...updatedSettings },
-      };
-      window.electronAPI.saveSettings(newConfig);
-    });
-  };
-
-  const handleDownloadPreviewsChange = () => {
-    setDownloadPreviews(!downloadPreviews);
-    saveSettings({ downloadPreviews: !downloadPreviews });
-  };
-
-  return (
-    <div className="p-5 text-text">
-      <div className="flex items-center mb-2">
-        <label className="flex-1">Download Image Previews</label>
-        <input
-          type="checkbox"
-          className="mr-5"
-          checked={downloadPreviews}
-          onChange={handleDownloadPreviewsChange}
-        />
-      </div>
-      <p className="text-xs opacity-50 mb-2">
-        This will grab all preview images when adding or updating existing
-        games.
+const Metadata = () => (
+  <div className="p-5 text-text">
+    <div className="rounded-2xl border border-border bg-primary/40 p-4">
+      <div className="text-lg font-semibold">Metadata downloads</div>
+      <p className="mt-2 text-sm opacity-70">
+        Preview images are now downloaded automatically for library installs and
+        updates. The old toggle was removed because it only added confusion and
+        did not improve the real workflow.
       </p>
-      <div className="border-t border-text opacity-25 my-2"></div>
     </div>
-  );
-};
+  </div>
+);
 
 window.Metadata = Metadata;

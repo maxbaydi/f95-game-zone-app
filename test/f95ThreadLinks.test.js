@@ -81,3 +81,27 @@ test("normalizeThreadDownloadLinks groups mirrors by platform variants", () => {
   assert.equal(result.variants[0].links.length, 2);
   assert.equal(result.variants[1].links.length, 2);
 });
+
+test("normalizeThreadDownloadLinks ignores screenshot attachments even when the container text includes download labels", () => {
+  const result = normalizeThreadDownloadLinks([
+    {
+      url: "https://f95zone.to/attachments/screenshot-png.12345/",
+      label: "01.png",
+      lineText: "DOWNLOAD Win/Linux: GOFILE - PIXELDRAIN 01.png",
+      contextText:
+        "DOWNLOAD Win/Linux: GOFILE - PIXELDRAIN Mac: GOFILE 01.png 02.png",
+      isLightboxImage: true,
+      order: 0,
+    },
+    {
+      url: "https://pixeldrain.com/u/windows-build",
+      label: "PIXELDRAIN",
+      lineText: "Win/Linux: GOFILE - PIXELDRAIN",
+      contextText: "DOWNLOAD Win/Linux: GOFILE - PIXELDRAIN",
+      order: 1,
+    },
+  ]);
+
+  assert.equal(result.links.length, 1);
+  assert.equal(result.links[0].host, "pixeldrain.com");
+});

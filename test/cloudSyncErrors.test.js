@@ -1,7 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { getCloudSyncErrorDetails } = require("../src/shared/cloudSyncErrors");
+const {
+  getCloudSyncErrorDetails,
+  getCloudSyncMessageIfPresent,
+} = require("../src/shared/cloudSyncErrors");
 
 test("cloud sync errors convert storage size-limit failures into user-facing upload text", () => {
   const details = getCloudSyncErrorDetails(
@@ -45,4 +48,18 @@ test("cloud sync errors fall back to a generic upload-safe message for unknown f
   assert.match(details.userMessage, /could not back up your saves/i);
   assert.match(details.userMessage, /local saves are still safe on this pc/i);
   assert.doesNotMatch(details.userMessage, /9182/i);
+});
+
+test("cloud sync message helper stays silent when there is no error", () => {
+  assert.equal(getCloudSyncMessageIfPresent(""), "");
+  assert.equal(getCloudSyncMessageIfPresent(null), "");
+  assert.equal(getCloudSyncMessageIfPresent(undefined), "");
+});
+
+test("cloud sync message helper returns user-facing text when an error exists", () => {
+  const message = getCloudSyncMessageIfPresent("Object not found", {
+    action: "restore",
+  });
+
+  assert.equal(message, "No cloud backup was found for this game yet.");
 });

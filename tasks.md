@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-04-04
+Last updated: 2026-04-05
 
 ## How To Read This File
 
@@ -14,12 +14,357 @@ Last updated: 2026-04-04
 | Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------- | ----------- | -------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Stage 1. Local core              | in_progress |      95% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, and Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall now exist. Scanner is still legacy, and the new F95 flow still needs manual end-to-end smoke with a real login. |
-| Stage 2. Save intelligence       | in_progress |      62% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app detects install-relative save roots plus `%AppData%/RenPy/*`, local save vault can now back up and restore profile-based roots, and the library details panel can inspect/refresh profile detection. Deeper conflict resolution and more engine-specific save adapters are still missing.                                                                                                                                                                                                  |
+| Stage 1. Local core              | in_progress |      98% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall, a confidence-ranked local scanner matcher with Ren'Py metadata extraction, runtime/helper-path suppression, and a safe auto-import gate that leaves ambiguous candidates out of the installed library now exist. Large messy-library manual smoke is still pending. |
+| Stage 2. Save intelligence       | in_progress |      79% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app now detects install-relative save roots, RPG Maker root save files, `%AppData%/RenPy/*`, Unity `LocalLow`, Unreal save roots, Godot `app_userdata`, and packaged HTML app storage, while local save vault and cloud sync can back up/restore those profile strategies safely. Richer conflict UX and live manual smoke across real game installs are still missing.                                                                                                                                      |
 | Stage 3. Supabase                | in_progress |      58% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. The service-role key is intentionally not used in the shipped app. First live bucket/auth smoke is still pending.                                                                                                                                                                                                                                                      |
-| Stage 4. Sync UX                 | in_progress |      54% | Settings now have a dedicated Cloud Saves page for config/auth, and the library details panel exposes refresh/upload/restore actions plus sync state. Rich conflict prompts, remote history browsing and background auto-sync are still missing.                                                                                                                                                                                                                                                                               |
-| Stage 5. Quality hardening       | partial     |      49% | CI/check foundation, migration tests, scan-source store tests, Ren'Py detector tests, scan-session tests, scan-candidate store tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                                                                                                      |
-| MVP total                        | in_progress |      73% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Stage 4. Sync UX                 | in_progress |      56% | Settings now have a dedicated Cloud Saves page for config/auth, and the library details panel exposes refresh/upload/restore actions plus sync state. False warning rendering after successful backup is fixed, but richer conflict prompts, remote history browsing and background auto-sync are still missing.                                                                                                                                                                                                                                               |
+| Stage 5. Quality hardening       | partial     |      60% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                              |
+| MVP total                        | in_progress |      79% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### 2026-04-05 — Stage 4 sync UX: stop showing fake cloud-backup errors after success
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes a user-facing trust bug where the library panel could show a cloud-backup failure banner even after a successful upload with a valid `Last backup` timestamp
+
+What was done:
+
+- Fixed cloud-save UI so it only renders a user-facing error when there is an actual error string.
+- Successful backups with `last_error = ""` no longer produce the fake warning `Could not back up your saves to the cloud right now.`
+- Applied the same guard to the cloud auth panel so empty auth errors do not generate phantom failure messages there either.
+
+How it was implemented:
+
+- Shared error helper:
+  - `src/shared/cloudSyncErrors.js`
+  - added `getCloudSyncMessageIfPresent(...)`, which returns an empty string when no raw error exists and otherwise reuses the existing user-facing error mapping
+- Library cloud panel:
+  - `src/core/library/LibrarySaveSyncPanel.jsx`
+  - replaced unconditional `getCloudSyncErrorDetails(...).userMessage` usage with the new guarded helper
+- Cloud auth panel:
+  - `src/core/cloud/CloudAuthPanel.jsx`
+  - applied the same fix so empty auth-state errors stay silent
+
+Files changed in this slice:
+
+- `src/shared/cloudSyncErrors.js`
+- `src/core/library/LibrarySaveSyncPanel.jsx`
+- `src/core/cloud/CloudAuthPanel.jsx`
+- `test/cloudSyncErrors.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/cloudSyncErrors.test.js test/saveSyncStateStore.test.js test/saveSyncPlan.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- no renderer-level interaction test exists yet for the save panel itself; the regression is covered at the shared helper level, not with a mounted UI test
+
+### 2026-04-05 — Stage 1 scanner hardening: stop importing runtime trash and unresolved matches
+
+- Status: partial
+- Progress: 95%
+- ТЗ coverage: closes the practical failure mode discovered on a real user library where runtime/helper folders and ambiguous matches could still land in the installed library
+
+What was done:
+
+- Library rescan no longer auto-imports everything the scanner finds.
+- Only `matched` scan candidates are auto-imported into the installed library.
+- `ambiguous` and `unmatched` candidates stay in the discovery queue for review instead of silently polluting `games` / `versions`.
+- Added runtime/helper-path suppression so nested infrastructure folders are not treated as game roots.
+- Added extra executable/file blacklist coverage for common junk like `readme.html`, `Common.ExtProtocol.Executor.exe`, and `ReiPatcher.exe`.
+- HTML game detection now treats `index.html` as a generic launcher name and prefers the folder title.
+
+How it was implemented:
+
+- Auto-import gate:
+  - `src/main/scanCandidateImportPolicy.js`
+  - `src/main.js`
+  - introduced a dedicated split between auto-importable scan results and review-required results
+  - library rescan now imports only matched candidates and reports the review queue count
+- Nested runtime suppression:
+  - `src/core/scanners/f95scanner.js`
+  - added infrastructure-segment filtering for nested candidates such as `game/fonts`, `*_Data/Managed`, `Translators`, `BepInEx`, `RenPy`, `www`, `resources`, and similar runtime-only paths
+- Identity cleanup:
+  - `src/main/scanIdentity.js`
+  - `index.html` is now treated as a generic launcher label so folder naming wins for HTML titles
+
+Files changed in this slice:
+
+- `src/main/scanCandidateImportPolicy.js`
+- `src/main.js`
+- `src/core/scanners/f95scanner.js`
+- `src/main/scanIdentity.js`
+- `test/scanCandidateImportPolicy.test.js`
+- `test/scanCacheStores.test.js`
+- `test/scanIdentity.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/scanMatchUtils.test.js test/scanIdentity.test.js test/scanAtlasMatcher.test.js test/scanCandidatesStore.test.js test/scanCacheStores.test.js test/scanCandidateImportPolicy.test.js test/migrations.test.js test/scanTitleParser.test.js test/renpyDetector.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- already imported trash rows in the current live profile are not automatically cleaned yet; they were created before the new gate and still need an explicit cleanup/reconciliation pass
+- threshold tuning for high-score ambiguous cases still needs real-library calibration rather than guesswork
+
+### 2026-04-05 — Stage 1 scanner hardening: confidence-ranked F95/Atlas matching
+
+- Status: partial
+- Progress: 92%
+- ТЗ coverage: materially closes the main scanner gap by replacing first-hit Atlas linking with a safer scored matcher that can identify previously downloaded F95 games without silently auto-binding ambiguous titles
+
+What was done:
+
+- Added a dedicated confidence-ranked Atlas/F95 matcher for scan candidates.
+- Local scan identity now pulls stronger signals from:
+  - folder names
+  - executable names
+  - configured scan path formats
+  - Ren'Py `game/options.rpy` title/version metadata when available
+- Ambiguous matches are no longer auto-selected during scan/importer refresh flows.
+- Scan candidate persistence now stores match status, match score and match reasons instead of only raw match count.
+
+How it was implemented:
+
+- Shared matching primitives:
+  - `src/shared/scanMatchUtils.js`
+  - added canonical text/version/engine normalization plus deterministic similarity helpers for the scanner domain
+- Local identity extraction:
+  - `src/main/scanIdentity.js`
+  - builds a candidate fingerprint from local folder layout, executable names, nested creator/title/version folders and Ren'Py `options.rpy`
+- Atlas/F95 ranking:
+  - `src/main/scanAtlasMatcher.js`
+  - preloads Atlas/F95 rows once per scan job, indexes aliases (`title`, `short_name`, `id_name`, `original_name`), scores title/creator/version/engine agreement, and only auto-links when score plus winner margin are strong enough
+- Scanner integration:
+  - `src/core/scanners/f95scanner.js`
+  - `src/main/scanRunner.js`
+  - `src/main.js`
+  - scan results now carry `matchStatus`, `matchScore`, `matchReasons`, and `autoMatched`
+  - enabled-source scans build one matcher index and reuse it across the full run
+  - single-folder importer scans also reuse the same safer matcher path
+- Persistence + architecture:
+  - `src/main/db/migrations/006_scan_candidate_match_metadata.js`
+  - `src/main/db/migrations/index.js`
+  - `src/main/db/scanCandidatesStore.js`
+  - persisted match metadata was added to `scan_candidates`
+  - created ADR `docs/adr/0005-confidence-ranked-f95-matching.md`
+- Importer safety:
+  - `src/core/importer/importer.jsx`
+  - ambiguous Atlas results now stay unselected until the user explicitly chooses one instead of silently collapsing to the first option
+
+Files changed in this slice:
+
+- `src/shared/scanMatchUtils.js`
+- `src/shared/scanTitleParser.js`
+- `src/main/scanIdentity.js`
+- `src/main/scanAtlasMatcher.js`
+- `src/main/scanRunner.js`
+- `src/main.js`
+- `src/core/scanners/f95scanner.js`
+- `src/core/importer/importer.jsx`
+- `src/main/db/migrations/006_scan_candidate_match_metadata.js`
+- `src/main/db/migrations/index.js`
+- `src/main/db/scanCandidatesStore.js`
+- `docs/adr/0005-confidence-ranked-f95-matching.md`
+- `test/scanMatchUtils.test.js`
+- `test/scanIdentity.test.js`
+- `test/scanAtlasMatcher.test.js`
+- `test/scanCandidatesStore.test.js`
+- `test/scanCacheStores.test.js`
+- `test/migrations.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/scanMatchUtils.test.js test/scanIdentity.test.js test/scanAtlasMatcher.test.js test/scanCandidatesStore.test.js test/scanCacheStores.test.js test/migrations.test.js test/scanTitleParser.test.js test/renpyDetector.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- no large real-library manual smoke has been run yet to calibrate thresholds against messy user folders and same-title collisions in the wild
+- the legacy importer refresh action still uses the old manual Atlas search endpoint for explicit re-checks; the dangerous auto-select part is gone, but that flow still deserves migration onto the same ranked matcher later
+
+### 2026-04-05 — Stage 2 save intelligence: engine-aware save detection for popular Windows engines
+
+- Status: partial
+- Progress: 79%
+- ТЗ coverage: closes the biggest practical gap in save intelligence by replacing the renpy-only detector with engine-aware save profile discovery that can now feed backup, restore and cloud sync flows for the most common Windows engine layouts we actually see in the library
+
+What was done:
+
+- Replaced the renpy-only save refresh path with a general `detectSaveProfiles(...)` pipeline in the Electron main process.
+- Added engine-aware save adapters for:
+  - `Ren'Py`
+  - `RPG Maker`
+  - `Unity`
+  - `Unreal Engine`
+  - `Godot`
+  - packaged `HTML/NW.js/Electron` storage
+- Added support for root-level save file sets, which is required for older `RPG Maker` variants that do not use a dedicated `save/` directory.
+- Extended save vault backup/restore and cloud manifest/archive generation so the new profile strategies are not display-only.
+- Extended safe game removal so supported external save roots under `AppData`, `Local AppData` and `LocalLow` can be deleted deliberately instead of being treated as unknown/unsafe paths.
+- Updated the library save-sync panel labels so the UI now describes the detected save location type without leaking backend/internal details.
+
+How it was implemented:
+
+- Save profile detection:
+  - `src/main/detectors/saveProfileDetector.js`
+  - added engine normalization plus Windows-path heuristics for:
+    - install-relative save directories
+    - install-root file-pattern save sets
+    - `AppData` / `Local AppData` / `LocalLow` save roots
+- Save strategy model:
+  - `src/main/saveProfileStrategies.js`
+  - introduced reusable strategy helpers for:
+    - destination path resolution
+    - tracked-profile normalization
+    - file-pattern matching
+    - enumerating files from a save profile without copying an entire game folder by mistake
+- Main-process integration:
+  - `src/main/saveProfiles.js`
+  - `src/main/saveVault.js`
+  - `src/main/cloudSaveSync.js`
+  - `src/main/gameRemoval.js`
+  - switched save detection, vault backup/restore, cloud archive/manifest building and safe deletion to the new profile strategy layer
+- UI integration:
+  - `src/core/library/LibrarySaveSyncPanel.jsx`
+  - mapped new providers/strategies to product-facing labels and updated the empty-state copy
+- Compatibility:
+  - `src/main/detectors/renpySaveDetector.js`
+  - kept the existing Ren'Py-specific detector exports alive while reusing them from the new general detector path instead of breaking older code/tests
+
+Files changed in this slice:
+
+- `src/main/detectors/saveProfileDetector.js`
+- `src/main/saveProfileStrategies.js`
+- `src/main/saveProfiles.js`
+- `src/main/saveVault.js`
+- `src/main/cloudSaveSync.js`
+- `src/main/gameRemoval.js`
+- `src/main/detectors/renpySaveDetector.js`
+- `src/core/library/LibrarySaveSyncPanel.jsx`
+- `docs/adr/0005-engine-save-profile-strategies.md`
+- `test/saveProfileDetector.test.js`
+- `test/saveVault.test.js`
+- `test/gameRemoval.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/saveProfileDetector.test.js test/renpySaveDetector.test.js test/saveVault.test.js test/gameRemoval.test.js`
+- `npm run typecheck`
+- `npm run lint`
+- `npm test`
+
+What is still missing here:
+
+- `Unity`, `Godot` and packaged `HTML` app-data detection still relies on title/company folder matching heuristics, so heavily renamed projects can still be missed
+- no manual smoke has been run yet against a real installed sample for each supported engine family
+- save conflict UX is still basic; this slice improves detection/transport, not human conflict resolution or history browsing
+
+### 2026-04-05 — Stage 1 media policy: screenshot cap reduced from unlimited to 20
+
+- Status: partial
+- Progress: 97%
+- ТЗ coverage: tightens screenshot caching so imports, rescans and post-import backfill stop at a bounded count instead of downloading unbounded media per game
+
+What was done:
+
+- Replaced the new unlimited screenshot behavior with a hard cap of `20`.
+- Applied the same cap to:
+  - default library rescans
+  - importer defaults
+  - manual per-game preview refresh
+  - bulk cached screenshot backfill for already imported games
+- Added a dedicated resolver so any legacy `Unlimited` value is coerced down to `20` in the Electron main process instead of slipping through old call paths.
+
+How it was implemented:
+
+- Main media limit handling:
+  - `src/main/previewLimit.js`
+  - centralized `DEFAULT_PREVIEW_LIMIT = "20"` and `resolvePreviewDownloadCount()`
+  - old non-numeric inputs like `Unlimited` are now clamped to `20`
+- Main integration:
+  - `src/main.js`
+  - image download flows now use the shared preview-limit resolver instead of special-casing `Unlimited`
+- Importer defaults:
+  - `src/core/importer/importer.jsx`
+  - default preview limit displayed in the importer is now `20`
+
+Files changed in this slice:
+
+- `src/main/previewLimit.js`
+- `src/main.js`
+- `src/core/importer/importer.jsx`
+- `test/previewLimit.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/previewLimit.test.js`
+
+What is still missing here:
+
+- no manual Electron smoke was run yet to verify the UX copy/progress against a game with more than 20 remote screenshots
+
+### 2026-04-05 — Stage 1 library media backfill: cached screenshot refresh without cache reset
+
+- Status: partial
+- Progress: 97%
+- ТЗ coverage: closes the real gap left after removing the old screenshot cap by giving already-imported games a safe way to backfill missing cached screenshots without abusing reset-cache rescans
+
+What was done:
+
+- Added a dedicated bulk screenshot refresh flow for already imported library games with Atlas/F95 mappings.
+- Existing games no longer need `Reset Cache & Rescan Library` just to backfill screenshots after the preview cap was raised.
+- Hardened F95 thread-link normalization so screenshot/lightbox attachments are ignored even if the surrounding container text contains `DOWNLOAD`.
+
+How it was implemented:
+
+- Main process media refresh:
+  - `src/main/libraryPreviewRefresh.js`
+  - `src/main.js`
+  - introduced a focused bulk-refresh target builder plus a cached-vs-remote decision helper
+  - added a new `refresh-library-previews` IPC that iterates installed games with `atlas_id`, compares local preview count against remote `f95_zone_data.screens`, and reuses the existing `downloadImages(..., false, true, "Unlimited", false)` path only when backfill is actually needed
+- Renderer/UI entrypoint:
+  - `src/renderer.js`
+  - `src/App.jsx`
+  - exposed the new IPC to renderer and added a product-facing `Refresh Cached Screenshots` action to the library rescan menu
+- F95 live thread guard:
+  - `src/main/f95/threadInspector.js`
+  - `src/main/f95/threadLinks.js`
+  - attachment/lightbox screenshot anchors now carry image metadata from inspection and are filtered out during mirror normalization instead of relying on fragile container text
+
+Files changed in this slice:
+
+- `src/main/libraryPreviewRefresh.js`
+- `src/main/f95/threadInspector.js`
+- `src/main/f95/threadLinks.js`
+- `src/main.js`
+- `src/renderer.js`
+- `src/App.jsx`
+- `test/libraryPreviewRefresh.test.js`
+- `test/f95ThreadLinks.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/libraryPreviewRefresh.test.js test/f95ThreadLinks.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- no full Electron manual smoke was run yet for the new bulk screenshot refresh action on a large real library
+- the legacy `GameDetailsWindow` still has its old per-record preview controls; the new bulk action fixes the workflow gap, but that older window is still not aligned with the newer library UX
 
 ### 2026-04-05 — Stage 1 mirror resolver extension: Google Drive support and live anonfile host-family recognition
 
@@ -2429,3 +2774,106 @@ Impact on overall progress:
 
 - closes the gap between “manual backup UI exists” and “cloud save continuity actually works in product terms”
 - keeps the architecture aligned with the project rule that binary user data belongs in managed filesystem storage, not SQLite blobs
+
+## 2026-04-05 — Library sorting refresh and sort semantics
+
+What was done:
+
+- fixed the library grid so it actually refreshes after sort order changes instead of keeping stale virtualized cells
+- clarified the library sort labels for engine and status so the UI states the intended ordering instead of making the user guess
+- added a user-facing sort description under the toolbar for every library sort mode
+- extended regression coverage for the shared sort contract
+
+How it was implemented:
+
+- expanded `src/shared/librarySort.js` sort option metadata with user-facing descriptions and exported `getLibrarySortDescription()`
+- updated `src/App.jsx` with a centralized `refreshLibraryGrid()` helper and triggered it after visible library order changes, resize recalculations, game updates, and deletions
+- widened the sort select in `src/App.jsx`, added a tooltip, and rendered a small helper line below the toolbar controls
+- extended `test/librarySort.test.js` with assertions for the engine and status sort descriptions
+
+What remains:
+
+- run a manual desktop smoke with the title sidebar hidden to verify the banner grid visibly reshuffles for each sort mode
+- decide later whether to expand project lint coverage to renderer files like `src/App.jsx`, because current lint does not check that layer
+
+Current stage progress:
+
+- library browsing polish and reliability: 86%
+- overall roadmap progress relative to the current fork scope: 80%
+
+Impact on overall progress:
+
+- removes a user-visible library UX regression where sorting could be computed correctly but not shown correctly in the virtualized grid
+- makes the product behavior for `Engine` and `Status` sorting explicit in the UI without leaking any technical/internal wording
+
+## 2026-04-05 — Settings removal in favor of product surfaces
+
+What was done:
+
+- removed the dedicated `Settings` entry from the main sidebar so the primary app flow no longer routes users into a grab-bag settings window
+- moved cloud-save account access into a reusable modal opened from a new header icon and from the library save-sync panel
+- expanded `Scan Hub` so it now owns scan source management and the default library folder instead of leaving those controls stranded in settings
+- set preview downloads to always-on defaults and removed the old metadata toggle from the user-facing settings content
+
+How it was implemented:
+
+- added `src/core/cloud/CloudAuthPanel.jsx` as a reusable renderer component and made `src/core/settings/CloudSync.jsx` a thin wrapper around it
+- updated `src/App.jsx` to:
+  - track cloud auth state for the header
+  - open the auth modal from the header
+  - manage scan source add/replace/toggle/remove actions
+  - manage the default library folder directly for `Scan Hub`
+- refactored `src/core/library/ScanHubPanel.jsx` into an actionable side panel instead of a passive status board
+- updated `src/core/library/LibraryDetailsPanel.jsx` and `src/core/library/LibrarySaveSyncPanel.jsx` so save-sync actions point to the new cloud-auth modal
+- removed the old settings sidebar entry in `src/core/Sidebar.js`
+- aligned defaults in `src/main.js` and `src/core/importer/importer.jsx` so preview downloads are on by default
+
+What remains:
+
+- run a manual smoke for the new header auth modal, including sign-in, sign-out and unavailable-cloud states
+- manually verify `Scan Hub` source mutations and default library folder selection on Windows dialogs
+- decide later whether to delete the legacy settings window entirely or leave it as a hidden compatibility artifact during transition
+
+Current stage progress:
+
+- main-shell UX consolidation away from settings: 78%
+- scan and library workflow coherence: 84%
+- overall roadmap progress relative to the current fork scope: 83%
+
+Impact on overall progress:
+
+- removes a chunk of fake configuration UI and replaces it with product-facing entry points that match actual user tasks
+- reduces duplicated surface area between `Settings`, importer flows and `Scan Hub`, which lowers future maintenance cost and UI drift
+
+## 2026-04-05 — Reset-cache full library rescan
+
+What was done:
+
+- changed the `Rescan Library` button to open a context menu with `Reset Cache & Rescan Library` and `Rescan Library`
+- added a safe reset-cache flow that clears persisted scan history and then forces a full reindex pass
+- kept installed library records, save metadata, and local save files intact during reset-cache rescans
+- documented the scan-flow decision in a dedicated ADR and added regression coverage for the new reset path
+
+How it was implemented:
+
+- extended the renderer rescan flow in `src/App.jsx` to open the existing Electron context menu bridge and route menu commands back into the app
+- changed `src/renderer.js` and `src/main.js` so `scan-library` accepts options, with `resetCache` implying `forceRescan`
+- added `src/main/scanCache.js` plus `clearScanCandidates()` / `clearScanJobs()` in the scan store modules to wipe only `scan_candidates` and `scan_jobs`
+- updated `src/core/scanners/f95scanner.js` so force rescans re-queue already-known library entries instead of skipping them
+- added ADR `docs/adr/0004-reset-cache-full-library-rescan.md`
+- added regression coverage in `test/scanCacheStores.test.js`
+
+What remains:
+
+- run a manual desktop smoke to confirm the context menu opens from the footer button and both menu actions produce the expected progress text in the UI
+- decide later whether a separate stale-library reconciliation flow should remove records whose folders disappeared from disk, because reset-cache rescans intentionally do not delete library entries
+
+Current stage progress:
+
+- scan/discovery control surface and persistence: 88%
+- overall roadmap progress relative to the current fork scope: 81%
+
+Impact on overall progress:
+
+- gives the product an explicit safe reset path for scanner persistence without violating the rule against hidden destructive refactors
+- closes the gap between incremental rescans and a real full reindex flow while preserving backward compatibility for the local library and save sync state

@@ -17,6 +17,9 @@
  *   is_archive: number,
  *   detection_score: number,
  *   detection_reasons_json: string | null,
+ *   match_status: string | null,
+ *   match_score: number,
+ *   match_reasons_json: string | null,
  *   match_count: number,
  *   status: string,
  *   first_seen_at: string,
@@ -43,6 +46,9 @@ function mapCandidateRow(row) {
     detectionReasons: row.detection_reasons_json
       ? JSON.parse(row.detection_reasons_json)
       : [],
+    matchStatus: row.match_status || "unmatched",
+    matchScore: row.match_score || 0,
+    matchReasons: row.match_reasons_json ? JSON.parse(row.match_reasons_json) : [],
     matchCount: row.match_count,
     status: row.status,
     firstSeenAt: row.first_seen_at,
@@ -67,6 +73,9 @@ function mapCandidateRow(row) {
  *   isArchive?: boolean,
  *   detectionScore?: number,
  *   detectionReasons?: string[],
+ *   matchStatus?: string,
+ *   matchScore?: number,
+ *   matchReasons?: string[],
  *   matchCount?: number,
  *   status?: string
  * }>} candidates
@@ -95,12 +104,15 @@ async function upsertScanCandidates(db, candidates) {
               is_archive,
               detection_score,
               detection_reasons_json,
+              match_status,
+              match_score,
+              match_reasons_json,
               match_count,
               status,
               first_seen_at,
               last_seen_at
             )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(folder_path) DO UPDATE SET
             source_id = excluded.source_id,
             last_job_id = excluded.last_job_id,
@@ -114,6 +126,9 @@ async function upsertScanCandidates(db, candidates) {
             is_archive = excluded.is_archive,
             detection_score = excluded.detection_score,
             detection_reasons_json = excluded.detection_reasons_json,
+            match_status = excluded.match_status,
+            match_score = excluded.match_score,
+            match_reasons_json = excluded.match_reasons_json,
             match_count = excluded.match_count,
             status = excluded.status,
             last_seen_at = excluded.last_seen_at
@@ -134,6 +149,9 @@ async function upsertScanCandidates(db, candidates) {
           candidate.detectionReasons
             ? JSON.stringify(candidate.detectionReasons)
             : null,
+          candidate.matchStatus || "unmatched",
+          candidate.matchScore || 0,
+          candidate.matchReasons ? JSON.stringify(candidate.matchReasons) : null,
           candidate.matchCount || 0,
           candidate.status || "detected",
           now,
@@ -252,8 +270,28 @@ function listScanCandidates(db, limit = 20) {
   });
 }
 
+/**
+ * @param {import("sqlite3").Database} db
+ * @returns {Promise<{ deleted: number }>}
+ */
+function clearScanCandidates(db) {
+  return new Promise((resolve, reject) => {
+    db.run(`DELETE FROM scan_candidates`, [], function onDelete(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve({
+        deleted: this.changes || 0,
+      });
+    });
+  });
+}
+
 module.exports = {
   upsertScanCandidates,
   markScanCandidateImported,
   listScanCandidates,
+  clearScanCandidates,
 };

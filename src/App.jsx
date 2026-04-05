@@ -51,6 +51,26 @@ const createDefaultDeleteGameModalState = () => ({
   saveProfiles: [],
 });
 
+const createDefaultHeaderCloudAuthState = () => ({
+  configured: false,
+  authenticated: false,
+  user: null,
+  error: "",
+  settings: {},
+});
+
+const getRendererErrorMessage = (error, fallbackMessage) => {
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  if (typeof error?.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return fallbackMessage;
+};
+
 const getDisplayTitle = (game) =>
   game?.displayTitle || game?.title || "Unknown";
 const getDisplayCreator = (game) =>
@@ -60,6 +80,7 @@ const {
     INSTALLED_NEWEST: "installedNewest",
   },
   LIBRARY_SORT_OPTIONS = [],
+  getLibrarySortDescription = () => "",
   sortLibraryGames = (games) => [...games],
 } = window.librarySortUtils || {};
 const { getCaptchaContinuationUrl: sharedGetF95CaptchaContinuationUrl } =
@@ -79,6 +100,37 @@ const getF95CaptchaContinuationUrl =
     }
     return normalizedCurrentUrl;
   });
+
+const IMPORT_PROGRESS_TERMINAL_TOAST_MS = 2000;
+const PREVIEW_MODAL_IMAGE_MAX_HEIGHT_CSS = "min(78vh, 900px)";
+
+const isTerminalImportProgressToast = (text) => {
+  const t = String(text || "").trim();
+  if (!t) {
+    return false;
+  }
+  if (/^starting library rescan/i.test(t)) {
+    return false;
+  }
+  if (
+    /^scanning source \d+\//i.test(t) ||
+    /^scanning configured sources/i.test(t)
+  ) {
+    return false;
+  }
+  if (/^cancelling library scan/i.test(t)) {
+    return false;
+  }
+  return (
+    /^scan complete\./i.test(t) ||
+    /^library rescan complete:/i.test(t) ||
+    /^library rescan cancelled$/i.test(t) ||
+    /^library rescan finished with errors/i.test(t) ||
+    /^library rescan error:/i.test(t) ||
+    /^cancel failed:/i.test(t) ||
+    /^no active scan to cancel$/i.test(t)
+  );
+};
 
 const getGameInstallPaths = (game) => {
   const seenPaths = new Set();
@@ -213,7 +265,7 @@ const App = () => {
   const [selectedGameDetails, setSelectedGameDetails] = useState(null);
   const [selectedGamePreviews, setSelectedGamePreviews] = useState([]);
   const [isSelectedGameLoading, setIsSelectedGameLoading] = useState(false);
-  const [previewModalUrl, setPreviewModalUrl] = useState("");
+  const [previewModalIndex, setPreviewModalIndex] = useState(null);
   const [libraryQuery, setLibraryQuery] = useState("");
   const [librarySortMode, setLibrarySortMode] = useState(
     LIBRARY_SORT_MODES.INSTALLED_NEWEST || "installedNewest",
@@ -238,12 +290,26 @@ const App = () => {
   const [deleteGameModal, setDeleteGameModal] = useState(
     createDefaultDeleteGameModalState,
   );
+  const [defaultGameFolder, setDefaultGameFolder] = useState("");
+  const [cloudAuthState, setCloudAuthState] = useState(
+    createDefaultHeaderCloudAuthState,
+  );
+  const [isCloudAuthOpen, setIsCloudAuthOpen] = useState(false);
   const gridRef = useRef(null);
   const gameGridRef = useRef(null);
   const selectedGameRef = useRef(null);
   const f95UpdateModalRef = useRef(createDefaultF95UpdateModalState());
   const f95CaptchaRetryKeyRef = useRef("");
   const deleteGameModalRef = useRef(createDefaultDeleteGameModalState());
+
+  const refreshLibraryGrid = useCallback(() => {
+    if (!gridRef.current) {
+      return;
+    }
+
+    gridRef.current.recomputeGridSize?.();
+    gridRef.current.forceUpdate?.();
+  }, []);
 
   // Debounce function for game refresh
   const debounce = (func, delay) => {
@@ -317,11 +383,6 @@ const App = () => {
   };
 
   const handleSidebarSelect = (sectionId) => {
-    if (sectionId === "settings") {
-      window.electronAPI.openSettings();
-      return;
-    }
-
     setActiveSection(sectionId);
   };
 
@@ -415,8 +476,7 @@ const App = () => {
           ...previous,
           isDeleting: false,
           error:
-            result?.error ||
-            "F95 Game Zone App could not remove this game.",
+            result?.error || "F95 Game Zone App could not remove this game.",
         }));
         return;
       }
@@ -441,9 +501,7 @@ const App = () => {
       setDeleteGameModal((previous) => ({
         ...previous,
         isDeleting: false,
-        error:
-          error.message ||
-          "F95 Game Zone App could not remove this game.",
+        error: error.message || "F95 Game Zone App could not remove this game.",
       }));
     }
   };
@@ -623,6 +681,116 @@ const App = () => {
     }
   };
 
+  const addScanSource = async () => {
+    const selectedPath = await window.electronAPI.selectDirectory();
+    if (!selectedPath) {
+      return { success: false, cancelled: true };
+    }
+
+    const result = await window.electronAPI.addScanSource(selectedPath);
+    if (!result?.success) {
+      return {
+        success: false,
+        error: getRendererErrorMessage(
+          result?.error,
+          "Failed to add scan source.",
+        ),
+      };
+    }
+
+    setScanSources((previous) => [...previous, result.source]);
+    return { success: true, source: result.source };
+  };
+
+  const toggleScanSource = async (source) => {
+    const result = await window.electronAPI.updateScanSource({
+      id: source.id,
+      isEnabled: !source.isEnabled,
+    });
+
+    if (!result?.success) {
+      return {
+        success: false,
+        error: getRendererErrorMessage(
+          result?.error,
+          "Failed to update scan source.",
+        ),
+      };
+    }
+
+    setScanSources((previous) =>
+      previous.map((item) => (item.id === source.id ? result.source : item)),
+    );
+    return { success: true, source: result.source };
+  };
+
+  const replaceScanSource = async (source) => {
+    const selectedPath = await window.electronAPI.selectDirectory();
+    if (!selectedPath) {
+      return { success: false, cancelled: true };
+    }
+
+    const result = await window.electronAPI.updateScanSource({
+      id: source.id,
+      path: selectedPath,
+    });
+
+    if (!result?.success) {
+      return {
+        success: false,
+        error: getRendererErrorMessage(
+          result?.error,
+          "Failed to update scan source.",
+        ),
+      };
+    }
+
+    setScanSources((previous) =>
+      previous.map((item) => (item.id === source.id ? result.source : item)),
+    );
+    return { success: true, source: result.source };
+  };
+
+  const removeScanSource = async (sourceId) => {
+    const result = await window.electronAPI.removeScanSource(sourceId);
+
+    if (!result?.success) {
+      return {
+        success: false,
+        error: getRendererErrorMessage(
+          result?.error,
+          "Failed to remove scan source.",
+        ),
+      };
+    }
+
+    setScanSources((previous) =>
+      previous.filter((item) => item.id !== sourceId),
+    );
+    return { success: true };
+  };
+
+  const chooseLibraryFolder = async () => {
+    const selectedPath = await window.electronAPI.selectDirectory();
+    if (!selectedPath) {
+      return { success: false, cancelled: true };
+    }
+
+    const result = await window.electronAPI.setDefaultGameFolder(selectedPath);
+    if (!result?.success) {
+      return {
+        success: false,
+        error: getRendererErrorMessage(
+          result?.error,
+          "Failed to save library folder.",
+        ),
+      };
+    }
+
+    setDefaultGameFolder(result.path || selectedPath);
+    return { success: true, path: result.path || selectedPath };
+  };
+
   const openF95CaptchaWindow = async () => {
     const targetUrl = String(f95UpdateModal.captchaUrl || "").trim();
     if (!targetUrl) {
@@ -681,22 +849,26 @@ const App = () => {
     setIsDiscoveryLoading(true);
 
     try {
-      const [sourcesResult, jobsResult, candidatesResult] = await Promise.all([
-        window.electronAPI.getScanSources(),
-        window.electronAPI.getScanJobs(8),
-        window.electronAPI.getScanCandidates(30),
-      ]);
+      const [sourcesResult, jobsResult, candidatesResult, libraryFolderResult] =
+        await Promise.all([
+          window.electronAPI.getScanSources(),
+          window.electronAPI.getScanJobs(8),
+          window.electronAPI.getScanCandidates(30),
+          window.electronAPI.getDefaultGameFolder(),
+        ]);
 
       setScanSources(sourcesResult.success ? sourcesResult.sources || [] : []);
       setScanJobs(jobsResult.success ? jobsResult.jobs || [] : []);
       setDiscoveryCandidates(
         candidatesResult.success ? candidatesResult.candidates || [] : [],
       );
+      setDefaultGameFolder(String(libraryFolderResult || "").trim());
     } catch (error) {
       console.error("Failed to load scan hub data:", error);
       setScanSources([]);
       setScanJobs([]);
       setDiscoveryCandidates([]);
+      setDefaultGameFolder("");
     } finally {
       setIsDiscoveryLoading(false);
     }
@@ -736,11 +908,8 @@ const App = () => {
                 ? updatedGame
                 : current,
             );
-            // Force grid re-render for the updated game
-            if (gridRef.current) {
-              console.log(`Forcing grid update for recordId: ${recordId}`);
-              gridRef.current.forceUpdate();
-            }
+            console.log(`Forcing grid update for recordId: ${recordId}`);
+            refreshLibraryGrid();
           } else {
             console.warn(`No game data returned for recordId: ${recordId}`);
           }
@@ -763,13 +932,18 @@ const App = () => {
     const adjustedWidth = Math.max(0, containerWidth - scrollbarWidth);
     const newColumnCount = getColumnCount(adjustedWidth);
     setColumnCount(newColumnCount);
-    if (gridRef.current) {
-      gridRef.current.recomputeGridSize();
-      gridRef.current.forceUpdate();
-    }
+    refreshLibraryGrid();
   }, 16); // ~60fps for smoother resize
 
   useEffect(() => {
+    window.electronAPI
+      .getDefaultGameFolder()
+      .then((value) => setDefaultGameFolder(String(value || "").trim()))
+      .catch((error) => {
+        console.error("Failed to load default library folder:", error);
+        setDefaultGameFolder("");
+      });
+
     // Get Config
     window.electronAPI
       .getConfig()
@@ -880,16 +1054,6 @@ const App = () => {
 
     const handleImportProgress = (progress) => {
       setImportProgress(progress);
-      if (
-        progress.progress >= progress.total &&
-        progress.total > 0 &&
-        progress.text.includes("Import complete")
-      ) {
-        setTimeout(
-          () => setImportProgress({ text: "", progress: 0, total: 0 }),
-          2000,
-        );
-      }
     };
     const handleGameImported = (event, recordId) => {
       console.log(`Game imported: recordId ${recordId}`);
@@ -962,7 +1126,7 @@ const App = () => {
         });
       setTimeout(
         () => setImportProgress({ text: "", progress: 0, total: 0 }),
-        2000,
+        IMPORT_PROGRESS_TERMINAL_TOAST_MS,
       );
       loadDiscoveryCandidates();
     };
@@ -1025,10 +1189,7 @@ const App = () => {
       }
 
       // Force grid refresh
-      if (gridRef.current) {
-        gridRef.current.recomputeGridSize();
-        gridRef.current.forceUpdate();
-      }
+      refreshLibraryGrid();
     };
 
     window.electronAPI.onGameDeleted(handleGameDeleted);
@@ -1082,6 +1243,65 @@ const App = () => {
           .catch((error) =>
             console.error("Failed to prepare game update:", error),
           );
+        return;
+      }
+
+      if (data.action === "rescanLibrary") {
+        rescanLibrary();
+        return;
+      }
+
+      if (data.action === "resetCacheAndRescanLibrary") {
+        rescanLibrary({ resetCache: true });
+        return;
+      }
+
+      if (data.action === "refreshLibraryPreviews") {
+        setIsLibraryScanRunning(true);
+        setImportProgress({
+          text: "Starting screenshot refresh...",
+          progress: 0,
+          total: 1,
+        });
+
+        window.electronAPI
+          .refreshLibraryPreviews()
+          .then((result) => {
+            if ((result?.totalGames || 0) === 0) {
+              setImportProgress({
+                text: "No library games with site screenshots were found.",
+                progress: 0,
+                total: 1,
+              });
+              return;
+            }
+
+            if (!result?.success) {
+              setImportProgress({
+                text: `Screenshot refresh finished: ${result?.refreshed || 0} updated, ${result?.skipped || 0} skipped, ${result?.failed || 0} failed`,
+                progress: result?.processed || 0,
+                total: result?.totalGames || 1,
+              });
+              return;
+            }
+
+            setImportProgress({
+              text: `Screenshot refresh complete: ${result.refreshed} updated, ${result.skipped} already complete`,
+              progress: result.processed || 0,
+              total: result.totalGames || 1,
+            });
+          })
+          .catch((error) => {
+            console.error("Failed to refresh library screenshots:", error);
+            setImportProgress({
+              text: `Screenshot refresh failed: ${error.message}`,
+              progress: 0,
+              total: 1,
+            });
+          })
+          .finally(() => {
+            setIsLibraryScanRunning(false);
+          });
       }
     });
 
@@ -1101,6 +1321,54 @@ const App = () => {
       window.electronAPI.onImportComplete(() => {});
       window.electronAPI.onUpdateStatus(() => {});
       window.electronAPI.removeAllListeners("f95-browser-navigation");
+    };
+  }, [refreshLibraryGrid]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const applyCloudAuthState = (state) => {
+      if (!mounted) {
+        return;
+      }
+
+      setCloudAuthState(state || createDefaultHeaderCloudAuthState());
+    };
+
+    window.electronAPI
+      .getCloudAuthState()
+      .then((result) => {
+        if (!mounted) {
+          return;
+        }
+
+        if (result?.success && result.state) {
+          applyCloudAuthState(result.state);
+          return;
+        }
+
+        applyCloudAuthState({
+          ...createDefaultHeaderCloudAuthState(),
+          error: getRendererErrorMessage(result?.error, ""),
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to load cloud auth state:", error);
+        applyCloudAuthState({
+          ...createDefaultHeaderCloudAuthState(),
+          error: getRendererErrorMessage(error, ""),
+        });
+      });
+
+    const unsubscribe = window.electronAPI.onCloudAuthChanged((state) => {
+      applyCloudAuthState(state);
+    });
+
+    return () => {
+      mounted = false;
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
     };
   }, []);
 
@@ -1124,24 +1392,34 @@ const App = () => {
     }
   };
 
-  const rescanLibrary = async () => {
+  const rescanLibrary = async (options = {}) => {
+    if (isLibraryScanRunning) {
+      return;
+    }
+
+    const isResetRescan = Boolean(options?.resetCache);
+
     setIsLibraryScanRunning(true);
     setImportProgress({
-      text: "Starting library rescan...",
+      text: isResetRescan
+        ? "Starting reset-cache library rescan..."
+        : "Starting library rescan...",
       progress: 0,
       total: 1,
     });
 
     try {
-      const result = await window.electronAPI.scanLibrary();
+      const result = await window.electronAPI.scanLibrary(options);
 
       if (!result.success) {
         setImportProgress({
           text: result.cancelled
             ? "Library rescan cancelled"
-            : result.warningsCount > 0
-              ? `Library rescan finished with errors and ${result.warningsCount} warnings`
-              : "Library rescan finished with errors",
+            : result.error
+              ? `Library rescan failed: ${result.error}`
+              : result.warningsCount > 0
+                ? `Library rescan finished with errors and ${result.warningsCount} warnings`
+                : "Library rescan finished with errors",
           progress: result.imported || 0,
           total: result.scanned || 1,
         });
@@ -1169,6 +1447,27 @@ const App = () => {
       }
       setIsLibraryScanRunning(false);
     }
+  };
+
+  const openRescanLibraryMenu = () => {
+    if (isLibraryScanRunning) {
+      return;
+    }
+
+    window.electronAPI.showContextMenu([
+      {
+        label: "Refresh Cached Screenshots",
+        data: { action: "refreshLibraryPreviews" },
+      },
+      {
+        label: "Reset Cache & Rescan Library",
+        data: { action: "resetCacheAndRescanLibrary" },
+      },
+      {
+        label: "Rescan Library",
+        data: { action: "rescanLibrary" },
+      },
+    ]);
   };
 
   const cancelLibraryScan = async () => {
@@ -1235,14 +1534,47 @@ const App = () => {
   const visibleLibraryGames = useMemo(
     () =>
       sortLibraryGames(
-        filterLocalGames(games, libraryQuery, activeSection === SECTION_UPDATES),
+        filterLocalGames(
+          games,
+          libraryQuery,
+          activeSection === SECTION_UPDATES,
+        ),
         librarySortMode,
       ),
     [games, libraryQuery, activeSection, librarySortMode],
   );
+  const librarySortDescription = getLibrarySortDescription(librarySortMode);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      refreshLibraryGrid();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [refreshLibraryGrid, visibleLibraryGames, librarySortMode]);
 
   const canCancelLibraryScan =
     isLibraryScanRunning && /scan/i.test(importProgress.text || "");
+  const cloudAuthButtonTitle = cloudAuthState.authenticated
+    ? `Cloud saves connected as ${cloudAuthState.user?.email || "your account"}`
+    : cloudAuthState.configured
+      ? "Sign in to cloud saves"
+      : "Cloud saves unavailable";
+  const cloudAuthButtonIcon = cloudAuthState.authenticated
+    ? "cloud_done"
+    : cloudAuthState.configured
+      ? "cloud"
+      : "cloud_off";
+
+  useEffect(() => {
+    if (!isTerminalImportProgressToast(importProgress.text)) {
+      return;
+    }
+    const id = setTimeout(() => {
+      setImportProgress({ text: "", progress: 0, total: 0 });
+    }, IMPORT_PROGRESS_TERMINAL_TOAST_MS);
+    return () => clearTimeout(id);
+  }, [importProgress.text]);
 
   useEffect(() => {
     if (activeSection !== SECTION_SEARCH || window.F95BrowserWorkspace) {
@@ -1348,6 +1680,49 @@ const App = () => {
       cancelled = true;
     };
   }, [selectedGame?.record_id]);
+
+  useEffect(() => {
+    setPreviewModalIndex(null);
+  }, [selectedGame?.record_id]);
+
+  useEffect(() => {
+    if (previewModalIndex === null) {
+      return;
+    }
+    if (selectedGamePreviews.length === 0) {
+      setPreviewModalIndex(null);
+      return;
+    }
+    if (previewModalIndex >= selectedGamePreviews.length) {
+      setPreviewModalIndex(selectedGamePreviews.length - 1);
+    }
+  }, [selectedGamePreviews, previewModalIndex]);
+
+  useEffect(() => {
+    if (previewModalIndex === null) {
+      return;
+    }
+    const count = selectedGamePreviews.length;
+    if (count === 0) {
+      return;
+    }
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        setPreviewModalIndex(null);
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setPreviewModalIndex((i) => (i === null ? 0 : (i - 1 + count) % count));
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setPreviewModalIndex((i) => (i === null ? 0 : (i + 1) % count));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewModalIndex, selectedGamePreviews.length]);
 
   useEffect(() => {
     if (
@@ -1461,9 +1836,6 @@ const App = () => {
     activeSection === SECTION_UPDATES
       ? {
           eyebrow: "Update Inbox",
-          title: "Games with pending updates",
-          description:
-            "This is not a fake toggle anymore. It is a dedicated view of titles that already have newer site versions.",
           emptyTitle: "No pending updates",
           emptyDescription:
             "Current library entries are already on their latest known version.",
@@ -1471,18 +1843,12 @@ const App = () => {
       : activeSection === SECTION_SEARCH
         ? {
             eyebrow: "F95 Workspace",
-            title: "Live F95 search and install",
-            description:
-              "This screen now uses the real logged-in F95 flow instead of a cached local catalog. Browse the live site here, open a thread and install it straight into the library.",
             emptyTitle: "F95 session required",
             emptyDescription:
               "Log in to F95 to unlock the live search workspace, direct downloads and install-to-library flow.",
           }
         : {
             eyebrow: "User Library",
-            title: "Full installed library",
-            description:
-              "Default landing view shows the entire local library, not a half-hidden filtered subset.",
             emptyTitle: "Library is empty",
             emptyDescription:
               "Scan your configured sources to populate the library and discovery queue.",
@@ -1514,7 +1880,7 @@ const App = () => {
           />
         </div>
         <div className="relative flex-1 [-webkit-app-region:drag] h-[70px] bg-gradient-to-r from-primary/98 via-primary/92 to-primary/98">
-          <div className="absolute left-[48px] right-[120px] top-0 h-[2px] bg-gradient-to-r from-transparent via-accentBar/85 to-transparent"></div>
+          <div className="absolute left-[48px] right-[200px] top-0 h-[2px] bg-gradient-to-r from-transparent via-accentBar/85 to-transparent"></div>
           <div className="flex h-[70px] w-full items-center">
             <div className="ml-5 flex shrink-0 items-center">
               <div className="cursor-pointer bg-gradient-to-r from-accent via-highlight to-glam/90 bg-clip-text font-semibold text-transparent [-webkit-app-region:no-drag]">
@@ -1539,7 +1905,32 @@ const App = () => {
               />
             </div>
           </div>
-          <div className="absolute right-2 top-0 flex h-full items-center [-webkit-app-region:no-drag] gap-0.5">
+          <div className="pointer-events-none absolute right-[200px] top-1/2 z-0 -translate-y-1/2 select-none">
+            <span className="whitespace-nowrap text-xs text-text/90">
+              v{version}{" "}
+              <span className="text-glam drop-shadow-[0_0_8px_rgba(201,166,90,0.45)]">
+                α
+              </span>
+            </span>
+          </div>
+          <div className="absolute right-2 top-0 z-20 flex h-full items-center [-webkit-app-region:no-drag] gap-0.5">
+            <button
+              type="button"
+              title={cloudAuthButtonTitle}
+              aria-label={cloudAuthButtonTitle}
+              onClick={() => setIsCloudAuthOpen(true)}
+              className={`mr-1 flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border text-text transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
+                cloudAuthState.authenticated
+                  ? "border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20"
+                  : cloudAuthState.configured
+                    ? "border-accent/35 bg-accent/10 hover:bg-accent/20"
+                    : "border-border bg-white/5 hover:bg-white/10"
+              }`}
+            >
+              <span className="material-symbols-outlined text-[20px] leading-none">
+                {cloudAuthButtonIcon}
+              </span>
+            </button>
             <button
               type="button"
               aria-label="Minimize window"
@@ -1571,18 +1962,10 @@ const App = () => {
               <i className="fas fa-times fa-sm"></i>
             </button>
           </div>
-          <div className="absolute right-3 top-10 flex h-[10px]">
-            <span className="mr-4 text-xs text-text/90">
-              v{version}{" "}
-              <span className="text-glam drop-shadow-[0_0_8px_rgba(201,166,90,0.45)]">
-                α
-              </span>
-            </span>
-          </div>
         </div>
       </div>
 
-      <div className="fixed bottom-[44px] left-0 right-0 top-[70px] flex flex-1 bg-transparent">
+      <div className="fixed bottom-[40px] left-0 right-0 top-[70px] flex flex-1 bg-transparent">
         <window.Sidebar
           activeSection={activeSection}
           onSelectSection={handleSidebarSelect}
@@ -1628,19 +2011,11 @@ const App = () => {
               {activeSection !== SECTION_SEARCH && (
                 <div className="atlas-glass-panel relative z-20 shrink-0 border-b border-border px-4 py-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase leading-none tracking-[0.2em] text-glam/90">
-                        {sectionMeta.eyebrow}
-                      </div>
-                      <div className="mt-0.5 text-lg font-semibold leading-tight tracking-tight text-text">
-                        {sectionMeta.title}
-                      </div>
-                      <div className="mt-0.5 max-w-3xl text-xs leading-snug text-text/70">
-                        {sectionMeta.description}
-                      </div>
+                    <div className="min-w-0 text-[10px] uppercase leading-none tracking-[0.2em] text-glam/90">
+                      {sectionMeta.eyebrow}
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <label className="flex items-center gap-2 rounded-lg border border-border bg-black/25 px-2.5 py-1.5 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md">
+                      <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md">
                         <span className="uppercase tracking-[0.14em] text-text/60">
                           Sort
                         </span>
@@ -1649,7 +2024,8 @@ const App = () => {
                           onChange={(event) =>
                             setLibrarySortMode(event.target.value)
                           }
-                          className="min-w-[148px] bg-transparent text-xs text-text outline-none"
+                          title={librarySortDescription}
+                          className="min-w-[196px] bg-transparent text-xs text-text outline-none"
                         >
                           {LIBRARY_SORT_OPTIONS.map((option) => (
                             <option
@@ -1665,14 +2041,17 @@ const App = () => {
                       <button
                         type="button"
                         onClick={toggleGameList}
-                        className="rounded-lg border border-border bg-white/5 px-2.5 py-1.5 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
+                        className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
                       >
                         {showGameList ? "Hide titles" : "Show titles"}
                       </button>
-                      <div className="rounded-lg border border-border bg-black/25 px-2.5 py-1.5 text-[11px] uppercase tracking-[0.14em] text-text/90 backdrop-blur-sm">
+                      <div className="border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-text/90 backdrop-blur-sm">
                         {`${visibleLibraryGames.length} results`}
                       </div>
                     </div>
+                  </div>
+                  <div className="mt-2 text-[11px] text-text/60">
+                    {librarySortDescription}
                   </div>
                 </div>
               )}
@@ -1732,7 +2111,8 @@ const App = () => {
                   onUpdateGame={handleGameUpdate}
                   onOpenFolder={openGameFolder}
                   onRemoveGame={openDeleteGameModal}
-                  onPreviewSelect={setPreviewModalUrl}
+                  onPreviewSelect={setPreviewModalIndex}
+                  onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
                 />
               )}
           </div>
@@ -1746,32 +2126,92 @@ const App = () => {
         jobs={scanJobs}
         candidates={discoveryCandidates}
         isScanRunning={canCancelLibraryScan}
+        defaultGameFolder={defaultGameFolder}
         onRefresh={loadScanHubData}
         onClose={() => setShowDiscovery(false)}
         onRescan={rescanLibrary}
         onCancelScan={cancelLibraryScan}
         onOpenFolder={openGameFolder}
+        onAddSource={addScanSource}
+        onToggleSource={toggleScanSource}
+        onReplaceSource={replaceScanSource}
+        onRemoveSource={removeScanSource}
+        onChooseLibraryFolder={chooseLibraryFolder}
       />
 
-      {previewModalUrl && (
+      <window.CloudAuthPanel
+        layout="modal"
+        isOpen={isCloudAuthOpen}
+        onClose={() => setIsCloudAuthOpen(false)}
+      />
+
+      {previewModalIndex !== null && selectedGamePreviews.length > 0 && (
         <div
-          className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/75 p-6 backdrop-blur-md"
-          onClick={() => setPreviewModalUrl("")}
+          className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md sm:p-6"
+          onClick={() => setPreviewModalIndex(null)}
           role="presentation"
         >
-          <div className="flex h-full max-h-full w-full items-center justify-center">
-            <img
-              src={previewModalUrl}
-              alt="Selected screenshot"
-              className="max-h-full max-w-full rounded-2xl border border-border shadow-glass ring-1 ring-border motion-safe:animate-atlas-fade-up"
-            />
+          <div
+            className="flex max-h-full w-full max-w-[min(96vw,1200px)] flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Screenshot viewer"
+          >
+            <div className="flex w-full min-h-0 flex-1 items-center justify-center gap-2 sm:gap-4">
+              <button
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-primary/85 text-lg text-text shadow-glass backdrop-blur-xl transition hover:bg-primary sm:h-11 sm:w-11"
+                aria-label="Previous screenshot"
+                onClick={() =>
+                  setPreviewModalIndex((i) => {
+                    const n = selectedGamePreviews.length;
+                    if (n === 0) {
+                      return null;
+                    }
+                    const cur = i ?? 0;
+                    return (cur - 1 + n) % n;
+                  })
+                }
+              >
+                ‹
+              </button>
+              <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+                <img
+                  src={selectedGamePreviews[previewModalIndex]}
+                  alt={`Screenshot ${previewModalIndex + 1} of ${selectedGamePreviews.length}`}
+                  className="max-w-full rounded-2xl border border-border object-contain shadow-glass ring-1 ring-border motion-safe:animate-atlas-fade-up"
+                  style={{ maxHeight: PREVIEW_MODAL_IMAGE_MAX_HEIGHT_CSS }}
+                />
+              </div>
+              <button
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-primary/85 text-lg text-text shadow-glass backdrop-blur-xl transition hover:bg-primary sm:h-11 sm:w-11"
+                aria-label="Next screenshot"
+                onClick={() =>
+                  setPreviewModalIndex((i) => {
+                    const n = selectedGamePreviews.length;
+                    if (n === 0) {
+                      return null;
+                    }
+                    const cur = i ?? 0;
+                    return (cur + 1) % n;
+                  })
+                }
+              >
+                ›
+              </button>
+            </div>
+            <div className="text-xs tabular-nums text-text/75">
+              {previewModalIndex + 1} / {selectedGamePreviews.length}
+            </div>
           </div>
         </div>
       )}
 
       {/* Status / Progress Bars */}
       {dbUpdateStatus.text && (
-        <div className="absolute bottom-[48px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center rounded-2xl border border-border bg-primary/80 p-3 shadow-glass backdrop-blur-xl">
+        <div className="absolute bottom-[44px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
           <div className="flex w-full max-w-[540px] items-center gap-3">
             <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
               {dbUpdateStatus.text}
@@ -1794,7 +2234,7 @@ const App = () => {
       )}
 
       {importStatus.text && (
-        <div className="absolute bottom-[56px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center rounded-2xl border border-border bg-primary/80 p-3 shadow-glass backdrop-blur-xl">
+        <div className="absolute bottom-[52px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
           <div className="flex w-full max-w-[540px] items-center gap-3">
             <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
               {importStatus.text}
@@ -1817,7 +2257,7 @@ const App = () => {
       )}
 
       {importProgress.text && (
-        <div className="absolute bottom-[60px] left-1/2 z-[1500] flex w-[min(800px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center rounded-2xl border border-border bg-primary/80 p-3 shadow-glass backdrop-blur-xl">
+        <div className="absolute bottom-[56px] left-1/2 z-[1500] flex w-[min(800px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
           <div className="flex w-full max-w-[760px] items-center gap-3">
             <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
               {importProgress.text}
@@ -1885,12 +2325,12 @@ const App = () => {
         onClose={closeDeleteGameModal}
       />
 
-      <div className="fixed bottom-0 z-50 grid min-h-[44px] w-full grid-cols-1 items-center gap-x-3 gap-y-2 border-t border-border bg-primary/75 px-2 py-1.5 shadow-glass-sm backdrop-blur-xl sm:h-[44px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-4 sm:py-0">
+      <div className="fixed bottom-0 z-50 grid min-h-[40px] w-full grid-cols-1 items-center gap-x-3 gap-y-2 border-t border-border bg-primary/75 px-2 py-1 shadow-glass-sm backdrop-blur-xl sm:h-[40px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-4 sm:py-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={addGame}
-            className="flex h-9 items-center rounded-lg px-2 text-sm text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
           >
             <i className="fas fa-plus mr-2 text-accent"></i>
             Add Game
@@ -1898,15 +2338,15 @@ const App = () => {
           <button
             type="button"
             onClick={() => setShowDiscovery((prev) => !prev)}
-            className="flex h-9 items-center rounded-lg px-2 text-sm text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
           >
             <i className="fas fa-binoculars mr-2 text-accent"></i>
             Scan Hub
           </button>
           <button
             type="button"
-            onClick={rescanLibrary}
-            className="flex h-9 items-center rounded-lg px-2 text-sm text-text transition hover:bg-white/10 hover:text-highlight"
+            onClick={openRescanLibraryMenu}
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
           >
             <i className="fas fa-sync-alt mr-2 text-accent"></i>
             Rescan Library
@@ -1915,7 +2355,7 @@ const App = () => {
             <button
               type="button"
               onClick={cancelLibraryScan}
-              className="flex h-9 items-center rounded-lg px-2 text-sm text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
+              className="flex h-8 items-center px-2 text-xs text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
             >
               <i className="fas fa-ban mr-2"></i>
               Cancel Scan
@@ -1941,7 +2381,7 @@ const App = () => {
               appUpdateState.status === "checking" ||
               appUpdateState.status === "downloading"
             }
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium shadow-glass-sm transition ${
+            className={`px-2 py-1 text-[11px] font-medium shadow-glass-sm transition ${
               appUpdateState.status === "downloaded"
                 ? "bg-emerald-800/90 text-white hover:bg-emerald-700"
                 : appUpdateState.status === "available"
@@ -1959,12 +2399,12 @@ const App = () => {
           <button
             type="button"
             onClick={() => setDownloadsPanelOpen((previous) => !previous)}
-            className="flex h-9 items-center rounded-lg px-2 text-sm text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
           >
             <i className="fas fa-download mr-2 text-accent"></i>
             Downloads
             {f95Downloads.activeCount > 0 && (
-              <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-black">
+              <span className="ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-black">
                 {f95Downloads.activeCount}
               </span>
             )}

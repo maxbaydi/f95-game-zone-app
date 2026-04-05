@@ -127,9 +127,19 @@
     };
   }
 
+  function getCloudSyncMessageIfPresent(error, options = {}) {
+    const rawMessage = normalizeErrorText(error?.message || error);
+    if (!rawMessage) {
+      return "";
+    }
+
+    return getCloudSyncErrorDetails(rawMessage, options).userMessage;
+  }
+
   const api = {
     formatByteSize,
     getCloudSyncErrorDetails,
+    getCloudSyncMessageIfPresent,
   };
 
   if (typeof module === "object" && module.exports) {

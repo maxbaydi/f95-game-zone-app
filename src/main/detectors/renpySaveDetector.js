@@ -239,4 +239,6 @@ module.exports = {
   detectRenpySaveProfiles,
   isRenpyLikeGame,
   normalizeToken,
+  pathExists,
+  safeReadDir,
 };

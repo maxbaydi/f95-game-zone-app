@@ -12,26 +12,33 @@
     {
       value: LIBRARY_SORT_MODES.INSTALLED_NEWEST,
       label: "Newest installed",
+      description: "Recently installed games first.",
     },
     {
       value: LIBRARY_SORT_MODES.INSTALLED_OLDEST,
       label: "Oldest installed",
+      description: "Earliest installs first. Games without install history stay last.",
     },
     {
       value: LIBRARY_SORT_MODES.TITLE_ASC,
-      label: "Title A-Z",
+      label: "Title (A-Z)",
+      description: "Alphabetical by title, A to Z.",
     },
     {
       value: LIBRARY_SORT_MODES.TITLE_DESC,
-      label: "Title Z-A",
+      label: "Title (Z-A)",
+      description: "Alphabetical by title, Z to A.",
     },
     {
       value: LIBRARY_SORT_MODES.ENGINE,
-      label: "Engine",
+      label: "Engine (A-Z)",
+      description: "Alphabetical by engine. Unknown engines stay last.",
     },
     {
       value: LIBRARY_SORT_MODES.STATUS,
-      label: "Status",
+      label: "Status (In dev first)",
+      description:
+        "Orders games by status: In development, On hold, Completed, Abandoned, then other statuses.",
     },
   ];
 
@@ -132,6 +139,11 @@
     return normalizeSortText(game?.status, "Other");
   }
 
+  function getLibrarySortDescription(sortMode) {
+    const option = LIBRARY_SORT_OPTIONS.find((entry) => entry.value === sortMode);
+    return option?.description || "Recently installed games first.";
+  }
+
   function sortLibraryGames(games, sortMode = LIBRARY_SORT_MODES.INSTALLED_NEWEST) {
     const normalizedSortMode = Object.values(LIBRARY_SORT_MODES).includes(sortMode)
       ? sortMode
@@ -215,6 +227,7 @@
     LIBRARY_SORT_OPTIONS,
     STATUS_GROUPS,
     getInstalledAtTimestamp,
+    getLibrarySortDescription,
     getStatusSortLabel,
     normalizeLibraryStatus,
     sortLibraryGames,

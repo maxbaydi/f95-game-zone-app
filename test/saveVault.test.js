@@ -128,3 +128,122 @@ test("backupGameSaves and restoreGameSaves preserve Ren'Py AppData profiles", as
     process.env.APPDATA = previousAppData;
   }
 });
+
+test("backupGameSaves and restoreGameSaves preserve root-level RPG Maker save files only", async () => {
+  const tempRoot = makeTempDir();
+  const appPaths = {
+    backups: path.join(tempRoot, "backups"),
+  };
+  const installDirectory = path.join(tempRoot, "install");
+  const reinstalledDirectory = path.join(tempRoot, "reinstall");
+
+  fs.mkdirSync(installDirectory, { recursive: true });
+  fs.writeFileSync(path.join(installDirectory, "Save01.rvdata2"), "save-one", "utf8");
+  fs.writeFileSync(path.join(installDirectory, "Save02.rvdata2"), "save-two", "utf8");
+  fs.writeFileSync(path.join(installDirectory, "game.exe"), "binary", "utf8");
+
+  const backupResult = await backupGameSaves({
+    appPaths,
+    title: "Old School Quest",
+    creator: "RPG Studio",
+    installDirectory,
+    profiles: [
+      {
+        provider: "local",
+        rootPath: installDirectory,
+        strategy: {
+          type: "install-file-patterns",
+          payload: {
+            relativePath: "",
+            filePatterns: ["Save*.rvdata2"],
+          },
+        },
+        confidence: 100,
+        reasons: ["found RPG Maker save files in the game root"],
+      },
+    ],
+  });
+
+  assert.equal(backupResult.backedUpProfiles.length, 1);
+
+  fs.mkdirSync(reinstalledDirectory, { recursive: true });
+  const restoreResult = await restoreGameSaves({
+    appPaths,
+    title: "Old School Quest",
+    creator: "RPG Studio",
+    installDirectory: reinstalledDirectory,
+  });
+
+  assert.equal(restoreResult.restoredPaths.length, 1);
+  assert.equal(
+    fs.readFileSync(path.join(reinstalledDirectory, "Save01.rvdata2"), "utf8"),
+    "save-one",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(reinstalledDirectory, "Save02.rvdata2"), "utf8"),
+    "save-two",
+  );
+  assert.equal(fs.existsSync(path.join(reinstalledDirectory, "game.exe")), false);
+});
+
+test("backupGameSaves and restoreGameSaves preserve LocalLow app data profiles", async () => {
+  const tempRoot = makeTempDir();
+  const previousUserProfile = process.env.USERPROFILE;
+  const appPaths = {
+    backups: path.join(tempRoot, "backups"),
+  };
+  const localLowRoot = path.join(
+    tempRoot,
+    "AppData",
+    "LocalLow",
+    "Studio X",
+    "Crimson High",
+  );
+
+  process.env.USERPROFILE = tempRoot;
+  fs.mkdirSync(localLowRoot, { recursive: true });
+  fs.writeFileSync(path.join(localLowRoot, "slot1.json"), "{\"slot\":1}", "utf8");
+
+  try {
+    const backupResult = await backupGameSaves({
+      appPaths,
+      title: "Crimson High",
+      creator: "Studio X",
+      installDirectory: path.join(tempRoot, "install"),
+      profiles: [
+        {
+          provider: "unity_locallow",
+          rootPath: localLowRoot,
+          strategy: {
+            type: "windows-known-folder",
+            payload: {
+              baseFolder: "localLow",
+              path: "Studio X/Crimson High",
+            },
+          },
+          confidence: 88,
+          reasons: ["found Unity persistent data directory in LocalLow"],
+        },
+      ],
+    });
+
+    assert.equal(backupResult.backedUpProfiles.length, 1);
+
+    fs.rmSync(localLowRoot, { recursive: true, force: true });
+
+    const restoreResult = await restoreGameSaves({
+      appPaths,
+      title: "Crimson High",
+      creator: "Studio X",
+      installDirectory: path.join(tempRoot, "reinstall"),
+    });
+
+    assert.equal(restoreResult.restoredPaths.length, 1);
+    assert.equal(
+      fs.readFileSync(path.join(localLowRoot, "slot1.json"), "utf8"),
+      "{\"slot\":1}",
+    );
+  } finally {
+    process.env.USERPROFILE = previousUserProfile;
+  }
+});
