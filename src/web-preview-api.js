@@ -90,6 +90,10 @@
     signInCloud: p({ success: false, error: "Desktop only", state: null }),
     signUpCloud: p({ success: false, error: "Desktop only", state: null }),
     signOutCloud: p({ success: true, state: CLOUD_AUTH_STATE }),
+    runBulkCloudSaveAction: p({ success: false, error: "Desktop only" }),
+    getCloudLibraryCatalog: () =>
+      Promise.resolve({ success: true, result: null }),
+    syncCloudLibraryCatalog: p({ success: false, error: "Desktop only" }),
     getSaveProfileSnapshot: () =>
       Promise.resolve({ success: true, snapshot: null }),
     refreshSaveProfiles: () =>
@@ -121,13 +125,16 @@
       Promise.resolve({ items: [], activeCount: 0 }),
     getF95ThreadInstallState: () =>
       Promise.resolve({
+        inLibrary: false,
         installed: false,
         recordId: null,
         title: "",
         creator: "",
         version: "",
         gamePath: "",
+        siteUrl: "",
       }),
+    addF95ThreadToLibrary: p({ success: false, error: "Desktop only" }),
     inspectF95Thread: p({
       success: false,
       error: "F95 tools require the desktop app.",
@@ -214,6 +221,7 @@
     onF95AuthChanged: listen,
     onF95DownloadsChanged: listen,
     onCloudAuthChanged: listenUnsub,
+    onCloudBulkProgress: listenUnsub,
     onF95DownloadProgress: listen,
     getUniqueFilterOptions: () =>
       Promise.resolve({

@@ -95,6 +95,93 @@ function isUsefulCreatorHint(value) {
 
 /**
  * @param {string} rawValue
+ * @returns {{ title: string, creator: string } | null}
+ */
+function extractDelimitedTitleCreator(rawValue) {
+  const trimmed = String(rawValue || "").trim();
+  const match = trimmed.match(/^(.+?)\s+(?:by|from)\s+(.+)$/i);
+
+  if (!match?.[1] || !match?.[2]) {
+    return null;
+  }
+
+  const title = String(match[1]).trim();
+  const creator = String(match[2]).trim();
+  if (!title || !isUsefulCreatorHint(creator)) {
+    return null;
+  }
+
+  return { title, creator };
+}
+
+/**
+ * @param {string} rawValue
+ * @returns {{ title: string, creator: string } | null}
+ */
+function extractAttachedCreatorSuffix(rawValue) {
+  const normalized = String(rawValue || "")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const creatorTailWords = new Set([
+    "dev",
+    "devs",
+    "game",
+    "games",
+    "lab",
+    "labs",
+    "productions",
+    "production",
+    "studio",
+    "studios",
+    "team",
+    "works",
+  ]);
+  const tokens = normalized.split(" ").filter(Boolean);
+
+  for (let tokenIndex = tokens.length - 1; tokenIndex >= 0; tokenIndex -= 1) {
+    const token = tokens[tokenIndex];
+    if (!/[a-z][A-Z]/.test(token)) {
+      continue;
+    }
+
+    const splitToken = token.replace(/([a-z])([A-Z])/g, "$1 $2");
+    const parts = splitToken.split(" ").filter(Boolean);
+    for (let splitIndex = 1; splitIndex < parts.length; splitIndex += 1) {
+      const creatorParts = parts.slice(splitIndex);
+      const creatorTail = creatorParts[creatorParts.length - 1]?.toLowerCase() || "";
+      if (!creatorTailWords.has(creatorTail)) {
+        continue;
+      }
+
+      const titleParts = [...tokens.slice(0, tokenIndex), ...parts.slice(0, splitIndex)];
+      const title = titleParts.join(" ").trim();
+      const creator = creatorParts.join(" ").trim();
+
+      if (
+        extractSignificantTokens(title).length === 0 ||
+        !isUsefulCreatorHint(creator)
+      ) {
+        continue;
+      }
+
+      return {
+        title,
+        creator,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * @param {string} rawValue
  * @param {string} source
  * @param {number} weight
  * @param {string[]} reasons
@@ -116,6 +203,51 @@ function createTitleHint(rawValue, source, weight, reasons) {
     weight,
     reasons,
   };
+}
+
+/**
+ * @param {string} rawValue
+ * @param {string} source
+ * @param {number} weight
+ * @param {string[]} hintReasons
+ * @param {Array<{ title: string, version: string, source: string, weight: number, reasons: string[] }>} titleHints
+ * @param {string[]} creatorHints
+ * @param {string[]} reasons
+ */
+function appendTitleHints(
+  rawValue,
+  source,
+  weight,
+  hintReasons,
+  titleHints,
+  creatorHints,
+  reasons,
+) {
+  titleHints.push(createTitleHint(rawValue, source, weight, hintReasons));
+
+  const delimited = extractDelimitedTitleCreator(rawValue);
+  if (delimited) {
+    titleHints.push(
+      createTitleHint(delimited.title, source, weight + 8, [
+        ...hintReasons,
+        "split creator suffix from title metadata",
+      ]),
+    );
+    creatorHints.push(delimited.creator);
+    reasons.push("parsed creator from title suffix");
+  }
+
+  const attached = extractAttachedCreatorSuffix(rawValue);
+  if (attached) {
+    titleHints.push(
+      createTitleHint(attached.title, source, weight + 6, [
+        ...hintReasons,
+        "split attached studio suffix from title metadata",
+      ]),
+    );
+    creatorHints.push(attached.creator);
+    reasons.push("parsed creator from attached studio suffix");
+  }
 }
 
 /**
@@ -284,10 +416,14 @@ function extractScanCandidateIdentity(input) {
       });
 
       if (structuredMapping.title) {
-        titleHints.push(
-          createTitleHint(structuredMapping.title, "structured-format", 90, [
-            "title extracted from configured scan format",
-          ]),
+        appendTitleHints(
+          structuredMapping.title,
+          "structured-format",
+          90,
+          ["title extracted from configured scan format"],
+          titleHints,
+          creatorHints,
+          reasons,
         );
       }
 
@@ -303,24 +439,42 @@ function extractScanCandidateIdentity(input) {
     }
   }
 
-  titleHints.push(
-    createTitleHint(leafName, "folder-name", 60, ["parsed title from folder name"]),
+  appendTitleHints(
+    leafName,
+    "folder-name",
+    60,
+    ["parsed title from folder name"],
+    titleHints,
+    creatorHints,
+    reasons,
   );
 
   for (const executableBaseName of executableBaseNames) {
-    titleHints.push(
-      createTitleHint(executableBaseName, "executable-name", 76, [
+    appendTitleHints(
+      executableBaseName,
+      "executable-name",
+      76,
+      [
         "parsed title from executable name",
-      ]),
+      ],
+      titleHints,
+      creatorHints,
+      reasons,
     );
   }
 
   const leafLooksAuxiliary = looksLikeAuxiliarySegment(leafName);
   if (leafLooksAuxiliary && relativeParts.length >= 2) {
-    titleHints.push(
-      createTitleHint(relativeParts[relativeParts.length - 2], "parent-folder", 68, [
+    appendTitleHints(
+      relativeParts[relativeParts.length - 2],
+      "parent-folder",
+      68,
+      [
         "parsed title from parent folder because leaf folder looks like a build/version label",
-      ]),
+      ],
+      titleHints,
+      creatorHints,
+      reasons,
     );
   }
 
@@ -343,8 +497,14 @@ function extractScanCandidateIdentity(input) {
       : null;
 
   if (renpyHints?.title) {
-    titleHints.push(
-      createTitleHint(renpyHints.title, "renpy-options", 110, renpyHints.reasons),
+    appendTitleHints(
+      renpyHints.title,
+      "renpy-options",
+      110,
+      renpyHints.reasons,
+      titleHints,
+      creatorHints,
+      reasons,
     );
   }
 

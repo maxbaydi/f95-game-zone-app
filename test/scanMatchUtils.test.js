@@ -41,4 +41,5 @@ test("normalizeEngineName maps common aliases to canonical values", () => {
   assert.equal(normalizeEngineName("Ren'Py"), "renpy");
   assert.equal(normalizeEngineName("RPG Maker MV"), "rpgm");
   assert.equal(normalizeEngineName("Unreal Engine"), "unreal");
+  assert.equal(normalizeEngineName("Unknown"), "");
 });

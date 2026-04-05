@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   signInCloud: (payload) => ipcRenderer.invoke("sign-in-cloud", payload),
   signUpCloud: (payload) => ipcRenderer.invoke("sign-up-cloud", payload),
   signOutCloud: () => ipcRenderer.invoke("sign-out-cloud"),
+  runBulkCloudSaveAction: (mode) =>
+    ipcRenderer.invoke("run-bulk-cloud-save-action", mode),
+  getCloudLibraryCatalog: () => ipcRenderer.invoke("get-cloud-library-catalog"),
+  syncCloudLibraryCatalog: () =>
+    ipcRenderer.invoke("sync-cloud-library-catalog"),
   getSaveProfileSnapshot: (recordId) =>
     ipcRenderer.invoke("get-save-profile-snapshot", recordId),
   refreshSaveProfiles: (recordId) =>
@@ -82,6 +87,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getF95Downloads: () => ipcRenderer.invoke("get-f95-downloads"),
   getF95ThreadInstallState: (payload) =>
     ipcRenderer.invoke("get-f95-thread-install-state", payload),
+  addF95ThreadToLibrary: (payload) =>
+    ipcRenderer.invoke("add-f95-thread-to-library", payload),
   inspectF95Thread: (payload) =>
     ipcRenderer.invoke("inspect-f95-thread", payload),
   openF95Login: () => ipcRenderer.invoke("open-f95-login"),
@@ -262,6 +269,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on("cloud-auth-changed", listener);
     return () => ipcRenderer.removeListener("cloud-auth-changed", listener);
+  },
+  onCloudBulkProgress: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("cloud-bulk-progress", listener);
+    return () => ipcRenderer.removeListener("cloud-bulk-progress", listener);
   },
   onF95DownloadProgress: (callback) =>
     ipcRenderer.on("f95-download-progress", (event, payload) =>

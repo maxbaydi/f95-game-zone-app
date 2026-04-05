@@ -6,6 +6,7 @@ const {
   compareVersionLabels,
   diceCoefficient,
   jaccardSimilarity,
+  normalizeVersionLabel,
   normalizeEngineName,
   tokenOverlap,
 } = require("../shared/scanMatchUtils");
@@ -93,6 +94,23 @@ function collectVariantTokens(variants) {
   }
 
   return tokens;
+}
+
+/**
+ * @param {Set<string>} leftTokens
+ * @param {Set<string>} rightTokens
+ * @returns {number}
+ */
+function countSharedTokens(leftTokens, rightTokens) {
+  let shared = 0;
+
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      shared += 1;
+    }
+  }
+
+  return shared;
 }
 
 /**
@@ -222,9 +240,9 @@ function buildCandidateFingerprint(candidate) {
   const creatorVariants = dedupeVariants(
     (candidate.creatorHints || []).map((creator) => buildVariant(creator, "detected-creator", 0)),
   );
-  const versionHints = (candidate.versionHints || [])
+  const versionHints = [...new Set((candidate.versionHints || [])
     .map((version) => trimText(version))
-    .filter(Boolean);
+    .filter((version) => Boolean(normalizeVersionLabel(version))))];
 
   return {
     titleVariants,
@@ -337,6 +355,13 @@ function scoreTitleMatch(candidate, entry) {
         const dice = diceCoefficient(localVariant.value, remoteVariant.value);
         const overlap = tokenOverlap(localVariant.tokens, remoteVariant.tokens);
         const jaccard = jaccardSimilarity(localVariant.tokens, remoteVariant.tokens);
+        const sharedTokens = countSharedTokens(localVariant.tokens, remoteVariant.tokens);
+        const symmetricTokenDifference =
+          localVariant.tokens.size + remoteVariant.tokens.size - sharedTokens * 2;
+        const subsetMatch =
+          sharedTokens > 0 &&
+          sharedTokens === Math.min(localVariant.tokens.size, remoteVariant.tokens.size) &&
+          localVariant.tokens.size !== remoteVariant.tokens.size;
         const containsMatch =
           localVariant.compactKey.length >= 8 &&
           remoteVariant.compactKey.length >= 8 &&
@@ -354,7 +379,23 @@ function scoreTitleMatch(candidate, entry) {
           score = Math.max(score, 98);
         }
 
+        if (symmetricTokenDifference > 0) {
+          score -= Math.min(24, symmetricTokenDifference * 10);
+        }
+
+        if (subsetMatch) {
+          score -= 12;
+        }
+
+        if (
+          localVariant.tokens.size === 1 ||
+          remoteVariant.tokens.size === 1
+        ) {
+          score -= 6;
+        }
+
         score = Math.min(score, 108);
+        score = Math.max(score, 0);
       }
 
       score += Math.min(localVariant.weight + remoteVariant.weight, 18);
@@ -435,31 +476,37 @@ function scoreCreatorMatch(candidate, entry) {
  * @param {ReturnType<typeof buildIndexedEntry>} entry
  */
 function scoreVersionMatch(candidate, entry) {
-  let best = {
-    score: 0,
-    reason: "",
-  };
+  const comparisons = [];
 
   for (const versionHint of candidate.versionHints) {
     const comparison = compareVersionLabels(versionHint, entry.version);
-    if (comparison.score > best.score) {
-      best = {
-        score: comparison.score,
-        reason:
-          comparison.matchType === "exact"
-            ? "version matches Atlas version"
-            : comparison.matchType === "prefix" || comparison.matchType === "shared-prefix"
-              ? "version is compatible with Atlas version"
-              : comparison.matchType === "major-match"
-                ? "major version matches Atlas version"
-                : comparison.matchType === "conflict"
-                  ? "version conflicts with Atlas version"
-                  : "",
-      };
+    if (comparison.matchType !== "missing") {
+      comparisons.push(comparison);
     }
   }
 
-  return best;
+  if (comparisons.length === 0) {
+    return {
+      score: 0,
+      reason: "",
+    };
+  }
+
+  const best = comparisons.sort((left, right) => right.score - left.score)[0];
+
+  return {
+    score: best.score,
+    reason:
+      best.matchType === "exact"
+        ? "version matches Atlas version"
+        : best.matchType === "prefix" || best.matchType === "shared-prefix"
+          ? "version is compatible with Atlas version"
+          : best.matchType === "major-match"
+            ? "major version matches Atlas version"
+            : best.matchType === "conflict"
+              ? "version conflicts with Atlas version"
+              : "",
+  };
 }
 
 /**
@@ -540,20 +587,50 @@ function decideMatchOutcome(matches) {
   const strongCorroboration =
     bestMatch.creatorScore >= 16 ||
     bestMatch.versionScore >= 8 ||
+    (bestMatch.titleExact &&
+      bestMatch.versionScore >= 5 &&
+      bestMatch.engineScore >= 18) ||
+    (bestMatch.titleExact &&
+      bestMatch.engineScore >= 18 &&
+      Boolean(bestMatch.f95Id)) ||
     (bestMatch.creatorScore >= 10 && bestMatch.engineScore >= 18);
 
   const strongAutoMatch =
     bestMatch.titleExact &&
     bestMatch.score >= 150 &&
-    margin >= 25 &&
+    margin >= 15 &&
     strongCorroboration;
+  const clearNearExactAutoMatch =
+    !bestMatch.titleExact &&
+    bestMatch.titleScore >= 120 &&
+    bestMatch.score >= 140 &&
+    margin >= 60 &&
+    bestMatch.engineScore >= 18;
+  const creatorAnchoredAutoMatch =
+    bestMatch.creatorScore >= 38 &&
+    bestMatch.versionScore >= 12 &&
+    bestMatch.engineScore >= 18 &&
+    bestMatch.score >= 145 &&
+    margin >= 25;
+  const preciseVersionAutoMatch =
+    bestMatch.titleScore >= 88 &&
+    bestMatch.versionScore >= 18 &&
+    bestMatch.engineScore >= 18 &&
+    bestMatch.score >= 125 &&
+    margin >= 20;
   const similarityAutoMatch =
     bestMatch.titleSimilarity >= 0.96 &&
     bestMatch.score >= 165 &&
     margin >= 35 &&
     (bestMatch.creatorScore >= 16 || bestMatch.versionScore >= 8);
 
-  if (strongAutoMatch || similarityAutoMatch) {
+  if (
+    strongAutoMatch ||
+    clearNearExactAutoMatch ||
+    creatorAnchoredAutoMatch ||
+    preciseVersionAutoMatch ||
+    similarityAutoMatch
+  ) {
     return {
       status: "matched",
       autoMatch: true,

@@ -1740,6 +1740,13 @@ const App = () => {
     () => games.filter((game) => game.isUpdateAvailable).length,
     [games],
   );
+  const installedGameCount = useMemo(
+    () =>
+      games.filter(
+        (game) => Array.isArray(game.versions) && game.versions.length > 0,
+      ).length,
+    [games],
+  );
 
   const activeFilterCount = useMemo(
     () => countActiveFilters(siteSearchFilters),
@@ -1900,7 +1907,7 @@ const App = () => {
                 placeholder={
                   activeSection === SECTION_SEARCH
                     ? "Use the embedded F95 page below for live search"
-                    : "Search installed library"
+                    : "Search library"
                 }
               />
             </div>
@@ -1977,7 +1984,7 @@ const App = () => {
               <div className="sticky top-0 z-10 border-b border-border bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.2em] text-text/55 backdrop-blur-md">
                 {activeSection === SECTION_UPDATES
                   ? "Update Titles"
-                  : "Installed Titles"}
+                  : "Library Titles"}
               </div>
               {visibleLibraryGames.length === 0 ? (
                 <div className="p-4 text-center text-sm text-text/65">
@@ -2365,7 +2372,7 @@ const App = () => {
         <div className="flex min-w-0 items-center justify-center gap-2 text-center text-[11px] text-text/80 sm:text-xs">
           <i className="fas fa-gamepad shrink-0 text-glam/90"></i>
           <span className="truncate">
-            {`${games.length} installed · ${totalVersions} versions · ${updateAvailableCount} updates`}
+            {`${games.length} in library · ${installedGameCount} installed · ${totalVersions} versions · ${updateAvailableCount} updates`}
           </span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">

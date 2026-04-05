@@ -14,12 +14,136 @@ Last updated: 2026-04-05
 | Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------- | ----------- | -------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Stage 1. Local core              | in_progress |      98% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall, a confidence-ranked local scanner matcher with Ren'Py metadata extraction, runtime/helper-path suppression, and a safe auto-import gate that leaves ambiguous candidates out of the installed library now exist. Large messy-library manual smoke is still pending. |
+| Stage 1. Local core              | in_progress |      99% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, library stubs for not-yet-installed F95 threads, card/detail install CTAs for stub entries, a first local save vault, Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall, a confidence-ranked local scanner matcher with Ren'Py metadata extraction, runtime/helper-path suppression, a safe auto-import gate that leaves ambiguous candidates out of the installed library, and a reusable safe cleanup path for obvious runtime-trash library records now exist. Large messy-library manual smoke is still pending. |
 | Stage 2. Save intelligence       | in_progress |      79% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app now detects install-relative save roots, RPG Maker root save files, `%AppData%/RenPy/*`, Unity `LocalLow`, Unreal save roots, Godot `app_userdata`, and packaged HTML app storage, while local save vault and cloud sync can back up/restore those profile strategies safely. Richer conflict UX and live manual smoke across real game installs are still missing.                                                                                                                                      |
-| Stage 3. Supabase                | in_progress |      58% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. The service-role key is intentionally not used in the shipped app. First live bucket/auth smoke is still pending.                                                                                                                                                                                                                                                      |
-| Stage 4. Sync UX                 | in_progress |      56% | Settings now have a dedicated Cloud Saves page for config/auth, and the library details panel exposes refresh/upload/restore actions plus sync state. False warning rendering after successful backup is fixed, but richer conflict prompts, remote history browsing and background auto-sync are still missing.                                                                                                                                                                                                                                               |
-| Stage 5. Quality hardening       | partial     |      60% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                              |
-| MVP total                        | in_progress |      79% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Stage 3. Supabase                | in_progress |      62% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. A user-scoped additive cloud-library catalog is now stored alongside save archives without any service-role key in the client. First live bucket/auth smoke is still pending.                                                                                                                                                                                           |
+| Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                             |
+| Stage 5. Quality hardening       | partial     |      61% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                          |
+| MVP total                        | in_progress |      83% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### 2026-04-05 — Stage 4 sync UX + Stage 1 library flow: additive cloud library catalog, bulk cloud save actions, and installable library stubs
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes the missing cross-device library continuity flow, adds bulk cloud save actions, and turns F95 thread links into first-class library entries even before installation
+
+What was done:
+
+- Added account-wide cloud library catalog sync on top of the existing user-scoped Supabase storage flow.
+- Added safe local materialization of remote-only cloud library entries into local stub records so another PC can see the library without already having installed files.
+- Added a manual `Add to Library` action in the live F95 browser workspace next to `Install This Thread`.
+- Added `Install` CTAs for library entries with no installed files on both the banner card and the details panel.
+- Added bulk cloud save actions for all installed games:
+  - back up all detected saves to cloud
+  - sync all installed games against cloud saves
+  - continue after per-game failures instead of aborting the whole batch
+- Added cloud-panel progress and summary UI for those bulk actions.
+
+How it was implemented:
+
+- Cloud library catalog:
+  - `src/main/cloudLibraryCatalog.js`
+  - introduced normalized cloud-library entries and merge logic for local + remote catalogs
+- Supabase/storage layer:
+  - `src/main/cloudSaveSync.js`
+  - now accepts `listGames(...)`
+  - stores / reads a user-scoped `library/catalog.json`
+  - merges local and remote library entries additively
+- Local library materialization and F95 thread stubs:
+  - `src/main.js`
+  - added local upsert flow for F95-linked library stubs
+  - remote-only catalog entries now materialize into local `games` rows without installed `versions`
+  - `resolveF95InstallTarget(...)` now reuses stub records so installing later updates the same library entry instead of creating a duplicate
+- F95 mapping persistence:
+  - `src/database.js`
+  - `getGame(...)` / `getGames(...)` now resolve `siteUrl` and `f95_id` from either Atlas-backed F95 metadata or direct `f95_zone_mappings`
+  - added `upsertF95ZoneMapping(...)`
+  - added migration `src/main/db/migrations/007_f95_zone_mapping_site_url.js`
+  - updated migration index + tests
+- Renderer / UI:
+  - `src/renderer.js`
+  - `src/web-preview-api.js`
+  - added bulk cloud action APIs, cloud-library catalog APIs, bulk progress listener, and `addF95ThreadToLibrary(...)`
+  - `src/core/cloud/CloudAuthPanel.jsx`
+    - now exposes bulk backup/sync buttons
+    - shows live bulk progress
+    - shows cloud-library counts and remote-only entries
+  - `src/core/search/F95BrowserWorkspace.jsx`
+    - now distinguishes `in library` vs `installed`
+    - adds the new `Add to Library` button next to install
+  - `src/core/GameBanner.js`
+    - stub entries now show `Install` instead of a dead `Play`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+    - stub entries now show install-ready state and `Install` CTA
+  - `src/core/updates/F95UpdateModal.jsx`
+    - install/update copy now adapts to whether the entry already has installed files
+  - `src/App.jsx`
+    - library UI summary now distinguishes total library entries from installed entries
+
+Checks run:
+
+- `node --test test/cloudLibraryCatalog.test.js test/f95ZoneMappings.test.js test/migrations.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- no live manual Electron smoke was run yet for:
+  - signing in on a second machine and watching remote-only library entries appear
+  - full bulk save sync against a real populated Supabase bucket
+- there is still no explicit account-level "remove from every device" flow; current cloud-library behavior is intentionally additive, not destructive
+
+### 2026-04-05 — Stage 1 library hygiene: safe cleanup for obvious runtime-trash records
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes the immediate real-world fallout from the older scanner by safely removing obvious runtime/helper junk from the installed library without touching game files or user saves
+
+What was done:
+
+- Added a reusable backend cleanup path for obvious noise records already imported into `games` / `versions`.
+- Ran the cleanup against the current live profile and removed 6 strict-noise records:
+  - `Managed`
+  - `FullNET`
+  - `DIN`
+  - `ReiPatcher`
+  - `Common ExtProtocol Executor`
+  - `readme`
+- Confirmed after cleanup that no matching runtime-trash records remain in the current library database.
+
+How it was implemented:
+
+- Cleanup classifier:
+  - `src/main/libraryCleanup.js`
+  - added strict heuristics that only flag records when they look like obvious runtime/helper artifacts:
+    - known junk titles (`readme`, `ReiPatcher`, `Managed`, `FullNET`, etc.)
+    - known helper executables (`readme.html`, `ReiPatcher.exe`, `Common.ExtProtocol.Executor.exe`, etc.)
+    - nested runtime paths (`game/fonts`, `*_Data/Managed`, `Translators`, `BepInEx`, `RenPy`, `www`, and related infra folders)
+  - cleanup is intentionally conservative and ignores merely suspicious-but-not-certain cases like an `index.html` root game
+- Safety model:
+  - cleanup uses `deleteGameCompletely(...)` only for the library record and related metadata/cache rows
+  - it does **not** delete installed game files from disk
+  - it does **not** touch user save files
+- Live execution:
+  - performed a dry-run first against `C:\Users\jerem\AppData\Roaming\f95-game-zone-app\data\data.db`
+  - only after confirming the candidate set contained strict junk records did the real cleanup run
+
+Files changed in this slice:
+
+- `src/main/libraryCleanup.js`
+- `test/libraryCleanup.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/libraryCleanup.test.js test/gameRemoval.test.js`
+- `npm run typecheck`
+- `npm run lint`
+
+What is still missing here:
+
+- this cleanup path is backend-only for now; there is no explicit Scan Hub / Library UI action wired to it yet
+- non-junk but still badly identified records such as HTML roots with `index.html` are intentionally left for a separate reconciliation pass instead of being auto-deleted
 
 ### 2026-04-05 — Stage 4 sync UX: stop showing fake cloud-backup errors after success
 
@@ -2877,3 +3001,129 @@ Impact on overall progress:
 
 - gives the product an explicit safe reset path for scanner persistence without violating the rule against hidden destructive refactors
 - closes the gap between incremental rescans and a real full reindex flow while preserving backward compatibility for the local library and save sync state
+
+## 2026-04-05 — Library duplicate prevention and exact-path reconciliation
+
+What was done:
+
+- fixed the import pipeline so `reset cache + rescan` no longer creates a second library record for the same installed folder
+- added exact-path duplicate reconciliation that preserves the best record and removes loser records sharing the identical `game_path`
+- hardened duplicate cleanup so linked save/cloud/mapping metadata is migrated before deleting loser records
+- ran the reconciler against the live profile after a DB backup and collapsed `39` duplicate path groups, reducing the library from `81` to `42` records
+
+How it was implemented:
+
+- updated `src/main.js` import flow to build a path index from `getGames()`, resolve existing records by normalized `game_path`, and update the existing game/version instead of blindly calling `addGame()`
+- added `runLibraryDuplicateCleanup()` in `src/main.js` and invoked it from the library rescan flow so future rescans also self-heal legacy exact-path duplicates
+- updated `src/database.js` so `updateGame()` performs a real `UPDATE` instead of `INSERT OR REPLACE`, avoiding silent loss of fields like playtime/description
+- expanded `src/main/libraryDuplicates.js` to score duplicate winners more sanely, penalize titles with detached version tails, and migrate `save_profiles`, `save_sync_state`, `atlas_mappings`, `steam_mappings`, `f95_zone_mappings`, and `tag_mappings`
+- added regression coverage in `test/libraryDuplicates.test.js`
+- created a safety backup at `C:\Users\jerem\AppData\Roaming\f95-game-zone-app\backups\data-pre-duplicate-cleanup-20260405-214703.db`
+
+What remains:
+
+- manually refresh/restart the app shell and verify the rendered library count matches the cleaned DB state
+- keep tuning duplicate winner scoring for edge cases where both records are unmapped and only folder-derived metadata exists
+- later decide whether to add a dedicated user-triggered “reconcile library duplicates” action in UI, or keep this as an automatic maintenance pass during rescans only
+
+Current stage progress:
+
+- duplicate prevention for library rescans: 95%
+- exact-path library reconciliation safety: 90%
+- overall roadmap progress relative to the current fork scope: 85%
+
+Impact on overall progress:
+
+- removes the main data-integrity regression where a safe rescan could quietly bloat the library with duplicate records for the same install path
+- keeps cleanup aligned with the project rule that user data safety comes first, because only DB metadata was merged/removed while installed game files and save files on disk were left untouched
+
+## 2026-04-05 — Missing F95 auto-links for exact game matches
+
+What was done:
+
+- fixed the scan matcher so exact game titles with valid version/engine evidence no longer stay stuck in `ambiguous` just because of nearby fuzzy neighbors or stale duplicate Atlas rows
+- backfilled live Atlas/F95 mappings for `12` already-imported library records that were safe `matched` candidates under the corrected matcher
+- explicitly repaired the user-reported cases `My Hotwife`, `Not a Failure to Launch`, and `Willing Temptations` in the live profile, and updated their stale `scan_candidates` rows to `matched` + `imported`
+
+How it was implemented:
+
+- updated `src/shared/scanMatchUtils.js` so `normalizeEngineName()` treats `Unknown`-style placeholders as missing engine data instead of false engine conflicts
+- updated `src/main/scanAtlasMatcher.js` to:
+  - filter invalid version hints before scoring
+  - preserve negative version-conflict evidence instead of letting a missing hint erase it
+  - penalize subset/substring title collisions like `Temptations` vs `Willing Temptations`
+  - relax the auto-match decision only for exact-title cases that also have enough corroboration from version/engine/F95 presence
+- extended `test/scanAtlasMatcher.test.js` with regressions covering:
+  - `Not a Failure to Launch` vs `A Failure to Launch`
+  - `My Hotwife` same-title branch selection
+  - `Willing Temptations` vs shorter `Temptations` collisions
+- extended `test/scanMatchUtils.test.js` with the `Unknown` engine normalization case
+- created a safety backup at `C:\Users\jerem\AppData\Roaming\f95-game-zone-app\backups\data-pre-match-backfill-20260405-220145.db`
+- ran a live metadata backfill that added Atlas mappings and refreshed scan-candidate match state for 12 exact-path library entries, including:
+  - `record_id 70` → `My Hotwife`
+  - `record_id 72` → `Not a Failure to Launch`
+  - `record_id 89` → `Willing Temptations`
+
+What remains:
+
+- manually refresh/restart the renderer and verify the linked thread metadata is visible in the library UI for the newly mapped records
+- continue tuning title/version heuristics for harder non-exact cases where there is no Ren'Py metadata and no strong executable-name evidence
+- later decide whether to add a dedicated maintenance action that re-evaluates already imported unmapped library records without requiring a full reset-cache rescan
+
+Current stage progress:
+
+- F95 thread auto-link reliability for exact-title scans: 91%
+- live metadata backfill for already imported records: 88%
+- overall roadmap progress relative to the current fork scope: 87%
+
+Impact on overall progress:
+
+- removes a real product failure mode where obviously correct site threads were present in the local catalog but still withheld from the user because the matcher was over-penalizing engine gaps and under-penalizing fuzzy neighbors
+- reduces the number of “known but not linked” games in the current profile immediately, instead of waiting for the next full rescan to repair those mappings
+
+## 2026-04-05 — Parent-folder identity and remaining site-link backfill
+
+What was done:
+
+- upgraded scan identity extraction so it can recover creator/title evidence from two common messy Windows folder patterns:
+  - `Title by Creator`
+  - `TitleCreatorStudio` with the creator stuck onto the end of the title token
+- widened the matcher only for clearly dominant non-exact cases, so strong parent-folder titles and creator-anchored matches can auto-link without opening the floodgates to generic fuzzy collisions
+- backfilled 4 more live library records that became safely matchable after those universal heuristics:
+  - `NLWMD 0 7 0b`
+  - `Dating a Giantess by Giantess Nexus`
+  - `GGA`
+  - `Libertas`
+
+How it was implemented:
+
+- added creator/title splitting helpers in `src/main/scanIdentity.js` and routed folder/executable/Ren'Py title hints through a shared `appendTitleHints(...)` path
+- added regression coverage in `test/scanIdentity.test.js` for:
+  - `Dating a Giantess by Giantess Nexus`
+  - `New_Life_with_My_DaughterVanderGames-0.7.0b-pc`
+- extended `src/main/scanAtlasMatcher.js` with additional auto-match lanes for:
+  - decisive near-exact parent-folder titles
+  - creator-anchored matches with exact version evidence
+  - exact-version + engine corroboration when title evidence is strong enough
+- added matcher regressions in `test/scanAtlasMatcher.test.js` for `Libertas`, `NLWMD`, `Date a Giantess`, and `Gamer Girl Adventure`
+- created a safety backup at `C:\Users\jerem\AppData\Roaming\f95-game-zone-app\backups\data-pre-remaining-match-backfill-20260405-221500.db`
+
+What remains:
+
+- unresolved from the reviewed screenshot, and intentionally still not auto-linked:
+  - `SW upd4 Open release` — not enough trustworthy local identity; current data looks like junk build naming
+  - `Family Secrets` — true collision between multiple real F95 threads with the same title
+  - `SmallCoffee female` — likely related to `Small Coffee`, but the local title modifier is too specific to safely collapse without more evidence
+  - `banu west` — probably `Banu in the West`, but still not strong enough for safe automatic linking
+- later add a dedicated “re-evaluate unmapped library records” maintenance action so these improved heuristics can be applied from UI without needing another full rescan
+
+Current stage progress:
+
+- universal scan identity extraction for messy folder naming: 90%
+- F95 thread auto-link reliability for imported library records: 93%
+- overall roadmap progress relative to the current fork scope: 88%
+
+Impact on overall progress:
+
+- reduces dependence on pristine folder naming and lets the scanner recover correct site links from the ugly real-world naming conventions users actually have on disk
+- keeps the matching policy professional: more exact links are recovered automatically, while the genuinely unsafe collisions are still withheld instead of being silently mislinked

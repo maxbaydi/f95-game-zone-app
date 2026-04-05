@@ -150,6 +150,15 @@ function normalizeEngineName(value) {
     return "";
   }
 
+  if (
+    normalized === "unknown" ||
+    normalized === "other" ||
+    normalized === "na" ||
+    normalized === "n/a"
+  ) {
+    return "";
+  }
+
   if (normalized === "renpy" || normalized === "renpy64") {
     return "renpy";
   }

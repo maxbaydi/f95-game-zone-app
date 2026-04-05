@@ -77,3 +77,63 @@ test("extractScanCandidateIdentity treats index.html as generic and keeps folder
 
   assert.equal(identity.title, "My Oblivious MILF");
 });
+
+test("extractScanCandidateIdentity splits creator from Ren'Py title suffix", () => {
+  const root = path.join(
+    makeTempDir(),
+    "games",
+    "Dating_a_Giantess-5.22-pc",
+  );
+  fs.mkdirSync(path.join(root, "game"), { recursive: true });
+  fs.writeFileSync(path.join(root, "Dating_a_Giantess.exe"), "");
+  fs.writeFileSync(
+    path.join(root, "game", "options.rpy"),
+    [
+      'define config.name = _("Dating a Giantess by Giantess Nexus")',
+      'define config.version = "5.22"',
+    ].join("\n"),
+  );
+
+  const identity = extractScanCandidateIdentity({
+    targetPath: root,
+    rootPath: path.dirname(root),
+    relativePath: path.basename(root),
+    isFile: false,
+    executables: ["Dating_a_Giantess.exe"],
+    engine: "renpy",
+  });
+
+  assert.ok(
+    identity.titleVariants.some((variant) => variant.value === "Dating a Giantess"),
+  );
+  assert.ok(identity.creatorHints.includes("Giantess Nexus"));
+  assert.ok(identity.reasons.includes("parsed creator from title suffix"));
+});
+
+test("extractScanCandidateIdentity splits attached studio suffix from parent folder", () => {
+  const sourceRoot = path.join(makeTempDir(), "source");
+  const gameRoot = path.join(
+    sourceRoot,
+    "New_Life_with_My_DaughterVanderGames-0.7.0b-pc",
+    "NLWMD-0.7.0b-pc",
+  );
+  fs.mkdirSync(gameRoot, { recursive: true });
+  fs.writeFileSync(path.join(gameRoot, "NLWMD.exe"), "");
+
+  const identity = extractScanCandidateIdentity({
+    targetPath: gameRoot,
+    rootPath: sourceRoot,
+    relativePath: path.relative(sourceRoot, gameRoot),
+    isFile: false,
+    executables: ["NLWMD.exe"],
+    engine: "renpy",
+  });
+
+  assert.ok(
+    identity.titleVariants.some(
+      (variant) => variant.value === "New Life with My Daughter",
+    ),
+  );
+  assert.ok(identity.creatorHints.includes("Vander Games"));
+  assert.ok(identity.reasons.includes("parsed creator from attached studio suffix"));
+});

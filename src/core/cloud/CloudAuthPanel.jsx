@@ -1,4 +1,4 @@
-const { useCallback, useEffect, useState } = window.React;
+const { useCallback, useEffect, useMemo, useState } = window.React;
 
 const createCloudAuthPanelDefaultState = () => ({
   configured: false,
@@ -6,6 +6,25 @@ const createCloudAuthPanelDefaultState = () => ({
   user: null,
   error: "",
   settings: {},
+});
+
+const createCloudBulkProgressState = () => ({
+  active: false,
+  mode: "",
+  completed: 0,
+  total: 0,
+  currentTitle: "",
+  summary: null,
+});
+
+const createCloudLibraryCatalogState = () => ({
+  localEntries: [],
+  remoteEntries: [],
+  mergedEntries: [],
+  remoteOnlyEntries: [],
+  remoteExists: false,
+  lastUpdatedAt: "",
+  materialized: null,
 });
 
 const getCloudAuthPanelErrorMessage = (error, fallbackMessage) => {
@@ -18,6 +37,47 @@ const getCloudAuthPanelErrorMessage = (error, fallbackMessage) => {
   }
 
   return fallbackMessage;
+};
+
+const formatCloudPanelDate = (value) => {
+  if (!value) {
+    return "Never";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Never";
+  }
+
+  return parsed.toLocaleString();
+};
+
+const getBulkSummaryMessage = (summary) => {
+  if (!summary) {
+    return "";
+  }
+
+  const parts = [];
+  if (summary.uploaded) {
+    parts.push(`${summary.uploaded} uploaded`);
+  }
+  if (summary.restored) {
+    parts.push(`${summary.restored} restored`);
+  }
+  if (summary.synced) {
+    parts.push(`${summary.synced} already synced`);
+  }
+  if (summary.conflicts) {
+    parts.push(`${summary.conflicts} conflicts`);
+  }
+  if (summary.skipped) {
+    parts.push(`${summary.skipped} skipped`);
+  }
+  if (summary.failed) {
+    parts.push(`${summary.failed} failed`);
+  }
+
+  return parts.join(" · ");
 };
 
 const CloudAuthFeatureCard = ({ title, description }) => (
@@ -42,6 +102,14 @@ const CloudAuthPanelContent = ({ onClose }) => {
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isAuthBusy, setIsAuthBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(
+    createCloudBulkProgressState(),
+  );
+  const [catalogState, setCatalogState] = useState(
+    createCloudLibraryCatalogState(),
+  );
+  const [isCatalogLoading, setIsCatalogLoading] = useState(false);
+  const [catalogBusyAction, setCatalogBusyAction] = useState("");
   const userFacingError =
     errorMessage ||
     getCloudSyncMessageIfPresent(authState.error, {
@@ -67,19 +135,95 @@ const CloudAuthPanelContent = ({ onClose }) => {
     }
   }, []);
 
+  const loadCatalog = useCallback(
+    async (mode = "read") => {
+      if (!authState.authenticated) {
+        setCatalogState(createCloudLibraryCatalogState());
+        return;
+      }
+
+      setIsCatalogLoading(true);
+
+      try {
+        const initialResult =
+          mode === "sync"
+            ? await window.electronAPI.syncCloudLibraryCatalog()
+            : await window.electronAPI.getCloudLibraryCatalog();
+
+        if (!initialResult?.success || !initialResult?.result) {
+          setErrorMessage(
+            getCloudAuthPanelErrorMessage(
+              initialResult?.error,
+              "Failed to load your cloud library.",
+            ),
+          );
+          return;
+        }
+
+        const finalResult =
+          mode === "sync"
+            ? await window.electronAPI.getCloudLibraryCatalog()
+            : initialResult;
+
+        if (!finalResult?.success || !finalResult?.result) {
+          setErrorMessage(
+            getCloudAuthPanelErrorMessage(
+              finalResult?.error,
+              "Failed to load your cloud library.",
+            ),
+          );
+          return;
+        }
+
+        setCatalogState({
+          ...createCloudLibraryCatalogState(),
+          ...finalResult.result,
+          materialized: initialResult.result?.materialized || null,
+        });
+      } catch (error) {
+        console.error("Failed to load cloud library catalog:", error);
+        setErrorMessage(
+          getCloudAuthPanelErrorMessage(
+            error,
+            "Failed to load your cloud library.",
+          ),
+        );
+      } finally {
+        setIsCatalogLoading(false);
+      }
+    },
+    [authState.authenticated],
+  );
+
   useEffect(() => {
     loadState();
 
-    const unsubscribe = window.electronAPI.onCloudAuthChanged((state) => {
+    const unsubscribeAuth = window.electronAPI.onCloudAuthChanged((state) => {
       setAuthState(state || createCloudAuthPanelDefaultState());
+    });
+    const unsubscribeBulk = window.electronAPI.onCloudBulkProgress((payload) => {
+      setBulkProgress(payload || createCloudBulkProgressState());
     });
 
     return () => {
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
+      if (typeof unsubscribeAuth === "function") {
+        unsubscribeAuth();
+      }
+      if (typeof unsubscribeBulk === "function") {
+        unsubscribeBulk();
       }
     };
   }, [loadState]);
+
+  useEffect(() => {
+    if (!authState.authenticated) {
+      setCatalogState(createCloudLibraryCatalogState());
+      setBulkProgress(createCloudBulkProgressState());
+      return;
+    }
+
+    loadCatalog("read");
+  }, [authState.authenticated, loadCatalog]);
 
   const handleAuthAction = async (action) => {
     setIsAuthBusy(true);
@@ -123,6 +267,66 @@ const CloudAuthPanelContent = ({ onClose }) => {
     }
   };
 
+  const handleBulkAction = async (mode) => {
+    setErrorMessage("");
+    setStatusMessage("");
+
+    try {
+      const result = await window.electronAPI.runBulkCloudSaveAction(mode);
+      if (!result?.success) {
+        setErrorMessage(
+          getCloudAuthPanelErrorMessage(
+            result?.error,
+            "Cloud save action failed.",
+          ),
+        );
+        return;
+      }
+
+      const summary = result.result || null;
+      setBulkProgress({
+        active: false,
+        mode,
+        completed: summary?.completed || 0,
+        total: summary?.total || 0,
+        currentTitle: "",
+        summary,
+      });
+      setStatusMessage(
+        mode === "upload"
+          ? "Bulk backup finished."
+          : "Bulk save sync finished.",
+      );
+    } catch (error) {
+      console.error("Bulk cloud action failed:", error);
+      setErrorMessage(
+        getCloudAuthPanelErrorMessage(error, "Cloud save action failed."),
+      );
+    }
+  };
+
+  const handleCatalogAction = async (mode) => {
+    setCatalogBusyAction(mode);
+    setErrorMessage("");
+    setStatusMessage("");
+
+    try {
+      await loadCatalog(mode);
+      setStatusMessage(
+        mode === "sync"
+          ? "Cloud library sync finished."
+          : "Cloud library refreshed.",
+      );
+    } finally {
+      setCatalogBusyAction("");
+    }
+  };
+
+  const bulkSummaryText = useMemo(
+    () => getBulkSummaryMessage(bulkProgress.summary),
+    [bulkProgress.summary],
+  );
+
   return (
     <div className="space-y-5 text-text">
       <section className="border border-border bg-primary/50 p-5 shadow-glass">
@@ -133,8 +337,8 @@ const CloudAuthPanelContent = ({ onClose }) => {
             </div>
             <h3 className="mt-2 text-xl font-semibold">Account access</h3>
             <p className="mt-2 max-w-xl text-sm leading-6 text-text/70">
-              Sign in once and the app can back up and restore your saves across
-              machines without exposing backend internals in the UI.
+              One account handles save backups and the cross-device library
+              catalog without leaking infrastructure details into the UI.
             </p>
           </div>
           {onClose && (
@@ -152,18 +356,22 @@ const CloudAuthPanelContent = ({ onClose }) => {
           )}
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
           <CloudAuthFeatureCard
-            title="Back up to cloud"
-            description="Upload the save set detected on this machine to your account."
+            title="Back up all saves"
+            description="Push every detected local save set to the cloud without stopping on one bad game."
           />
           <CloudAuthFeatureCard
-            title="Restore safely"
-            description="Pull the latest backup back to this PC with a local safety copy first."
+            title="Sync across PCs"
+            description="Reconcile installed saves on this machine against the latest cloud copy."
           />
           <CloudAuthFeatureCard
-            title="Keep progress linked"
-            description="Use the same account on every machine where you want continuity."
+            title="Keep the library"
+            description="Library entries sync additively so a second PC does not start from zero."
+          />
+          <CloudAuthFeatureCard
+            title="Install later"
+            description="Remote library entries can exist without local files until you choose to install them."
           />
         </div>
       </section>
@@ -173,24 +381,171 @@ const CloudAuthPanelContent = ({ onClose }) => {
           Cloud saves are temporarily unavailable.
         </div>
       ) : authState.authenticated && authState.user ? (
-        <section className="border border-green-500/30 bg-green-500/10 p-5 shadow-glass-sm">
-          <div className="text-lg font-semibold">
-            Signed in as {authState.user.email}
-          </div>
-          <div className="mt-1 text-sm text-text/70">
-            Your cloud backups are linked to this account.
-          </div>
-          <button
-            type="button"
-            className="mt-4 border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-60"
-            onClick={() =>
-              handleAuthAction(() => window.electronAPI.signOutCloud())
-            }
-            disabled={isAuthBusy}
-          >
-            {isAuthBusy ? "Please wait..." : "Sign Out"}
-          </button>
-        </section>
+        <>
+          <section className="border border-green-500/30 bg-green-500/10 p-5 shadow-glass-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-lg font-semibold">
+                  Signed in as {authState.user.email}
+                </div>
+                <div className="mt-1 text-sm text-text/70">
+                  Your saves and library catalog are linked to this account.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-60"
+                onClick={() =>
+                  handleAuthAction(() => window.electronAPI.signOutCloud())
+                }
+                disabled={isAuthBusy}
+              >
+                {isAuthBusy ? "Please wait..." : "Sign Out"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => handleBulkAction("upload")}
+                disabled={bulkProgress.active}
+                className="border border-accent/50 bg-accent px-4 py-3 text-left text-sm font-medium text-text transition hover:bg-selected disabled:opacity-60"
+              >
+                <div>Back Up All Saves</div>
+                <div className="mt-1 text-xs font-normal text-text/75">
+                  Upload every detected local save set on this PC.
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkAction("sync")}
+                disabled={bulkProgress.active}
+                className="border border-border bg-secondary px-4 py-3 text-left text-sm font-medium text-text transition hover:bg-selected disabled:opacity-60"
+              >
+                <div>Sync All Saves</div>
+                <div className="mt-1 text-xs font-normal text-text/75">
+                  Reconcile all installed games against cloud backups.
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCatalogAction("sync")}
+                disabled={catalogBusyAction !== "" || isCatalogLoading}
+                className="border border-border bg-secondary px-4 py-3 text-left text-sm font-medium text-text transition hover:bg-selected disabled:opacity-60"
+              >
+                <div>Refresh Cloud Library</div>
+                <div className="mt-1 text-xs font-normal text-text/75">
+                  Merge this device with the account-wide library catalog.
+                </div>
+              </button>
+            </div>
+
+            {(bulkProgress.active || bulkProgress.summary) && (
+              <div className="mt-4 border border-border/70 bg-canvas/40 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-medium">
+                    {bulkProgress.mode === "upload"
+                      ? "Bulk backup"
+                      : "Bulk save sync"}
+                  </div>
+                  <div className="text-xs opacity-70">
+                    {bulkProgress.completed}/{bulkProgress.total}
+                  </div>
+                </div>
+                <div className="mt-1 text-xs opacity-70">
+                  {bulkProgress.active
+                    ? bulkProgress.currentTitle || "Working through the library..."
+                    : bulkSummaryText || "No changes were needed."}
+                </div>
+                {bulkSummaryText && (
+                  <div className="mt-2 text-xs text-text/80">
+                    {bulkSummaryText}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="border border-border bg-primary/35 p-5 shadow-glass-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.18em] text-text/55">
+                  Cloud Library
+                </div>
+                <div className="mt-1 text-sm text-text/75">
+                  Last synced: {formatCloudPanelDate(catalogState.lastUpdatedAt)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCatalogAction("read")}
+                disabled={catalogBusyAction !== "" || isCatalogLoading}
+                className="border border-border bg-secondary px-3 py-2 text-sm transition hover:bg-selected disabled:opacity-60"
+              >
+                {isCatalogLoading ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <CloudAuthFeatureCard
+                title={`${catalogState.mergedEntries.length}`}
+                description="Total account library entries after merge."
+              />
+              <CloudAuthFeatureCard
+                title={`${catalogState.localEntries.length}`}
+                description="Entries already known on this device."
+              />
+              <CloudAuthFeatureCard
+                title={`${catalogState.remoteEntries.length}`}
+                description="Entries currently stored in the cloud catalog."
+              />
+              <CloudAuthFeatureCard
+                title={`${catalogState.remoteOnlyEntries.length}`}
+                description="Entries that existed in cloud before this device pulled them in."
+              />
+            </div>
+
+            <div className="mt-4 border border-border/70 bg-canvas/40 p-3">
+              <div className="text-sm font-medium text-text">
+                Library entries not installed on this PC
+              </div>
+              {catalogState.materialized &&
+                (catalogState.materialized.added > 0 ||
+                  catalogState.materialized.updated > 0 ||
+                  catalogState.materialized.failed > 0) && (
+                  <div className="mt-1 text-xs opacity-70">
+                    Added {catalogState.materialized.added || 0}, refreshed{" "}
+                    {catalogState.materialized.updated || 0}, failed{" "}
+                    {catalogState.materialized.failed || 0}.
+                  </div>
+                )}
+              {catalogState.remoteOnlyEntries.length === 0 ? (
+                <div className="mt-2 text-sm opacity-60">
+                  Nothing extra is waiting in the cloud catalog right now.
+                </div>
+              ) : (
+                <div className="mt-3 max-h-[220px] space-y-2 overflow-y-auto pr-1">
+                  {catalogState.remoteOnlyEntries.map((entry) => (
+                    <div
+                      key={entry.identityKey}
+                      className="border border-border/60 bg-black/15 px-3 py-2"
+                    >
+                      <div className="font-medium text-text">
+                        {entry.title || "Unknown"}
+                      </div>
+                      <div className="text-xs opacity-65">
+                        {entry.creator || "Unknown creator"}
+                        {entry.latestVersion
+                          ? ` · Latest ${entry.latestVersion}`
+                          : ""}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </>
       ) : (
         <section className="border border-border bg-primary/35 p-5 shadow-glass-sm">
           <div className="inline-flex border border-border bg-black/20 p-1">
@@ -308,7 +663,7 @@ const CloudAuthPanel = ({
         role="presentation"
       >
         <div
-          className="max-h-[90vh] w-full max-w-3xl overflow-y-auto border border-border bg-primary/92 p-5 shadow-2xl"
+          className="max-h-[90vh] w-full max-w-4xl overflow-y-auto border border-border bg-primary/92 p-5 shadow-2xl"
           onClick={(event) => event.stopPropagation()}
           role="dialog"
           aria-modal="true"

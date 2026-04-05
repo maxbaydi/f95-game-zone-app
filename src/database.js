@@ -33,6 +33,57 @@ const resolveBannerUrl = (appPaths, localBannerPath, remoteBannerUrl) =>
 const buildDisplayText = (localValue, remoteValue) =>
   remoteValue || localValue || "";
 
+const GAME_METADATA_SELECT = `
+  games.record_id as record_id,
+  atlas_mappings.atlas_id as atlas_id,
+  games.title as title,
+  games.creator as creator,
+  games.engine as engine,
+  games.description,
+  games.total_playtime,
+  games.last_played_r,
+  games.last_played_version,
+  banners.path as banner_path,
+  COALESCE(f95_thread_data.banner_url, f95_atlas_data.banner_url) as remote_banner_url,
+  COALESCE(f95_thread_data.f95_id, f95_atlas_data.f95_id, f95_zone_mappings.f95_id) as f95_id,
+  COALESCE(
+    NULLIF(f95_thread_data.site_url, ''),
+    NULLIF(f95_zone_mappings.site_url, ''),
+    f95_atlas_data.site_url
+  ) as siteUrl,
+  COALESCE(f95_thread_data.views, f95_atlas_data.views) as views,
+  COALESCE(f95_thread_data.likes, f95_atlas_data.likes) as likes,
+  COALESCE(f95_thread_data.tags, f95_atlas_data.tags) as f95_tags,
+  COALESCE(f95_thread_data.rating, f95_atlas_data.rating) as rating,
+  atlas_data.title as atlas_title,
+  atlas_data.creator as atlas_creator,
+  atlas_data.status,
+  atlas_data.version as latestVersion,
+  atlas_data.category,
+  atlas_data.censored,
+  atlas_data.genre,
+  atlas_data.language,
+  atlas_data.os,
+  atlas_data.overview,
+  atlas_data.translations,
+  atlas_data.release_date,
+  atlas_data.voice,
+  atlas_data.short_name,
+  GROUP_CONCAT(tags.tag) AS tags
+`;
+
+const GAME_METADATA_JOINS = `
+  FROM games
+  LEFT JOIN atlas_mappings ON games.record_id = atlas_mappings.record_id
+  LEFT JOIN banners ON games.record_id = banners.record_id AND banners.type = 'small'
+  LEFT JOIN f95_zone_mappings ON games.record_id = f95_zone_mappings.record_id
+  LEFT JOIN f95_zone_data AS f95_atlas_data ON atlas_mappings.atlas_id = f95_atlas_data.atlas_id
+  LEFT JOIN f95_zone_data AS f95_thread_data ON f95_zone_mappings.f95_id = f95_thread_data.f95_id
+  LEFT JOIN atlas_data ON atlas_mappings.atlas_id = atlas_data.atlas_id
+  LEFT JOIN tag_mappings ON games.record_id = tag_mappings.record_id
+  LEFT JOIN tags ON tag_mappings.tag_id = tags.tag_id
+`;
+
 const addGame = (game) => {
   return new Promise((resolve, reject) => {
     const { title, creator, engine } = game;
@@ -83,25 +134,34 @@ const addGame = (game) => {
 
 const updateGame = (game) => {
   return new Promise((resolve, reject) => {
-    const { title, creator, engine } = game;
+    const { record_id, title, creator, engine } = game;
     const escapedTitle = title.replace(/'/g, "''");
     const escapedCreator = creator.replace(/'/g, "''");
     const escapedEngine = engine.replace(/'/g, "''");
+
+    if (!record_id) {
+      reject(new Error("updateGame requires record_id"));
+      return;
+    }
+
     db.run(
-      `INSERT OR REPLACE INTO games (record_id, title, creator, engine)
-          VALUES (?, ?, ?, ?)`,
-      [game.record_id, escapedTitle, escapedCreator, escapedEngine],
+      `UPDATE games
+       SET title = ?, creator = ?, engine = ?
+       WHERE record_id = ?`,
+      [escapedTitle, escapedCreator, escapedEngine, record_id],
       function (err) {
         if (err) {
-          console.error("Error inserting game:", err);
+          console.error("Error updating game:", err);
           reject(err);
           return;
         }
-        // Return the new record_id
-        console.log(
-          `Inserted new game ${title} by ${creator} with record_id: ${game.record_id}`,
-        );
-        resolve(game.record_id);
+
+        if (this.changes === 0) {
+          reject(new Error(`Game with record_id ${record_id} does not exist`));
+          return;
+        }
+
+        resolve(record_id);
       },
     );
   });
@@ -187,46 +247,8 @@ const getGame = (recordId, appPaths) => {
   return new Promise((resolve, reject) => {
     const query = `
       SELECT
-        games.record_id as record_id,
-        atlas_mappings.atlas_id as atlas_id,
-        games.title as title,
-        games.creator as creator,
-        games.engine as engine,
-        games.description,
-        games.total_playtime,
-        games.last_played_r,
-        games.last_played_version,
-        banners.path as banner_path,
-        f95_zone_data.banner_url as remote_banner_url,
-        f95_zone_data.f95_id as f95_id,
-        f95_zone_data.site_url as siteUrl,
-        f95_zone_data.views as views,
-        f95_zone_data.likes as likes,
-        f95_zone_data.tags as f95_tags,
-        f95_zone_data.rating as rating,
-        atlas_data.title as atlas_title,
-        atlas_data.creator as atlas_creator,
-        atlas_data.status,
-        atlas_data.version as latestVersion,
-        atlas_data.category,
-        atlas_data.censored,
-        atlas_data.genre,
-        atlas_data.language,
-        atlas_data.os,
-        atlas_data.overview,
-        atlas_data.translations,
-        atlas_data.release_date,
-        atlas_data.voice,
-        atlas_data.short_name,
-        GROUP_CONCAT(tags.tag) AS tags
-      FROM
-        games
-      LEFT JOIN atlas_mappings ON games.record_id = atlas_mappings.record_id
-      LEFT JOIN banners ON games.record_id = banners.record_id AND banners.type = 'small'
-      LEFT JOIN f95_zone_data ON atlas_mappings.atlas_id = f95_zone_data.atlas_id
-      LEFT JOIN atlas_data ON atlas_mappings.atlas_id = atlas_data.atlas_id
-      LEFT JOIN tag_mappings ON games.record_id = tag_mappings.record_id
-      LEFT JOIN tags ON tag_mappings.tag_id = tags.tag_id
+        ${GAME_METADATA_SELECT}
+      ${GAME_METADATA_JOINS}
       WHERE games.record_id = ?
       GROUP BY games.record_id
     `;
@@ -292,46 +314,8 @@ const getGames = (appPaths, offset = 0, limit = null) => {
     // Main query with OFFSET and LIMIT
     let mainQuery = `
       SELECT
-        games.record_id as record_id,
-        atlas_mappings.atlas_id as atlas_id,
-        games.title as title,
-        games.creator as creator,
-        games.engine as engine,
-        games.description,
-        games.total_playtime,
-        games.last_played_r,
-        games.last_played_version,
-        banners.path as banner_path,
-        f95_zone_data.banner_url as remote_banner_url,
-        f95_zone_data.f95_id as f95_id,
-        f95_zone_data.site_url as siteUrl,
-        f95_zone_data.views as views,
-        f95_zone_data.likes as likes,
-        f95_zone_data.tags as f95_tags,
-        f95_zone_data.rating as rating,
-        atlas_data.title as atlas_title,
-        atlas_data.creator as atlas_creator,
-        atlas_data.status,
-        atlas_data.version as latestVersion,
-        atlas_data.category,
-        atlas_data.censored,
-        atlas_data.genre,
-        atlas_data.language,
-        atlas_data.os,
-        atlas_data.overview,
-        atlas_data.translations,
-        atlas_data.release_date,
-        atlas_data.voice,
-        atlas_data.short_name,
-        GROUP_CONCAT(tags.tag) AS tags
-      FROM
-        games
-      LEFT JOIN atlas_mappings ON games.record_id = atlas_mappings.record_id
-      LEFT JOIN banners ON games.record_id = banners.record_id AND banners.type = 'small'
-      LEFT JOIN f95_zone_data ON atlas_mappings.atlas_id = f95_zone_data.atlas_id
-      LEFT JOIN atlas_data ON atlas_mappings.atlas_id = atlas_data.atlas_id
-      LEFT JOIN tag_mappings ON games.record_id = tag_mappings.record_id
-      LEFT JOIN tags ON tag_mappings.tag_id = tags.tag_id
+        ${GAME_METADATA_SELECT}
+      ${GAME_METADATA_JOINS}
       GROUP BY games.record_id
     `;
     const params = [];
@@ -962,6 +946,36 @@ const addAtlasMapping = (recordId, atlasId) => {
   });
 };
 
+const upsertF95ZoneMapping = (recordId, f95Id, siteUrl = "") => {
+  return new Promise((resolve, reject) => {
+    if (!recordId || !f95Id) {
+      reject(new Error(`Invalid input: recordId=${recordId}, f95Id=${f95Id}`));
+      return;
+    }
+
+    db.run(
+      `
+        INSERT INTO f95_zone_mappings (record_id, f95_id, site_url)
+        VALUES (?, ?, ?)
+        ON CONFLICT(record_id)
+        DO UPDATE SET
+          f95_id = excluded.f95_id,
+          site_url = excluded.site_url
+      `,
+      [recordId, f95Id, String(siteUrl || "").trim()],
+      (err) => {
+        if (err) {
+          console.error("Error updating f95_zone_mappings:", err);
+          reject(err);
+          return;
+        }
+
+        resolve();
+      },
+    );
+  });
+};
+
 const updateFolderSize = (recordId, version, size) => {
   return new Promise((resolve, reject) => {
     db.run(
@@ -1494,6 +1508,7 @@ module.exports = {
   checkRecordExist,
   checkPathExist,
   addAtlasMapping,
+  upsertF95ZoneMapping,
   updateFolderSize,
   getBannerUrl,
   getScreensUrlList,

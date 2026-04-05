@@ -39,6 +39,10 @@ const { inspectF95Thread } = require("./main/f95/threadInspector");
 const { backupGameSaves, restoreGameSaves } = require("./main/saveVault");
 const { createCloudSaveService } = require("./main/cloudSaveSync");
 const {
+  buildCloudLibraryCatalogEntry,
+  buildCloudLibraryEntryIdentity,
+} = require("./main/cloudLibraryCatalog");
+const {
   getSaveProfileSnapshot,
   refreshSaveProfiles,
 } = require("./main/saveProfiles");
@@ -63,6 +67,12 @@ const {
   buildLibraryPreviewRefreshTargets,
   shouldRefreshCachedPreviews,
 } = require("./main/libraryPreviewRefresh");
+const {
+  buildLibraryPathIndex,
+  findPreferredGameByPath,
+  normalizePathKey,
+  reconcileLibraryDuplicateGamePaths,
+} = require("./main/libraryDuplicates");
 const {
   DEFAULT_PREVIEW_LIMIT,
   resolvePreviewDownloadCount,
@@ -102,6 +112,7 @@ const {
   searchAtlas,
   searchSiteCatalog,
   searchAtlasByF95Id,
+  upsertF95ZoneMapping,
   updateBanners,
   updatePreviews,
   getAtlasData,
@@ -398,8 +409,15 @@ function getPreferredInstalledPath(game) {
   return "";
 }
 
-function findMatchingInstalledF95Game(
-  installedGames,
+function getLibraryIdentityKey(game) {
+  return (
+    buildCloudLibraryCatalogEntry(game)?.identityKey ||
+    buildCloudLibraryEntryIdentity(game)
+  );
+}
+
+function findMatchingLibraryGame(
+  libraryGames,
   metadata,
   fallbackName = "",
 ) {
@@ -408,19 +426,34 @@ function findMatchingInstalledF95Game(
     metadata?.title || fallbackName,
   );
   const normalizedCreator = normalizeLibraryMatchText(metadata?.creator || "");
+  const requestedIdentityKey = buildCloudLibraryEntryIdentity({
+    atlasId: metadata?.atlasId,
+    f95Id: metadata?.f95Id || normalizedF95Id,
+    siteUrl: metadata?.threadUrl || metadata?.siteUrl || "",
+    title: metadata?.title || fallbackName,
+    creator: metadata?.creator || "",
+  });
 
   let existingGame = null;
 
+  if (requestedIdentityKey) {
+    existingGame =
+      libraryGames.find(
+        (game) => getLibraryIdentityKey(game) === requestedIdentityKey,
+      ) || null;
+  }
+
   if (normalizedF95Id) {
     existingGame =
-      installedGames.find(
+      existingGame ||
+      libraryGames.find(
         (game) => String(game?.f95_id || "") === String(normalizedF95Id),
       ) || null;
   }
 
   if (!existingGame && normalizedTitle) {
     existingGame =
-      installedGames.find((game) => {
+      libraryGames.find((game) => {
         const candidateTitle = normalizeLibraryMatchText(
           game?.displayTitle || game?.title || "",
         );
@@ -443,10 +476,10 @@ function findMatchingInstalledF95Game(
 }
 
 async function getF95ThreadInstallState(input) {
-  const installedGames = await getGames(appPaths, 0, null);
+  const libraryGames = await getGames(appPaths, 0, null);
   const parsedTitle = parseF95ThreadTitle(input?.rawTitle || "");
-  const existingGame = findMatchingInstalledF95Game(
-    installedGames,
+  const existingGame = findMatchingLibraryGame(
+    libraryGames,
     {
       threadUrl: input?.threadUrl || "",
       title: parsedTitle.title,
@@ -457,6 +490,7 @@ async function getF95ThreadInstallState(input) {
 
   if (!existingGame) {
     return {
+      inLibrary: false,
       installed: false,
       recordId: null,
       title: parsedTitle.title || "",
@@ -467,7 +501,9 @@ async function getF95ThreadInstallState(input) {
   }
 
   return {
-    installed: true,
+    inLibrary: true,
+    installed:
+      Array.isArray(existingGame.versions) && existingGame.versions.length > 0,
     recordId: existingGame.record_id,
     title:
       existingGame.displayTitle ||
@@ -485,13 +521,14 @@ async function getF95ThreadInstallState(input) {
       existingGame.version ||
       "",
     gamePath: getPreferredInstalledPath(existingGame),
+    siteUrl: existingGame.siteUrl || input?.threadUrl || "",
   };
 }
 
 async function resolveF95InstallTarget(metadata, fallbackName) {
-  const installedGames = await getGames(appPaths, 0, null);
-  const existingGame = findMatchingInstalledF95Game(
-    installedGames,
+  const libraryGames = await getGames(appPaths, 0, null);
+  const existingGame = findMatchingLibraryGame(
+    libraryGames,
     metadata,
     fallbackName,
   );
@@ -516,7 +553,7 @@ async function resolveF95InstallTarget(metadata, fallbackName) {
     installDirectory: fs.existsSync(desiredInstallPath)
       ? ensureUniquePath(desiredInstallPath)
       : desiredInstallPath,
-    existingGame: null,
+    existingGame: existingGame || null,
   };
 }
 
@@ -571,6 +608,221 @@ async function prepareDownloadedGameMetadata(metadata) {
       f95Id: normalizedF95Id,
     };
   }
+}
+
+async function resolveAtlasGameMetadata(atlasId) {
+  if (!atlasId) {
+    return {};
+  }
+
+  try {
+    return (await getAtlasData(atlasId)) || {};
+  } catch (error) {
+    console.warn("[library.stub] Failed to load atlas metadata:", {
+      atlasId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {};
+  }
+}
+
+async function buildF95ThreadLibraryMetadata(input) {
+  const parsedTitle = parseF95ThreadTitle(input?.rawTitle || input?.title || "");
+  const atlasMetadata = await prepareDownloadedGameMetadata({
+    threadUrl: input?.threadUrl || "",
+  });
+  const atlasData = await resolveAtlasGameMetadata(atlasMetadata.atlasId);
+
+  return {
+    threadUrl: String(input?.threadUrl || "").trim(),
+    rawTitle: String(input?.rawTitle || "").trim(),
+    title: String(
+      input?.title || atlasData.title || parsedTitle.title || "Unknown",
+    ).trim(),
+    creator: String(
+      input?.creator || atlasData.creator || parsedTitle.creator || "Unknown",
+    ).trim(),
+    version: String(
+      input?.version || parsedTitle.version || atlasData.version || "",
+    ).trim(),
+    engine: String(input?.engine || atlasData.engine || "Unknown").trim(),
+    atlasId: atlasMetadata.atlasId || null,
+    f95Id: atlasMetadata.f95Id || extractF95IdFromUrl(input?.threadUrl || ""),
+  };
+}
+
+async function upsertLibraryGameFromMetadata(
+  metadata,
+  options = {},
+) {
+  const libraryGames = Array.isArray(options.libraryGames)
+    ? options.libraryGames
+    : await getGames(appPaths, 0, null);
+  const existingGame = findMatchingLibraryGame(
+    libraryGames,
+    metadata,
+    metadata?.title || "",
+  );
+  const gamePayload = {
+    title: String(
+      metadata?.title ||
+        existingGame?.title ||
+        existingGame?.displayTitle ||
+        "Unknown",
+    ).trim(),
+    creator: String(
+      metadata?.creator ||
+        existingGame?.creator ||
+        existingGame?.displayCreator ||
+        "Unknown",
+    ).trim(),
+    engine: String(metadata?.engine || existingGame?.engine || "Unknown").trim(),
+  };
+  let recordId = existingGame?.record_id || null;
+
+  if (recordId) {
+    await updateGame({
+      record_id: recordId,
+      ...gamePayload,
+    });
+  } else {
+    recordId = await addGame(gamePayload);
+  }
+
+  if (metadata?.atlasId && existingGame?.atlas_id !== metadata.atlasId) {
+    try {
+      await addAtlasMapping(recordId, metadata.atlasId);
+    } catch (error) {
+      console.warn("[library.stub] Failed to attach atlas mapping:", {
+        recordId,
+        atlasId: metadata.atlasId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (metadata?.f95Id || metadata?.threadUrl || metadata?.siteUrl) {
+    const resolvedF95Id =
+      metadata?.f95Id || extractF95IdFromUrl(metadata?.threadUrl || "");
+    if (resolvedF95Id) {
+      await upsertF95ZoneMapping(
+        recordId,
+        resolvedF95Id,
+        metadata?.siteUrl || metadata?.threadUrl || "",
+      );
+    }
+  }
+
+  const localGame =
+    existingGame ||
+    {
+      record_id: recordId,
+      versions: [],
+    };
+
+  localGame.record_id = recordId;
+  localGame.title = gamePayload.title;
+  localGame.creator = gamePayload.creator;
+  localGame.engine = gamePayload.engine;
+  localGame.atlas_id = metadata?.atlasId || localGame.atlas_id || null;
+  localGame.f95_id =
+    metadata?.f95Id ||
+    extractF95IdFromUrl(metadata?.threadUrl || "") ||
+    localGame.f95_id ||
+    "";
+  localGame.siteUrl =
+    metadata?.siteUrl || metadata?.threadUrl || localGame.siteUrl || "";
+  localGame.displayTitle = localGame.atlas_id
+    ? localGame.displayTitle || gamePayload.title
+    : gamePayload.title;
+  localGame.displayCreator = localGame.atlas_id
+    ? localGame.displayCreator || gamePayload.creator
+    : gamePayload.creator;
+
+  if (!existingGame) {
+    libraryGames.push(localGame);
+  }
+
+  if (options.emitEvent !== false) {
+    mainWindow?.webContents.send(
+      existingGame ? "game-updated" : "game-imported",
+      recordId,
+    );
+  }
+
+  if (options.scheduleCatalogSync !== false) {
+    scheduleCloudLibraryCatalogSync(options.reason || "library-upsert");
+  }
+
+  return {
+    recordId,
+    added: !existingGame,
+    existing: Boolean(existingGame),
+  };
+}
+
+async function addF95ThreadToLibrary(input) {
+  const metadata = await buildF95ThreadLibraryMetadata(input);
+  const result = await upsertLibraryGameFromMetadata(metadata, {
+    reason: "manual-thread-add",
+  });
+  const state = await getF95ThreadInstallState({
+    threadUrl: metadata.threadUrl,
+    rawTitle: metadata.rawTitle || metadata.title,
+  });
+
+  return {
+    ...result,
+    state,
+  };
+}
+
+async function materializeCloudLibraryCatalogEntries(entries, reason) {
+  const libraryGames = await getGames(appPaths, 0, null);
+  let added = 0;
+  let updated = 0;
+  let failed = 0;
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    try {
+      const result = await upsertLibraryGameFromMetadata(
+        {
+          threadUrl: entry?.siteUrl || "",
+          siteUrl: entry?.siteUrl || "",
+          title: entry?.title || "",
+          creator: entry?.creator || "",
+          engine: entry?.engine || "Unknown",
+          atlasId: entry?.atlasId || null,
+          f95Id: entry?.f95Id || "",
+        },
+        {
+          libraryGames,
+          emitEvent: true,
+          scheduleCatalogSync: false,
+          reason,
+        },
+      );
+
+      if (result.added) {
+        added += 1;
+      } else {
+        updated += 1;
+      }
+    } catch (error) {
+      failed += 1;
+      console.error("[cloud.library] Failed to materialize library entry:", {
+        title: entry?.title || "",
+        siteUrl: entry?.siteUrl || "",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    added,
+    updated,
+    failed,
+  };
 }
 
 async function inspectF95ThreadPayload(threadUrl) {
@@ -631,6 +883,173 @@ function queueCloudSaveTask(taskName, task) {
   return cloudSaveQueue;
 }
 
+function broadcastCloudBulkProgress(payload) {
+  for (const windowInstance of [mainWindow, settingsWindow]) {
+    if (!windowInstance || windowInstance.isDestroyed()) {
+      continue;
+    }
+
+    windowInstance.webContents.send("cloud-bulk-progress", payload);
+  }
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const list = Array.isArray(items) ? items : [];
+  const concurrency = Math.max(1, Math.min(limit || 1, list.length || 1));
+  let cursor = 0;
+
+  async function runWorker() {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      await worker(list[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: concurrency }, () => runWorker()),
+  );
+}
+
+async function runBulkCloudSaveAction(mode, options = {}) {
+  if (!databaseConnection) {
+    throw new Error("Database connection is not ready.");
+  }
+
+  const authState = await getReadyCloudSaveService().getAuthState();
+  if (!authState?.authenticated) {
+    throw new Error("Sign in to cloud saves first.");
+  }
+
+  const installedGames = (await getGames(appPaths, 0, null)).filter(
+    (game) => game?.record_id && Array.isArray(game?.versions) && game.versions.length > 0,
+  );
+  const total = installedGames.length;
+  const summary = {
+    mode,
+    total,
+    completed: 0,
+    uploaded: 0,
+    restored: 0,
+    synced: 0,
+    conflicts: 0,
+    skipped: 0,
+    failed: 0,
+    results: [],
+  };
+
+  const emitProgress = options.emitProgress !== false;
+  if (emitProgress) {
+    broadcastCloudBulkProgress({
+      active: true,
+      mode,
+      completed: 0,
+      total,
+      currentTitle: "",
+      summary,
+    });
+  }
+
+  await mapWithConcurrency(installedGames, 3, async (game) => {
+    let result = {
+      recordId: game.record_id,
+      title: game.displayTitle || game.title || "Unknown",
+      outcome: "skipped",
+      message: "",
+    };
+
+    try {
+      if (mode === "upload") {
+        const snapshot = await refreshSaveProfiles(
+          appPaths,
+          databaseConnection,
+          game.record_id,
+        );
+        if (!snapshot?.profiles?.length) {
+          result = {
+            ...result,
+            outcome: "skipped",
+            message: "No save profiles found on this PC.",
+          };
+        } else {
+          await getReadyCloudSaveService().uploadGameSaves({
+            recordId: game.record_id,
+            snapshot,
+          });
+          result = {
+            ...result,
+            outcome: "uploaded",
+            message: "Uploaded local saves to cloud.",
+          };
+        }
+      } else {
+        const reconcileResult = await getReadyCloudSaveService().reconcileGameSaves({
+          recordId: game.record_id,
+        });
+        const action = reconcileResult?.action || "noop";
+        result = {
+          ...result,
+          outcome:
+            action === "upload"
+              ? "uploaded"
+              : action === "restore"
+                ? "restored"
+                : action === "conflict"
+                  ? "conflict"
+                  : "synced",
+          message: reconcileResult?.reason || "",
+        };
+      }
+    } catch (error) {
+      result = {
+        ...result,
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    summary.completed += 1;
+    if (result.outcome === "uploaded") {
+      summary.uploaded += 1;
+    } else if (result.outcome === "restored") {
+      summary.restored += 1;
+    } else if (result.outcome === "conflict") {
+      summary.conflicts += 1;
+    } else if (result.outcome === "failed") {
+      summary.failed += 1;
+    } else if (result.outcome === "synced") {
+      summary.synced += 1;
+    } else {
+      summary.skipped += 1;
+    }
+    summary.results.push(result);
+
+    if (emitProgress) {
+      broadcastCloudBulkProgress({
+        active: summary.completed < total,
+        mode,
+        completed: summary.completed,
+        total,
+        currentTitle: result.title,
+        summary,
+      });
+    }
+  });
+
+  if (emitProgress) {
+    broadcastCloudBulkProgress({
+      active: false,
+      mode,
+      completed: summary.completed,
+      total,
+      currentTitle: "",
+      summary,
+    });
+  }
+
+  return summary;
+}
+
 function scheduleCloudSaveReconcile(recordId, reason) {
   if (!recordId) {
     return Promise.resolve(null);
@@ -651,30 +1070,36 @@ function scheduleCloudSaveReconcile(recordId, reason) {
   );
 }
 
-function scheduleCloudLibraryReconcile(reason) {
+function scheduleCloudInstalledSavesReconcile(reason) {
   return queueCloudSaveTask(`auto reconcile library (${reason})`, async () => {
-    if (!databaseConnection) {
-      return null;
-    }
-
-    const authState = await getReadyCloudSaveService().getAuthState();
-    if (!authState?.authenticated) {
-      return null;
-    }
-
-    const games = await getGames(appPaths, 0, null);
-    for (const game of games || []) {
-      if (!game?.record_id) {
-        continue;
-      }
-
-      await getReadyCloudSaveService().reconcileGameSaves({
-        recordId: game.record_id,
-      });
-    }
-
-    return true;
+    return runBulkCloudSaveAction("sync", {
+      emitProgress: false,
+    });
   });
+}
+
+async function syncCloudLibraryCatalogNow(reason) {
+  const authState = await getReadyCloudSaveService().getAuthState();
+  if (!authState?.authenticated) {
+    return null;
+  }
+
+  const result = await getReadyCloudSaveService().syncLibraryCatalog();
+  const materialized = await materializeCloudLibraryCatalogEntries(
+    result?.remoteOnlyEntries || [],
+    `cloud-catalog-${reason}`,
+  );
+
+  return {
+    ...result,
+    materialized,
+  };
+}
+
+function scheduleCloudLibraryCatalogSync(reason) {
+  return queueCloudSaveTask(`sync cloud library catalog (${reason})`, async () =>
+    syncCloudLibraryCatalogNow(reason),
+  );
 }
 
 async function broadcastCloudAuthState() {
@@ -1209,6 +1634,12 @@ async function persistF95InstalledGame(payload) {
   };
 
   if (payload.existingGame?.record_id) {
+    await updateGame({
+      record_id: payload.existingGame.record_id,
+      title: gameRecord.title,
+      creator: gameRecord.creator,
+      engine: gameRecord.engine,
+    });
     await deleteVersionsForRecordPath(
       payload.existingGame.record_id,
       payload.installDirectory,
@@ -1228,7 +1659,27 @@ async function persistF95InstalledGame(payload) {
       gameRecord.atlasId &&
       payload.existingGame.atlas_id !== gameRecord.atlasId
     ) {
-      await addAtlasMapping(payload.existingGame.record_id, gameRecord.atlasId);
+      try {
+        await addAtlasMapping(payload.existingGame.record_id, gameRecord.atlasId);
+      } catch (error) {
+        console.warn("[f95.install] Failed to update atlas mapping:", {
+          recordId: payload.existingGame.record_id,
+          atlasId: gameRecord.atlasId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (gameRecord.f95Id || gameRecord.siteUrl) {
+      const resolvedF95Id =
+        gameRecord.f95Id || extractF95IdFromUrl(gameRecord.siteUrl);
+      if (resolvedF95Id) {
+        await upsertF95ZoneMapping(
+          payload.existingGame.record_id,
+          resolvedF95Id,
+          gameRecord.siteUrl,
+        );
+      }
     }
 
     if (databaseConnection) {
@@ -1247,6 +1698,7 @@ async function persistF95InstalledGame(payload) {
         "post-install-update",
       );
     }
+    scheduleCloudLibraryCatalogSync("post-install-update");
 
     mainWindow?.webContents.send(
       "game-imported",
@@ -1291,6 +1743,9 @@ async function persistF95InstalledGame(payload) {
       );
     });
     scheduleCloudSaveReconcile(importedRecordId, "post-install-import");
+  }
+  if (importedRecordId) {
+    scheduleCloudLibraryCatalogSync("post-install-import");
   }
 
   return importResults;
@@ -1666,7 +2121,9 @@ const defaultConfig = {
 // ────────────────────────────────────────────────
 
 ipcMain.handle("add-game", async (event, game) => {
-  return addGame(game);
+  const recordId = await addGame(game);
+  scheduleCloudLibraryCatalogSync("manual-add-game");
+  return recordId;
 });
 
 ipcMain.handle("count-versions", async (_, recordId) => {
@@ -1928,7 +2385,8 @@ ipcMain.handle("sign-in-cloud", async (_, payload) => {
     await getReadyCloudSaveService().signInWithPassword(payload || {});
     const state = await broadcastCloudAuthState();
     if (state?.authenticated) {
-      scheduleCloudLibraryReconcile("sign-in");
+      scheduleCloudInstalledSavesReconcile("sign-in");
+      scheduleCloudLibraryCatalogSync("sign-in");
     }
     return {
       success: true,
@@ -1951,7 +2409,8 @@ ipcMain.handle("sign-up-cloud", async (_, payload) => {
     );
     const state = await broadcastCloudAuthState();
     if (state?.authenticated) {
-      scheduleCloudLibraryReconcile("sign-up");
+      scheduleCloudInstalledSavesReconcile("sign-up");
+      scheduleCloudLibraryCatalogSync("sign-up");
     }
     return {
       success: true,
@@ -2079,6 +2538,60 @@ ipcMain.handle("restore-cloud-saves", async (_, recordId) => {
   }
 });
 
+ipcMain.handle("run-bulk-cloud-save-action", async (_, mode) => {
+  try {
+    const normalizedMode = mode === "upload" ? "upload" : "sync";
+    const result = await runBulkCloudSaveAction(normalizedMode, {
+      emitProgress: true,
+    });
+    return {
+      success: true,
+      result,
+    };
+  } catch (error) {
+    console.error("[cloud.sync] Bulk action failed:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      result: null,
+    };
+  }
+});
+
+ipcMain.handle("get-cloud-library-catalog", async () => {
+  try {
+    const result = await getReadyCloudSaveService().getCloudLibraryCatalog();
+    return {
+      success: true,
+      result,
+    };
+  } catch (error) {
+    console.error("[cloud.library] Failed to load cloud catalog:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      result: null,
+    };
+  }
+});
+
+ipcMain.handle("sync-cloud-library-catalog", async () => {
+  try {
+    const result = await syncCloudLibraryCatalogNow("manual-panel-sync");
+    return {
+      success: true,
+      result,
+    };
+  } catch (error) {
+    console.error("[cloud.library] Failed to sync cloud catalog:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      result: null,
+    };
+  }
+});
+
 ipcMain.handle("get-f95-auth-status", async () => {
   return getF95AuthState(getReadyF95Session());
 });
@@ -2099,13 +2612,41 @@ ipcMain.handle("get-f95-thread-install-state", async (event, payload) => {
       error,
     );
     return {
+      inLibrary: false,
       installed: false,
       recordId: null,
       title: "",
       creator: "",
       version: "",
       gamePath: "",
+      siteUrl: "",
       error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle("add-f95-thread-to-library", async (event, payload) => {
+  try {
+    const authState = await getF95AuthState(getReadyF95Session());
+    if (!authState.isAuthenticated) {
+      return {
+        success: false,
+        error: "F95 login is required before linking a thread to the library.",
+        result: null,
+      };
+    }
+
+    const result = await addF95ThreadToLibrary(payload || {});
+    return {
+      success: true,
+      result,
+    };
+  } catch (error) {
+    console.error("[f95.library] Failed to add thread to library:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      result: null,
     };
   }
 });
@@ -3026,6 +3567,9 @@ const importGamesInternal = async (params) => {
   }
 
   const results = [];
+  const existingGamesByPath = buildLibraryPathIndex(
+    await getGames(appPaths, 0, null),
+  );
 
   for (const game of games) {
     try {
@@ -3242,16 +3786,45 @@ const importGamesInternal = async (params) => {
         engine: resolvedGame.engine,
         description: resolvedGame.description || "Imported game",
       };
+      const versionPayload = {
+        ...resolvedGame,
+        folder: gamePath,
+        execPath,
+        folderSize: size,
+      };
+      const existingGame = findPreferredGameByPath(existingGamesByPath, gamePath);
+      let recordId;
 
-      console.log("Adding Game");
-      const recordId = await addGame(add);
-      console.log("game added");
-      console.log("adding version");
-      await addVersion(
-        { ...resolvedGame, folder: gamePath, execPath, folderSize: size },
-        recordId,
-      );
+      if (existingGame?.record_id) {
+        console.log("Updating existing game for imported path");
+        await updateGame({
+          record_id: existingGame.record_id,
+          title: add.title,
+          creator: add.creator,
+          engine: add.engine,
+        });
+        await deleteVersionsForRecordPath(existingGame.record_id, gamePath);
+        await addVersion(versionPayload, existingGame.record_id);
+        recordId = existingGame.record_id;
+      } else {
+        console.log("Adding Game");
+        recordId = await addGame(add);
+        console.log("game added");
+        console.log("adding version");
+        await addVersion(versionPayload, recordId);
+      }
       console.log("added version");
+      existingGamesByPath.set(normalizePathKey(gamePath), [
+        {
+          record_id: recordId,
+          title: add.title,
+          creator: add.creator,
+          engine: add.engine,
+          atlas_id: resolvedGame.atlasId || existingGame?.atlas_id || null,
+          f95_id: resolvedGame.f95Id || existingGame?.f95_id || null,
+          versions: [{ game_path: gamePath }],
+        },
+      ]);
       try {
         await markImportedCandidate(appPaths, resolvedGame.folder, recordId);
       } catch (scanCandidateErr) {
@@ -3266,14 +3839,37 @@ const importGamesInternal = async (params) => {
       }
       console.log("adding mapping");
       console.log("recordId:", recordId, "atlasId:", resolvedGame.atlasId);
-      if (resolvedGame.atlasId) {
+      if (resolvedGame.atlasId && existingGame?.atlas_id !== resolvedGame.atlasId) {
         try {
           await addAtlasMapping(recordId, resolvedGame.atlasId);
           console.log("mapping added");
         } catch (err) {
-          console.error("Failed to add atlas mapping:", err);
-          throw err;
+          console.warn("Failed to add atlas mapping:", err);
         }
+      }
+
+      if (resolvedGame.f95Id || resolvedGame.siteUrl) {
+        const resolvedF95Id =
+          resolvedGame.f95Id || extractF95IdFromUrl(resolvedGame.siteUrl);
+        if (resolvedF95Id) {
+          await upsertF95ZoneMapping(
+            recordId,
+            resolvedF95Id,
+            resolvedGame.siteUrl || "",
+          );
+        }
+      }
+
+      if (databaseConnection && existingGame?.record_id) {
+        await refreshSaveProfiles(appPaths, databaseConnection, recordId).catch(
+          (error) => {
+            console.warn(
+              "[save.profiles] Failed to refresh save profiles after import update:",
+              error,
+            );
+          },
+        );
+        scheduleCloudSaveReconcile(recordId, "post-import-update");
       }
 
       if (size > 0)
@@ -3310,6 +3906,9 @@ const importGamesInternal = async (params) => {
     total,
   });
   mainWindow.webContents.send("import-complete");
+  if (results.some((result) => result.success)) {
+    scheduleCloudLibraryCatalogSync("post-import-batch");
+  }
 
   // Phase 2: Image downloads
   if (downloadBannerImages || downloadPreviewImages) {
@@ -3390,6 +3989,34 @@ const importGamesInternal = async (params) => {
   mainWindow.webContents.send("import-complete");
   return results;
 };
+
+async function runLibraryDuplicateCleanup() {
+  const cleanup = await reconcileLibraryDuplicateGamePaths({
+    appPaths,
+    getGames,
+    deleteGameCompletely,
+    dryRun: false,
+  });
+
+  if (cleanup.removed.length > 0) {
+    mainWindow.webContents.send("import-progress", {
+      text: `Cleaned up ${cleanup.removed.length} duplicate library record(s) with identical install paths.`,
+      progress: 0,
+      total: 0,
+    });
+  }
+
+  if (cleanup.failed.length > 0) {
+    console.warn("[library.duplicates] Failed to remove some duplicate records", {
+      failed: cleanup.failed,
+    });
+    mainWindow.webContents.send("import-warning", {
+      message: `Failed to clean up ${cleanup.failed.length} duplicate library record(s).`,
+    });
+  }
+
+  return cleanup;
+}
 
 ipcMain.handle("import-games", async (event, params) => {
   return importGamesInternal(params);
@@ -3528,11 +4155,12 @@ ipcMain.handle("scan-library", async (event, request) => {
     }
 
     if (!scanResult.games || scanResult.games.length === 0) {
+      const duplicateCleanup = await runLibraryDuplicateCleanup();
       mainWindow.webContents.send("import-progress", {
         text:
           scanResult.warningsCount > 0
-            ? `Scan complete. No new games found. Warnings: ${scanResult.warningsCount}`
-            : "Scan complete. No new games found.",
+            ? `Scan complete. No new games found. Warnings: ${scanResult.warningsCount}${duplicateCleanup.removed.length > 0 ? `. Duplicates cleaned: ${duplicateCleanup.removed.length}` : ""}`
+            : `Scan complete. No new games found${duplicateCleanup.removed.length > 0 ? `. Duplicates cleaned: ${duplicateCleanup.removed.length}` : ""}.`,
         progress: 0,
         total: 0,
       });
@@ -3541,6 +4169,7 @@ ipcMain.handle("scan-library", async (event, request) => {
         warningsCount: scanResult.warningsCount || 0,
         imported: 0,
         scanned: 0,
+        duplicateRecordsRemoved: duplicateCleanup.removed.length,
       };
     }
 
@@ -3549,11 +4178,12 @@ ipcMain.handle("scan-library", async (event, request) => {
     );
 
     if (importableGames.length === 0) {
+      const duplicateCleanup = await runLibraryDuplicateCleanup();
       mainWindow.webContents.send("import-progress", {
         text:
           reviewGames.length > 0
-            ? `Scan complete. ${reviewGames.length} candidate(s) need review before import.`
-            : "Scan complete. No auto-importable games found.",
+            ? `Scan complete. ${reviewGames.length} candidate(s) need review before import.${duplicateCleanup.removed.length > 0 ? ` Duplicates cleaned: ${duplicateCleanup.removed.length}.` : ""}`
+            : `Scan complete. No auto-importable games found.${duplicateCleanup.removed.length > 0 ? ` Duplicates cleaned: ${duplicateCleanup.removed.length}.` : ""}`,
         progress: 0,
         total: scanResult.games.length || 0,
       });
@@ -3565,6 +4195,7 @@ ipcMain.handle("scan-library", async (event, request) => {
         imported: 0,
         reviewQueued: reviewGames.length,
         errorsCount: scanResult.errorsCount || 0,
+        duplicateRecordsRemoved: duplicateCleanup.removed.length,
       };
     }
 
@@ -3588,6 +4219,7 @@ ipcMain.handle("scan-library", async (event, request) => {
       moveToDefaultFolder: false,
       format: "",
     });
+    const duplicateCleanup = await runLibraryDuplicateCleanup();
 
     return {
       success: scanResult.success,
@@ -3596,6 +4228,7 @@ ipcMain.handle("scan-library", async (event, request) => {
       imported: importResults.filter((item) => item.success).length,
       reviewQueued: reviewGames.length,
       errorsCount: scanResult.errorsCount || 0,
+      duplicateRecordsRemoved: duplicateCleanup.removed.length,
     };
   } finally {
     endScanSession(event.sender);
@@ -4330,6 +4963,7 @@ app.whenReady().then(async () => {
       getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
     refreshSaveProfiles: (recordId) =>
       refreshSaveProfiles(appPaths, databaseConnection, recordId),
+    listGames: () => getGames(appPaths, 0, null),
     upsertSaveSyncState: (input) =>
       upsertSaveSyncState(databaseConnection, input),
   });
@@ -4351,7 +4985,8 @@ app.whenReady().then(async () => {
     return null;
   });
   if (initialCloudAuthState?.authenticated) {
-    scheduleCloudLibraryReconcile("startup");
+    scheduleCloudInstalledSavesReconcile("startup");
+    scheduleCloudLibraryCatalogSync("startup");
   }
   broadcastF95AuthState().catch((error) => {
     console.error("[f95.auth] Failed to initialize auth state:", error);

@@ -130,20 +130,35 @@ const getVersionLabelForCard = (game, installedLabel) => {
 function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
   const displayTitle = game.displayTitle || game.title || "Unknown";
   const newestInstalledVersion =
-    game.newestInstalledVersion || getNewestVersion(game.versions);
+    game.newestInstalledVersion ||
+    (Array.isArray(game.versions) && game.versions.length > 0
+      ? getNewestVersion(game.versions)
+      : game.latestVersion || "Unknown");
   const versionLabel = getVersionLabelForCard(game, newestInstalledVersion);
   const launchable = pickVersionForLaunch(game.versions);
   const canPlay = Boolean(launchable?.exec_path);
+  const canInstall = !canPlay && Boolean(game.siteUrl);
+  const primaryActionLabel = canPlay
+    ? "Play"
+    : canInstall
+      ? "Install"
+      : "Play";
 
-  const handlePlay = (e) => {
+  const handlePrimaryAction = (e) => {
     e.stopPropagation();
-    if (!launchable?.exec_path) return;
-    const ext = launchable.exec_path.split(".").pop().toLowerCase() || "";
-    window.electronAPI.launchGame({
-      execPath: launchable.exec_path,
-      extension: ext,
-      recordId: game.record_id,
-    });
+    if (canPlay && launchable?.exec_path) {
+      const ext = launchable.exec_path.split(".").pop().toLowerCase() || "";
+      window.electronAPI.launchGame({
+        execPath: launchable.exec_path,
+        extension: ext,
+        recordId: game.record_id,
+      });
+      return;
+    }
+
+    if (canInstall) {
+      onUpdateGame?.(game);
+    }
   };
 
   const thumbChildren = [];
@@ -247,19 +262,22 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
           className:
             "text-white/75 text-[11px] truncate min-w-0 flex-1 tabular-nums",
           title: versionLabel,
-          children: versionLabel,
+          children:
+            Array.isArray(game.versions) && game.versions.length === 0
+              ? "Not installed"
+              : versionLabel,
         }),
         React.createElement("button", {
           key: "play",
           type: "button",
           className: `shrink-0 px-3 py-1.5 text-xs font-semibold text-white pointer-events-auto transition-opacity ${
-            canPlay
+            canPlay || canInstall
               ? "bg-accent hover:opacity-90"
               : "bg-white/10 opacity-45 cursor-not-allowed"
           }`,
-          disabled: !canPlay,
-          onClick: handlePlay,
-          children: "Play",
+          disabled: !canPlay && !canInstall,
+          onClick: handlePrimaryAction,
+          children: primaryActionLabel,
         }),
       ],
     ),
@@ -386,6 +404,17 @@ const GameBanner = ({ game, onSelect, onUpdateGame }) => {
         label: game.latestVersion
           ? `Update to ${game.latestVersion}`
           : "Update Game",
+        data: { action: "updateGame", recordId: game.record_id },
+      });
+    }
+
+    if (!playableVersions.length && game.siteUrl) {
+      if (menuTemplate.length > 0) {
+        menuTemplate.push({ type: "separator" });
+      }
+
+      menuTemplate.push({
+        label: "Install",
         data: { action: "updateGame", recordId: game.record_id },
       });
     }

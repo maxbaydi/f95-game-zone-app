@@ -60,6 +60,7 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 4, name: "scan_candidates" },
     { version: 5, name: "save_sync" },
     { version: 6, name: "scan_candidate_match_metadata" },
+    { version: 7, name: "f95_zone_mapping_site_url" },
   ]);
   assert.deepEqual(tables, [
     { name: "games" },
@@ -85,6 +86,7 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 4, name: "scan_candidates" },
     { version: 5, name: "save_sync" },
     { version: 6, name: "scan_candidate_match_metadata" },
+    { version: 7, name: "f95_zone_mapping_site_url" },
   ]);
 
   await closeAsync(reopened);

@@ -108,6 +108,7 @@ const LibraryDetailsPanel = ({
   const tags = useMemo(() => splitGameTags(game?.f95_tags), [game?.f95_tags]);
   const displayTitle = game?.displayTitle || game?.title || "No game selected";
   const displayCreator = game?.displayCreator || game?.creator || "";
+  const hasInstalledVersions = versionList.length > 0;
 
   return (
     <aside className="atlas-glass-panel w-[420px] shrink-0 border-l border-border shadow-glass">
@@ -189,33 +190,50 @@ const LibraryDetailsPanel = ({
 
                 <section className="border border-border bg-secondary/10 p-4">
                   <div className="mb-3 text-[11px] uppercase tracking-[0.18em] opacity-55">
-                    Installed versions
+                    Installations
                   </div>
 
                   <div className="mb-3 border border-border/70 bg-canvas/40 p-3">
                     <div className="text-sm font-medium text-text">
-                      {game.isUpdateAvailable
-                        ? "Update available"
-                        : "Installed version is current"}
+                      {hasInstalledVersions
+                        ? game.isUpdateAvailable
+                          ? "Update available"
+                          : "Installed version is current"
+                        : "Not installed on this PC"}
                     </div>
-                    <div className="mt-1 text-xs opacity-70">
-                      Installed: {game.newestInstalledVersion || "Unknown"}
-                    </div>
-                    <div className="text-xs opacity-70">
-                      Site latest: {game.latestVersion || "Unknown"}
-                    </div>
-                    {game.isUpdateAvailable && (
+                    {hasInstalledVersions ? (
+                      <>
+                        <div className="mt-1 text-xs opacity-70">
+                          Installed: {game.newestInstalledVersion || "Unknown"}
+                        </div>
+                        <div className="text-xs opacity-70">
+                          Site latest: {game.latestVersion || "Unknown"}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-1 text-xs opacity-70">
+                        This library entry is linked to its thread and can be
+                        installed from here.
+                      </div>
+                    )}
+                    {(game.isUpdateAvailable || !hasInstalledVersions) && (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <DetailPill tone="warning">Needs update</DetailPill>
+                        {hasInstalledVersions ? (
+                          <DetailPill tone="warning">Needs update</DetailPill>
+                        ) : (
+                          <DetailPill tone="accent">Ready to install</DetailPill>
+                        )}
                         <button
                           type="button"
                           onClick={() => onUpdateGame?.(game)}
                           className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-40"
                           disabled={!game.siteUrl}
                         >
-                          {game.latestVersion
-                            ? `Update to ${game.latestVersion}`
-                            : "Update now"}
+                          {hasInstalledVersions
+                            ? game.latestVersion
+                              ? `Update to ${game.latestVersion}`
+                              : "Update now"
+                            : "Install"}
                         </button>
                       </div>
                     )}
@@ -223,7 +241,7 @@ const LibraryDetailsPanel = ({
 
                   {versionList.length === 0 ? (
                     <div className="text-sm opacity-60">
-                      No installed versions stored yet.
+                      No installed files are stored for this library entry yet.
                     </div>
                   ) : (
                     <div className="space-y-3">

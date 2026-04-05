@@ -13,6 +13,12 @@ const {
   backupGameSaves,
 } = require("./saveVault");
 const {
+  buildCloudLibraryCatalogEntry,
+  getRemoteOnlyCloudLibraryEntries,
+  mergeCloudLibraryCatalogEntries,
+  parseCloudLibraryCatalogManifest,
+} = require("./cloudLibraryCatalog");
+const {
   buildTrackedProfileDescriptor,
   listSaveProfileFiles,
   normalizeIdentityToken,
@@ -56,6 +62,16 @@ function getRemotePaths(authUserId, cloudIdentity) {
     latestArchivePath: `${remoteBase}/latest.zip`,
     latestManifestPath: `${remoteBase}/latest.manifest.json`,
     historyArchivePath: `${remoteBase}/history/${Date.now()}.zip`,
+  };
+}
+
+function getCloudLibraryRemotePaths(authUserId) {
+  const remoteBase = `${authUserId}/library`;
+
+  return {
+    remoteBase,
+    latestManifestPath: `${remoteBase}/catalog.json`,
+    historyManifestPath: `${remoteBase}/history/${Date.now()}.json`,
   };
 }
 
@@ -218,6 +234,7 @@ function createCloudSaveService({
   getConfig,
   getSaveProfileSnapshot,
   refreshSaveProfiles,
+  listGames,
   upsertSaveSyncState,
 }) {
   let cachedBundle = null;
@@ -374,6 +391,17 @@ function createCloudSaveService({
     }
   };
 
+  const listLocalLibraryEntries = async () => {
+    if (typeof listGames !== "function") {
+      return [];
+    }
+
+    const games = await listGames();
+    return (Array.isArray(games) ? games : [])
+      .map((game) => buildCloudLibraryCatalogEntry(game))
+      .filter(Boolean);
+  };
+
   const fetchRemoteManifest = async ({ bundle, authUserId, cloudIdentity }) => {
     const remotePaths = getRemotePaths(authUserId, cloudIdentity);
     const downloadResult = await bundle.client.storage
@@ -401,6 +429,70 @@ function createCloudSaveService({
 
     return {
       exists: true,
+      manifest,
+      remotePaths,
+    };
+  };
+
+  const fetchRemoteLibraryCatalog = async ({ bundle, authUserId }) => {
+    const remotePaths = getCloudLibraryRemotePaths(authUserId);
+    const downloadResult = await bundle.client.storage
+      .from(bundle.settings.storageBucket)
+      .download(remotePaths.latestManifestPath);
+
+    if (downloadResult.error || !downloadResult.data) {
+      if (isStorageNotFoundError(downloadResult.error)) {
+        return {
+          exists: false,
+          manifest: parseCloudLibraryCatalogManifest(null),
+          remotePaths,
+        };
+      }
+
+      throw (
+        downloadResult.error ||
+        new Error("Failed to download cloud library catalog.")
+      );
+    }
+
+    const manifest = parseCloudLibraryCatalogManifest(
+      JSON.parse(Buffer.from(await downloadResult.data.arrayBuffer()).toString("utf8")),
+    );
+
+    return {
+      exists: true,
+      manifest,
+      remotePaths,
+    };
+  };
+
+  const uploadCloudLibraryCatalog = async ({ bundle, authUserId, entries }) => {
+    const remotePaths = getCloudLibraryRemotePaths(authUserId);
+    const manifest = {
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      entries,
+    };
+    const manifestBuffer = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
+
+    const uploadResult = await bundle.client.storage
+      .from(bundle.settings.storageBucket)
+      .upload(remotePaths.latestManifestPath, manifestBuffer, {
+        contentType: "application/json",
+        upsert: true,
+      });
+    if (uploadResult.error) {
+      throw uploadResult.error;
+    }
+
+    await bundle.client.storage
+      .from(bundle.settings.storageBucket)
+      .upload(remotePaths.historyManifestPath, manifestBuffer, {
+        contentType: "application/json",
+        upsert: false,
+      });
+
+    return {
       manifest,
       remotePaths,
     };
@@ -793,6 +885,71 @@ function createCloudSaveService({
     };
   };
 
+  const getCloudLibraryCatalog = async () => {
+    const bundle = await withConfiguredClient();
+    const authState = await getAuthState();
+    if (!authState.user?.id) {
+      throw new Error("Cloud library access requires a signed-in Supabase user.");
+    }
+
+    const localEntries = await listLocalLibraryEntries();
+    const remoteResult = await fetchRemoteLibraryCatalog({
+      bundle,
+      authUserId: authState.user.id,
+    });
+    const remoteEntries = remoteResult.manifest.entries || [];
+    const mergedEntries = mergeCloudLibraryCatalogEntries(localEntries, remoteEntries);
+    const remoteOnlyEntries = getRemoteOnlyCloudLibraryEntries(
+      mergedEntries,
+      localEntries,
+    );
+
+    return {
+      localEntries,
+      remoteEntries,
+      mergedEntries,
+      remoteOnlyEntries,
+      remoteExists: remoteResult.exists,
+      lastUpdatedAt: remoteResult.manifest.updatedAt || "",
+    };
+  };
+
+  const syncLibraryCatalog = async () => {
+    const bundle = await withConfiguredClient();
+    const authState = await getAuthState();
+    if (!authState.user?.id) {
+      throw new Error("Cloud library sync requires a signed-in Supabase user.");
+    }
+
+    const localEntries = await listLocalLibraryEntries();
+    const remoteResult = await fetchRemoteLibraryCatalog({
+      bundle,
+      authUserId: authState.user.id,
+    });
+    const remoteEntries = remoteResult.manifest.entries || [];
+    const mergedEntries = mergeCloudLibraryCatalogEntries(localEntries, remoteEntries);
+    const currentSerialized = JSON.stringify(remoteEntries);
+    const nextSerialized = JSON.stringify(mergedEntries);
+    let manifest = remoteResult.manifest;
+
+    if (!remoteResult.exists || currentSerialized !== nextSerialized) {
+      const uploadResult = await uploadCloudLibraryCatalog({
+        bundle,
+        authUserId: authState.user.id,
+        entries: mergedEntries,
+      });
+      manifest = uploadResult.manifest;
+    }
+
+    return {
+      localEntries,
+      remoteEntries,
+      mergedEntries,
+      remoteOnlyEntries: getRemoteOnlyCloudLibraryEntries(mergedEntries, localEntries),
+      lastUpdatedAt: manifest.updatedAt || "",
+    };
+  };
+
   const onAuthStateChange = (listener) => {
     authListeners.add(listener);
     return () => {
@@ -809,6 +966,8 @@ function createCloudSaveService({
     reconcileGameSaves,
     uploadGameSaves,
     restoreGameSaves,
+    getCloudLibraryCatalog,
+    syncLibraryCatalog,
   };
 }
 

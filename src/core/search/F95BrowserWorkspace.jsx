@@ -124,12 +124,14 @@ const F95BrowserWorkspace = () => {
   const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
   const [threadInstallState, setThreadInstallState] = useState({
     checking: false,
+    inLibrary: false,
     installed: false,
     recordId: null,
     title: "",
     creator: "",
     version: "",
     gamePath: "",
+    siteUrl: "",
   });
 
   const currentUrl = browserState.url || F95_SEARCH_URL;
@@ -198,12 +200,14 @@ const F95BrowserWorkspace = () => {
     if (!authState.isAuthenticated || !isThreadPage) {
       setThreadInstallState({
         checking: false,
+        inLibrary: false,
         installed: false,
         recordId: null,
         title: "",
         creator: "",
         version: "",
         gamePath: "",
+        siteUrl: "",
       });
       return undefined;
     }
@@ -225,12 +229,14 @@ const F95BrowserWorkspace = () => {
 
         setThreadInstallState({
           checking: false,
+          inLibrary: Boolean(payload?.inLibrary),
           installed: Boolean(payload?.installed),
           recordId: payload?.recordId ?? null,
           title: payload?.title || "",
           creator: payload?.creator || "",
           version: payload?.version || "",
           gamePath: payload?.gamePath || "",
+          siteUrl: payload?.siteUrl || "",
         });
       })
       .catch((error) => {
@@ -241,12 +247,14 @@ const F95BrowserWorkspace = () => {
         console.error("Failed to resolve F95 thread install state:", error);
         setThreadInstallState({
           checking: false,
+          inLibrary: false,
           installed: false,
           recordId: null,
           title: "",
           creator: "",
           version: "",
           gamePath: "",
+          siteUrl: "",
         });
       });
 
@@ -432,6 +440,28 @@ const F95BrowserWorkspace = () => {
     isThreadPage,
   ]);
 
+  const addButtonLabel = useMemo(() => {
+    if (isInspectingThread || isStartingInstall) {
+      return "Working...";
+    }
+
+    if (threadInstallState.checking && isThreadPage) {
+      return "Checking...";
+    }
+
+    if (threadInstallState.inLibrary) {
+      return "In Library";
+    }
+
+    return "Add to Library";
+  }, [
+    isInspectingThread,
+    isStartingInstall,
+    threadInstallState.checking,
+    threadInstallState.inLibrary,
+    isThreadPage,
+  ]);
+
   const openLoginWindow = async () => {
     setInstallError("");
     setStatusMessage(
@@ -498,6 +528,49 @@ const F95BrowserWorkspace = () => {
       setThreadInfo(payload);
     } catch (error) {
       console.error("Failed to inspect F95 thread:", error);
+      setInstallError(error.message);
+    } finally {
+      setIsInspectingThread(false);
+    }
+  };
+
+  const addCurrentThreadToLibrary = async () => {
+    if (!isThreadPage) {
+      setInstallError("Open a game thread first, then add it to the library.");
+      return;
+    }
+
+    setInstallError("");
+    setStatusMessage("");
+    setIsInspectingThread(true);
+
+    try {
+      const result = await window.electronAPI.addF95ThreadToLibrary({
+        threadUrl: currentUrl,
+        rawTitle: browserState.title || "",
+      });
+
+      if (!result?.success || !result.result) {
+        setInstallError(result?.error || "Failed to add this thread to the library.");
+        return;
+      }
+
+      const nextState = result.result.state || null;
+      if (nextState) {
+        setThreadInstallState((previous) => ({
+          ...previous,
+          ...nextState,
+          checking: false,
+        }));
+      }
+
+      setStatusMessage(
+        nextState?.installed
+          ? `${nextState.title || "This thread"} is already installed.`
+          : `${nextState?.title || browserState.title || "This thread"} was added to your library.`,
+      );
+    } catch (error) {
+      console.error("Failed to add F95 thread to library:", error);
       setInstallError(error.message);
     } finally {
       setIsInspectingThread(false);
@@ -729,6 +802,19 @@ const F95BrowserWorkspace = () => {
           {installButtonLabel}
         </button>
         <button
+          onClick={addCurrentThreadToLibrary}
+          disabled={
+            !isThreadPage ||
+            isInspectingThread ||
+            isStartingInstall ||
+            threadInstallState.checking ||
+            threadInstallState.inLibrary
+          }
+          className="rounded border border-border bg-secondary px-4 py-2 text-sm font-medium text-text disabled:cursor-not-allowed disabled:opacity-50 hover:bg-selected"
+        >
+          {addButtonLabel}
+        </button>
+        <button
           onClick={logout}
           className="ml-auto rounded border border-border bg-secondary px-3 py-2 text-sm hover:bg-selected"
         >
@@ -741,9 +827,15 @@ const F95BrowserWorkspace = () => {
           {browserState.title || "F95"}
         </div>
         <div className="truncate opacity-55">{currentUrl}</div>
-        {threadInstallState.installed && (
-          <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-emerald-100">
-            Installed
+        {threadInstallState.inLibrary && (
+          <div
+            className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.16em] ${
+              threadInstallState.installed
+                ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                : "border border-accent/30 bg-accent/10 text-text"
+            }`}
+          >
+            {threadInstallState.installed ? "Installed" : "In Library"}
           </div>
         )}
         {browserState.loading && (
@@ -753,12 +845,20 @@ const F95BrowserWorkspace = () => {
         )}
       </div>
 
-      {threadInstallState.installed && isThreadPage && (
-        <div className="relative z-10 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100">
-          {threadInstallState.title || "This thread"} is already installed
-          {threadInstallState.version
-            ? ` in the library (${threadInstallState.version}).`
-            : " in the library."}
+      {threadInstallState.inLibrary && isThreadPage && (
+        <div
+          className={`relative z-10 border-b px-4 py-2 text-sm ${
+            threadInstallState.installed
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+              : "border-accent/30 bg-accent/10 text-text"
+          }`}
+        >
+          {threadInstallState.title || "This thread"}
+          {threadInstallState.installed
+            ? threadInstallState.version
+              ? ` is already installed in the library (${threadInstallState.version}).`
+              : " is already installed in the library."
+            : " is already linked in your library but not installed on this PC."}
         </div>
       )}
 

@@ -20,24 +20,33 @@ const F95UpdateModal = ({
   const variants = Array.isArray(thread?.variants) ? thread.variants : [];
   const selectedLink =
     links.find((link) => link.url === selectedLinkUrl) || links[0] || null;
-  const confirmLabel = captchaUrl ? "Retry Update" : "Update Now";
+  const hasInstalledVersions =
+    Array.isArray(game?.versions) && game.versions.length > 0;
+  const confirmLabel = captchaUrl
+    ? hasInstalledVersions
+      ? "Retry Update"
+      : "Retry Install"
+    : hasInstalledVersions
+      ? "Update Now"
+      : "Install Now";
 
   return (
     <div className="fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md">
       <div className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl">
         <div className="border-b border-border px-6 py-5">
           <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
-            Library Update
+            {hasInstalledVersions ? "Library Update" : "Library Install"}
           </div>
           <div className="mt-2 text-2xl font-semibold text-text">
             {thread?.title || game?.displayTitle || game?.title || "Update"}
           </div>
           <div className="mt-2 text-sm text-text/65">
             {thread?.version && `Latest: ${thread.version}`}
-            {game?.newestInstalledVersion &&
+            {hasInstalledVersions &&
+              game?.newestInstalledVersion &&
               `${thread?.version ? " • " : ""}Installed: ${game.newestInstalledVersion}`}
             {thread?.creator &&
-              `${thread?.version || game?.newestInstalledVersion ? " • " : ""}Creator: ${thread.creator}`}
+              `${thread?.version || (hasInstalledVersions && game?.newestInstalledVersion) ? " • " : ""}Creator: ${thread.creator}`}
           </div>
         </div>
 
@@ -72,9 +81,7 @@ const F95UpdateModal = ({
           ) : (
             <>
               <div className="mb-4 text-sm text-text/70">
-                Choose the file for this update. F95 Game Zone App now groups download links
-                by platform and skips unrelated links instead of dumping every
-                external URL into one list.
+                Choose the file for this {hasInstalledVersions ? "update" : "install"}. F95 Game Zone App now groups download links by platform and skips unrelated links instead of dumping every external URL into one list.
               </div>
               <div className="space-y-5">
                 {(variants.length > 0
