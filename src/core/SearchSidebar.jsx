@@ -102,7 +102,7 @@ const SearchSidebar = ({
     <div
       className={`overflow-hidden [-webkit-app-region:no-drag] ${
         isDocked
-          ? "atlas-glass-subtle w-[320px] shrink-0 border-r border-white/10"
+          ? "atlas-glass-subtle w-[320px] shrink-0 border-r border-border"
           : "fixed bottom-[48px] right-0 top-[70px] w-[320px] border border-accent/40 shadow-glass backdrop-blur-xl"
       }`}
       style={
@@ -119,9 +119,9 @@ const SearchSidebar = ({
       }
     >
       {/* Fixed-height sticky header */}
-      <div className="sticky top-0 z-10 flex h-[60px] items-center justify-between border-b border-white/10 bg-black/25 px-4 backdrop-blur-md">
+      <div className="sticky top-0 z-10 flex min-h-[48px] items-center justify-between border-b border-border bg-black/25 px-3 py-2 backdrop-blur-md">
         <div>
-          <span className="text-lg font-bold">
+          <span className="text-base font-bold leading-tight">
             <i className="fas fa-filter mr-2"></i>Filters
           </span>
           {isDocked && (
@@ -156,7 +156,7 @@ const SearchSidebar = ({
       <div className="h-[calc(100%-60px)] overflow-y-auto p-4">
         {/* Search Input */}
         <div className="mb-6">
-          <div className="flex items-center rounded-xl border border-white/10 bg-black/20 backdrop-blur-sm">
+          <div className="flex items-center rounded-xl border border-border bg-black/20 backdrop-blur-sm">
             <i className="fas fa-search w-6 h-6 text-text pl-3 flex items-center justify-center"></i>
             <input
               type="text"

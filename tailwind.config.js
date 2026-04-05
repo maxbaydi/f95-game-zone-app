@@ -11,7 +11,7 @@ module.exports = {
         primary: '#121418',
         secondary: '#1a1d22',
         tertiary: '#252a31',
-        border: 'rgba(255, 255, 255, 0.1)',
+        border: 'rgba(255, 255, 255, 0.26)',
         selected: 'rgba(44, 142, 169, 0.22)',
         accent: '#2C8EA9',
         accentBar: '#3db4d4',

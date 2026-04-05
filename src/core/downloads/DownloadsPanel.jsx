@@ -45,7 +45,7 @@ const getDownloadStatusTone = (status) => {
     case "downloading":
       return "border-accent/30 bg-accent/10 text-text";
     case "queued":
-      return "border-white/10 bg-white/5 text-text/85";
+      return "border-border bg-white/5 text-text/85";
     case "installing":
       return "border-sky-400/30 bg-sky-500/10 text-sky-100";
     case "completed":
@@ -53,7 +53,7 @@ const getDownloadStatusTone = (status) => {
     case "error":
       return "border-red-500/30 bg-red-500/10 text-red-100";
     default:
-      return "border-white/10 bg-white/5 text-text/85";
+      return "border-border bg-white/5 text-text/85";
   }
 };
 
@@ -69,8 +69,8 @@ const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
         onClick={onClose}
         role="presentation"
       />
-      <div className="fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-white/10 bg-primary/90 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+      <div className="fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-accent/80">
               Downloads
@@ -83,7 +83,7 @@ const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
+            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
           >
             Close
           </button>
@@ -108,7 +108,7 @@ const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
                 return (
                   <div
                     key={item.id}
-                    className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4"
+                    className="rounded-2xl border border-border bg-black/20 px-4 py-4"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">

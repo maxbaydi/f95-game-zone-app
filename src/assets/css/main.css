@@ -9,6 +9,7 @@
 .atlas-app {
   position: relative;
   isolation: isolate;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
 .atlas-app::before {
@@ -33,15 +34,15 @@
   );
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .atlas-glass-subtle {
   background: rgba(18, 20, 24, 0.65);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .atlas-skeleton {
@@ -59,4 +60,56 @@
     animation: none;
     background: rgba(255, 255, 255, 0.06);
   }
+}
+
+:root {
+  --atlas-scrollbar-size: 7px;
+  --atlas-scrollbar-thumb: rgba(255, 255, 255, 0.22);
+  --atlas-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
+  --atlas-scrollbar-thumb-hidden: rgba(255, 255, 255, 0);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--atlas-scrollbar-thumb-hidden) transparent;
+}
+
+html.atlas-scrollbar-reveal *,
+*:hover {
+  scrollbar-color: var(--atlas-scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: var(--atlas-scrollbar-size);
+  height: var(--atlas-scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--atlas-scrollbar-thumb-hidden);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.atlas-scrollbar-reveal *::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb {
+  background-color: var(--atlas-scrollbar-thumb);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--atlas-scrollbar-thumb-hover);
 }

@@ -3,16 +3,16 @@ const SearchBox = ({
   onChange,
   onAction,
   onFocus,
-  placeholder = "Search Atlas",
+  placeholder = "Search library",
   isSearchActive = false,
 }) => {
   return (
-    <div className="flex w-full justify-center">
+    <div className="flex w-full items-center justify-center">
       <div
-        className={`relative mt-5 flex h-11 w-[min(420px,calc(100vw-200px))] items-center rounded-2xl border bg-black/25 shadow-glass-sm backdrop-blur-xl transition-all duration-200 ${
+        className={`relative flex h-11 w-[min(420px,calc(100vw-200px))] items-center rounded-2xl border bg-black/25 shadow-glass-sm backdrop-blur-xl transition-all duration-200 ${
           isSearchActive
             ? "border-accent/60 ring-2 ring-accent/25 shadow-glow-accent"
-            : "border-white/10 hover:border-accent/40 hover:shadow-glass"
+            : "border-border hover:border-accent/40 hover:shadow-glass"
         }`}
       >
         <i className="fas fa-search flex h-11 w-10 items-center justify-center pl-3 text-text/70"></i>

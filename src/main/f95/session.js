@@ -48,21 +48,77 @@ async function clearF95Session(customSession = getF95Session()) {
 }
 
 function createF95LoginWindow({ BrowserWindow, appConfig }) {
-  const existingWindows = BrowserWindow.getAllWindows().filter(
-    (windowInstance) => windowInstance.__atlasF95LoginWindow === true,
+  const loginWindow = createF95BrowserWindow({
+    BrowserWindow,
+    appConfig,
+    url: F95_LOGIN_URL,
+    title: "F95 Login",
+    reuseKey: "__atlasF95LoginWindow",
+  });
+
+  return loginWindow;
+}
+
+function createF95BrowserWindow({
+  BrowserWindow,
+  appConfig,
+  url,
+  title = "F95 Browser",
+  reuseKey = "__atlasF95BrowserWindow",
+  onNavigation = null,
+}) {
+  const emitNavigation = (windowInstance) => {
+    if (
+      !windowInstance ||
+      windowInstance.isDestroyed() ||
+      typeof windowInstance.__atlasF95NavigationHandler !== "function"
+    ) {
+      return;
+    }
+
+    let currentUrl = "";
+    let currentTitle = "";
+    try {
+      currentUrl = windowInstance.webContents.getURL();
+      currentTitle = windowInstance.webContents.getTitle();
+    } catch (error) {
+      console.warn(
+        "[f95.browser] Failed to read browser navigation state:",
+        error,
+      );
+    }
+
+    windowInstance.__atlasF95NavigationHandler({
+      url: currentUrl,
+      title: currentTitle,
+    });
+  };
+
+  const existingWindow = BrowserWindow.getAllWindows().find(
+    (windowInstance) => windowInstance[reuseKey] === true,
   );
 
-  if (existingWindows.length > 0) {
-    existingWindows[0].focus();
-    return existingWindows[0];
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    existingWindow[reuseKey] = true;
+    existingWindow.__atlasF95NavigationHandler =
+      typeof onNavigation === "function" ? onNavigation : null;
+    existingWindow.setTitle(title);
+    existingWindow.loadURL(url).catch((error) => {
+      console.error(
+        "[f95.browser] Failed to reload F95 browser window:",
+        error,
+      );
+    });
+    existingWindow.focus();
+    return existingWindow;
   }
 
-  const loginWindow = new BrowserWindow({
+  const browserWindow = new BrowserWindow({
     width: 1180,
     height: 820,
     minWidth: 960,
     minHeight: 700,
-    title: "F95 Login",
+    title,
     autoHideMenuBar: true,
     show: false,
     backgroundColor: "#111111",
@@ -73,21 +129,48 @@ function createF95LoginWindow({ BrowserWindow, appConfig }) {
     },
   });
 
-  loginWindow.__atlasF95LoginWindow = true;
+  browserWindow[reuseKey] = true;
+  browserWindow.__atlasF95NavigationHandler =
+    typeof onNavigation === "function" ? onNavigation : null;
 
   if (process.defaultApp || appConfig?.Interface?.showDebugConsole) {
-    loginWindow.webContents.openDevTools({ mode: "detach" });
+    browserWindow.webContents.openDevTools({ mode: "detach" });
   }
 
-  loginWindow.once("ready-to-show", () => {
-    loginWindow.show();
+  browserWindow.once("ready-to-show", () => {
+    browserWindow.show();
   });
 
-  loginWindow.loadURL(F95_LOGIN_URL).catch((error) => {
-    console.error("[f95.auth] Failed to load login window:", error);
+  if (!browserWindow.__atlasF95BrowserWindowConfigured) {
+    browserWindow.__atlasF95BrowserWindowConfigured = true;
+    browserWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+      if (/^https?:\/\//i.test(String(targetUrl || ""))) {
+        browserWindow.loadURL(targetUrl).catch((error) => {
+          console.error("[f95.browser] Failed to open popup target:", error);
+        });
+      }
+
+      return { action: "deny" };
+    });
+
+    const forwardNavigationState = () => {
+      emitNavigation(browserWindow);
+    };
+
+    browserWindow.webContents.on("did-navigate", forwardNavigationState);
+    browserWindow.webContents.on("did-navigate-in-page", forwardNavigationState);
+    browserWindow.webContents.on("page-title-updated", forwardNavigationState);
+    browserWindow.webContents.on("did-finish-load", forwardNavigationState);
+    browserWindow.on("closed", () => {
+      browserWindow.__atlasF95NavigationHandler = null;
+    });
+  }
+
+  browserWindow.loadURL(url).catch((error) => {
+    console.error("[f95.browser] Failed to load browser window:", error);
   });
 
-  return loginWindow;
+  return browserWindow;
 }
 
 module.exports = {
@@ -96,6 +179,7 @@ module.exports = {
   F95_LOGIN_URL,
   F95_SEARCH_URL,
   clearF95Session,
+  createF95BrowserWindow,
   createF95LoginWindow,
   getF95AuthState,
   getF95Session,

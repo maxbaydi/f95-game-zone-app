@@ -14,12 +14,66 @@ Last updated: 2026-04-04
 | Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------------- | ----------- | -------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                |
-| Stage 1. Local core              | in_progress |      94% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, and Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall now exist. Scanner is still legacy, and the new F95 flow still needs manual end-to-end smoke with a real login. |
+| Stage 1. Local core              | in_progress |      95% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, a first local save vault, and Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall now exist. Scanner is still legacy, and the new F95 flow still needs manual end-to-end smoke with a real login. |
 | Stage 2. Save intelligence       | in_progress |      62% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app detects install-relative save roots plus `%AppData%/RenPy/*`, local save vault can now back up and restore profile-based roots, and the library details panel can inspect/refresh profile detection. Deeper conflict resolution and more engine-specific save adapters are still missing.                                                                                                                                                                                                  |
 | Stage 3. Supabase                | in_progress |      58% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. The service-role key is intentionally not used in the shipped app. First live bucket/auth smoke is still pending.                                                                                                                                                                                                                                                      |
 | Stage 4. Sync UX                 | in_progress |      54% | Settings now have a dedicated Cloud Saves page for config/auth, and the library details panel exposes refresh/upload/restore actions plus sync state. Rich conflict prompts, remote history browsing and background auto-sync are still missing.                                                                                                                                                                                                                                                                               |
-| Stage 5. Quality hardening       | partial     |      48% | CI/check foundation, migration tests, scan-source store tests, Ren'Py detector tests, scan-session tests, scan-candidate store tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, F95 download resolver tests including masked-link, countdown-host and gofile coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                                                                                                              |
+| Stage 5. Quality hardening       | partial     |      49% | CI/check foundation, migration tests, scan-source store tests, Ren'Py detector tests, scan-session tests, scan-candidate store tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                                                                                                      |
 | MVP total                        | in_progress |      73% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### 2026-04-05 — Stage 1 mirror resolver extension: Google Drive support and live anonfile host-family recognition
+
+- Status: partial
+- Progress: 96%
+- ТЗ coverage: closes another common mirror class by teaching the app how to resolve public Google Drive file links instead of treating share/view pages as dead HTML payloads
+
+What was done:
+
+- Added a dedicated `Google Drive` resolver in the Electron main process.
+- Public Google Drive mirrors now support:
+  - share/view URLs like `/file/d/<id>/view`
+  - direct `uc?export=download&id=<id>` URLs
+  - embedded viewer pages that expose the final `drive.usercontent.google.com` download URL
+  - confirm/warning forms for large or scanned files that require a second confirmation request before the real payload is served
+- Expanded known mirror-family recognition for live `anonfile`-style hosts:
+  - `anonfile.de`
+  - `anonfiles.se`
+  - `drive.usercontent.google.com` for the resolved Google Drive payload host
+
+How it was implemented:
+
+- Main download support:
+  - `src/main/f95/downloadSupport.js`
+  - added helpers for:
+    - Google Drive file-id extraction
+    - JS-unescape decoding inside HTML viewer payloads
+    - embedded direct download URL extraction from viewer pages
+    - confirm-form parsing for warning pages
+    - recursive resolution of the actual downloadable Google payload URL
+- Thread mirror recognition:
+  - `src/main/f95/threadLinks.js`
+  - added live host-family recognition for `anonfile.de`, `anonfiles.se` and Google Drive's content host
+- Important constraint:
+  - `anonfile` itself is only automatically supported when the mirror page is actually resolvable without captcha
+  - if the host requires captcha, the app still stops honestly instead of pretending it can bypass it
+
+Files changed in this slice:
+
+- `src/main/f95/downloadSupport.js`
+- `src/main/f95/threadLinks.js`
+- `test/f95DownloadSupport.test.js`
+- `tasks.md`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- `MEGA` still remains explicitly unsupported for automatic install and needs a dedicated implementation if it is ever going to work correctly
+- `anonfile` public downloads that require captcha are still intentionally not auto-bypassed
+- real manual smoke with a live Google Drive mirror from an actual F95 thread is still needed even though the resolver logic and tests are now in place
 
 ### 2026-04-04 — Stage 1 mirror resolver expansion: countdown hosts + Gofile + explicit MEGA guard
 
@@ -1645,6 +1699,570 @@ What is still missing here:
 - the new archive module is the base for update install/unpack, not the final game-update wizard itself
 - packaged manual smoke for updater behavior still has to be run; unit tests do not prove installer UX end-to-end
 - Linux/macOS updater behavior was not manually verified in this workspace
+
+### 2026-04-05 — Game removal flow: library-only, delete-with-save-preserve, full local wipe
+
+- Status: partial
+- Progress: 66%
+- TЗ coverage: closes a missing user-critical library operation by moving game deletion into a main-side removal service with explicit modes for keeping saves or fully wiping local data
+
+What was done:
+
+- Added a dedicated removal contract with explicit modes:
+  - remove from library only
+  - remove installed files but preserve saves
+  - remove installed files and detected saves
+- Moved deletion orchestration into a main-side service instead of spreading it across renderer confirms and ad-hoc DB calls.
+- Added install-path safety checks so Atlas refuses to delete:
+  - drive roots
+  - protected app/data/library roots
+  - folders overlapping another library entry
+- Wired game removal into the main library UI with a dedicated modal instead of raw confirm chains.
+- Added the same removal flow to the legacy `GameDetailsWindow` so the old details path no longer depends on broken/missing folder-delete plumbing.
+- Updated banner context menu with a direct `Remove Game` action.
+- Expanded DB cleanup so full library removal now also clears:
+  - `save_profiles`
+  - `save_sync_state`
+  - leftover per-record cached image folders
+- Added coverage for:
+  - delete installed files + preserve saves in local vault
+  - full cleanup of installed files + detected Ren'Py AppData saves + local vault copies
+
+How it was implemented:
+
+- Shared contract:
+  - `src/shared/gameRemoval.js`
+  - centralizes removal modes and input validation
+- Main deletion service:
+  - `src/main/gameRemoval.js`
+  - validates request payload
+  - loads current game + save snapshot
+  - performs safe backup before destructive delete when saves must be preserved
+  - validates removable install paths against protected roots and other library entries
+  - deletes install folders and optional save folders
+  - removes stale local vault copy on full cleanup
+- Main integration:
+  - `src/main.js`
+  - new IPC endpoint: `remove-library-game`
+  - reuses `game-deleted` broadcast for renderer refresh
+- Database cleanup:
+  - `src/database.js`
+  - `deleteGameCompletely()` now removes save-sync tables and record image cache directory in addition to old metadata cleanup
+- Renderer bridge:
+  - `src/renderer.js`
+  - exposes `removeLibraryGame()`
+- Main library UI:
+  - `src/core/library/DeleteGameModal.jsx`
+  - `src/core/library/LibraryDetailsPanel.jsx`
+  - `src/core/GameBanner.js`
+  - `src/App.jsx`
+  - added product-facing removal modal, remove button in details panel, and context-menu action
+- Legacy details window:
+  - `src/core/banner/GameDetailsWindow.jsx`
+  - `src/gamedetails.html`
+  - switched full game deletion to the same modal/service path
+- HTML wiring:
+  - `src/index.html`
+  - `src/gamedetails.html`
+- Tests:
+  - `test/gameRemoval.test.js`
+
+Rationale:
+
+- The old implementation was wrong architecturally:
+  - renderer-side confirm chains were deciding destructive FS behavior
+  - last-version removal and full-game removal were coupled badly
+  - the old details window depended on a non-existent recursive folder-delete bridge
+  - DB cleanup still left sync/save metadata behind
+- The new path keeps destructive logic in `main`, keeps renderer as presentation, and fails closed when folder/save deletion is unsafe.
+
+Checks run:
+
+- `npx prettier --write src/shared/gameRemoval.js src/main/gameRemoval.js src/database.js src/main.js src/renderer.js src/core/library/DeleteGameModal.jsx src/core/library/LibraryDetailsPanel.jsx src/core/GameBanner.js src/App.jsx src/core/banner/GameDetailsWindow.jsx src/index.html src/gamedetails.html test/gameRemoval.test.js`
+- `npm run lint`
+- `npm run typecheck`
+- `node --test test/gameRemoval.test.js`
+- `npm run test`
+
+What is still missing here:
+
+- no manual Electron smoke was run for the new modal/remove flows; only automated tests were run
+- multi-version delete still only removes version records, not version folders; this slice focused on whole-game removal
+- save cleanup is intentionally strict: if Atlas cannot classify an external save folder safely, it refuses full wipe instead of guessing
+- if we later want per-version folder deletion, that should reuse the same safety service rather than introducing a second deletion path
+
+### 2026-04-05 — Context menu routing fix + expanded library actions
+
+- Status: partial
+- Progress: 68%
+- TЗ coverage: fixes a real regression in the library context menu and expands it with product-level actions without pushing destructive UI behavior into `main`
+
+What was done:
+
+- Fixed the broken context-menu action path for `removeGame`.
+- Restored proper `main -> renderer` routing for UI-owned context-menu commands.
+- Added an update action to the game-card context menu, so updateable titles can open the existing update flow directly from right-click.
+- Cleaned up the game-card menu structure with separators and clearer labels:
+  - `Play`
+  - `Open Game Folder`
+  - `Update to ...` when available
+  - `Open Game Page`
+  - `View Details`
+  - `Remove Game`
+- Tightened menu generation so launch/folder entries are built only from usable versions instead of dumping invalid items blindly.
+
+How it was implemented:
+
+- Main:
+  - `src/main.js`
+  - `handleContextAction()` now accepts the originating webContents
+  - UI-owned actions like `removeGame` and `updateGame` are forwarded back to renderer via `context-menu-command`
+  - `processTemplate()` now preserves the sender context recursively instead of dropping it
+- Renderer/library UI:
+  - `src/App.jsx`
+  - handles forwarded `updateGame` command in addition to `removeGame`
+- Card menu:
+  - `src/core/GameBanner.js`
+  - expanded context menu items and cleaned label/group structure
+
+Rationale:
+
+- The bug was not in the delete modal itself. The real issue was that the context menu executed actions only inside `main`, while newer actions like remove/update are renderer-owned UI flows.
+- Leaving it as-is would keep producing `Unknown action: removeGame` and would encourage duplicating delete/update UI logic in `main`, which is the wrong boundary.
+
+Checks run:
+
+- `npx prettier --write src/main.js src/core/GameBanner.js src/App.jsx`
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+
+What is still missing here:
+
+- no manual Electron smoke was run for the right-click menu in a live window yet
+- context menu still belongs only to game cards; details-window-specific context actions were not extended in this slice
+
+### 2026-04-05 — Google Drive mirror resolver hardening
+
+- Status: partial
+- Progress: 97%
+- ТЗ coverage: tightens another real mirror family by fixing Google Drive link resolution instead of pushing invalid Drive URLs into the downloader
+
+What was done:
+
+- Hardened Google Drive mirror resolution so it no longer dies on the first failed candidate URL.
+- Added `resourcekey` awareness for Google Drive public links, which is required by some share links to build a valid direct download URL.
+- Expanded embedded Drive URL parsing so the resolver now accepts both:
+  - `.../uc?...`
+  - `.../download?...`
+- Expanded confirm/warning-form handling so Google Drive forms with `/download` actions are treated the same as `/uc`.
+- Tightened the Drive resolver boundary so this logic now runs only for actual Google Drive hosts and does not interfere with other mirrors.
+- Added regression coverage for:
+  - `drive.usercontent.google.com/download?...` extraction
+  - fallback from a share page to a resourcekey-aware direct candidate
+
+How it was implemented:
+
+- Main download resolver:
+  - `src/main/f95/downloadSupport.js`
+  - added:
+    - Drive `resourcekey` extraction
+    - candidate URL generation for multiple valid direct-download shapes
+    - broader direct URL recognition for embedded Drive payload links
+    - retry/fallback logic across candidate URLs instead of failing on the first 400/interstitial
+- Tests:
+  - `test/f95DownloadSupport.test.js`
+
+Rationale:
+
+- The bug was not only “GDrive download fails”. The deeper problem was that the resolver was too narrow and too eager to stop:
+  - it missed valid `/download`-style Drive URLs
+  - it dropped `resourcekey`
+  - it treated a single bad candidate as a fatal outcome instead of trying the next valid shape
+- Fixing the resolver is the right boundary. If the final URL is wrong, no downloader path will save it.
+
+Checks run:
+
+- `npx prettier --write src/main/f95/downloadSupport.js test/f95DownloadSupport.test.js`
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no live Electron smoke was run yet against the exact `Family Secrets` Google Drive mirror from your screenshot
+- other log lines you pasted are separate limitations and are not fixed by this slice:
+  - Pixeldrain list mirrors
+  - Gofile 401 guest/API issues
+  - masked links that now require captcha confirmation
+
+### 2026-04-05 — Captcha-required mirror resume flow
+
+- Status: partial
+- Progress: 98%
+- ТЗ coverage: removes a dead-end install/update failure mode by turning captcha-required mirrors into a resumable user flow instead of a terminal error
+
+What was done:
+
+- Added a typed `captcha_required` mirror error in the main F95 resolver path.
+- `install-f95-thread` now returns structured captcha metadata instead of only a dead text error.
+- Added a reusable F95 browser window on the same persistent session partition, so the user can solve the captcha without losing auth state.
+- Search workspace now handles captcha-required installs properly:
+  - loads the captcha page in the embedded browser
+  - keeps the pending install request in state
+  - shows a real `Retry Install` action after the user finishes the challenge
+- Library update modal now handles the same case:
+  - shows `Solve Captcha`
+  - opens a same-session F95 browser window
+  - lets the user retry the update without rebuilding the whole update flow
+
+How it was implemented:
+
+- Main resolver typing:
+  - `src/main/f95/downloadSupport.js`
+  - new `MirrorActionRequiredError`
+  - masked-link captcha and countdown-host captcha now throw typed `captcha_required` with `actionUrl`
+- F95 browser window support:
+  - `src/main/f95/session.js`
+  - new reusable `createF95BrowserWindow(...)`
+- Main IPC:
+  - `src/main.js`
+  - `install-f95-thread` now returns structured captcha action payloads
+  - new IPC endpoint: `open-f95-browser-url`
+- Renderer bridge:
+  - `src/renderer.js`
+  - exposes `openF95BrowserUrl(...)`
+- Search workspace UI:
+  - `src/core/search/F95BrowserWorkspace.jsx`
+  - stores pending captcha installs, opens captcha page, and retries the same install after challenge completion
+- Update modal UI:
+  - `src/App.jsx`
+  - `src/core/updates/F95UpdateModal.jsx`
+  - stores captcha URL for update attempts and renders a real recovery action instead of a dead error
+- Tests:
+  - `test/f95DownloadSupport.test.js`
+
+Rationale:
+
+- The old behavior was wrong product-wise. Telling the user “open it in the embedded browser and finish the captcha there” without giving them an actual resume flow is not a feature.
+- The right fix is not to bypass captcha. The right fix is to preserve user intent, let the user complete the required challenge on the same session, and then resume the exact install/update action.
+
+Checks run:
+
+- `npx prettier --write src/main/f95/session.js src/renderer.js src/core/search/F95BrowserWorkspace.jsx src/core/updates/F95UpdateModal.jsx src/App.jsx`
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no live Electron smoke was run yet for a real captcha-required mirror after this slice
+- this does not auto-solve captchas and should not; it only turns them into a proper resumable flow
+- other mirror limitations remain separate:
+  - Pixeldrain list mirrors
+  - Gofile 401/API edge cases
+
+### 2026-04-05 — Gofile handshake fix for public mirror installs
+
+- Status: partial
+- Progress: 99%
+- ТЗ coverage: fixes a real broken public mirror path by matching Gofile's current guest-account + website-token handshake instead of using an incomplete, now-invalid API flow
+
+What was done:
+
+- Fixed `Gofile content lookup failed with HTTP 401` for public mirrors by updating Atlas to follow Gofile's current frontend flow.
+- Guest account bootstrap now uses:
+  - `POST /accounts`
+  - `GET /accounts/website`
+  - `GET /contents/{id}` with:
+    - `Authorization`
+    - `X-Website-Token`
+    - `X-BL`
+    - stable `User-Agent`
+- Added a local implementation of the current `X-Website-Token` generation logic used by Gofile's frontend.
+- Removed the old half-implemented content lookup that only sent `Authorization` and therefore broke on `401`.
+
+How it was implemented:
+
+- Main mirror resolver:
+  - `src/main/f95/downloadSupport.js`
+  - added:
+    - Gofile website-token generation
+    - guest-account sync against `/accounts/website`
+    - full request headers required by `/contents/{id}`
+- Tests:
+  - `test/f95DownloadSupport.test.js`
+  - extended to cover:
+    - website-token generation shape
+    - synced account step before content lookup
+    - required headers on the content request
+
+Rationale:
+
+- The bug was not that Gofile was impossible. The bug was that Atlas was following an outdated/incomplete API path.
+- Their own frontend still creates a guest account, but it also syncs that account and sends a computed `X-Website-Token`. We were missing that second half, so `401` was expected.
+
+Checks run:
+
+- `npx prettier --write src/main/f95/downloadSupport.js test/f95DownloadSupport.test.js`
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no live Electron smoke was run yet against the exact failing Gofile mirror from your install flow
+- this fixes the API handshake path; it does not solve mirrors that later require password/captcha/premium-only access
+- separate mirror limitations still remain:
+  - Pixeldrain list mirrors
+  - GDrive queueing transport issue
+
+### 2026-04-05 — GDrive transport fix + Gofile file-link selection hardening
+
+- Status: partial
+- Progress: 99%
+- ТЗ coverage: fixes two mirror execution failures that were still blocking real installs even after URL resolution succeeded
+
+What was done:
+
+- Fixed `GDrive queued forever` by adding a dedicated main-side streamed download path for Google Drive-family hosts.
+- Atlas no longer waits for Electron `will-download` on `drive.google.com` / `drive.usercontent.google.com`, because that path was leaving Drive mirrors stuck in `queued`.
+- The Google Drive direct path now:
+  - streams the payload from the main process
+  - derives the filename from `Content-Disposition` or final URL
+  - updates the same download panel/store with progress
+  - hands the finished file to the same install pipeline as normal mirrors
+- Hardened Gofile file extraction so Atlas no longer grabs noisy folder-level `downloadPage` style values like `download.json`.
+- Gofile now prefers actual file entries and real child file links inside the content tree.
+
+How it was implemented:
+
+- New direct transport helper:
+  - `src/main/f95/directDownload.js`
+  - owns:
+    - direct-download host targeting
+    - filename extraction
+    - streamed response-to-file writing with progress
+- Main integration:
+  - `src/main.js`
+  - reintroduced a dedicated direct-download branch for Google Drive-family URLs inside `install-f95-thread`
+  - added queue cleanup helper for manual-download branches
+  - reuses the existing install finalization path after the file lands on disk
+- Gofile resolver tightening:
+  - `src/main/f95/downloadSupport.js`
+  - `extractNestedDownloadUrl()` now prefers real `file` nodes and child file links instead of noisy folder metadata
+- Tests:
+  - `test/f95DirectDownload.test.js`
+  - `test/f95DownloadSupport.test.js`
+
+Rationale:
+
+- The GDrive bug was not in the resolver anymore. The remaining problem was the transport: `downloadURL()` was not transitioning those mirrors into an active download item, so they sat in `queued` forever.
+- The Gofile `download.json` bug was not an auth problem anymore. It was a payload-selection bug: Atlas was still willing to take a non-file link from the content tree.
+
+Checks run:
+
+- `npx prettier --write src/main.js src/main/f95/downloadSupport.js src/main/f95/directDownload.js test/f95DownloadSupport.test.js test/f95DirectDownload.test.js`
+- `node --test test/f95DownloadSupport.test.js test/f95DirectDownload.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no live Electron smoke was run yet against your exact `Family Secrets` GDrive mirror after this slice
+- no live Electron smoke was run yet against your exact failing Gofile mirror after this slice
+- this still does not solve separate mirror classes:
+  - Pixeldrain list mirrors
+  - MEGA automatic install
+
+## 2026-04-05 — Captcha continuation recovery for install/update flows
+
+Progress: 73% of the current F95 mirror-resilience stage
+Overall roadmap impact: improves the live-install/update flow so manual captcha confirmation can actually hand control back to Atlas instead of dead-ending in a browser page
+
+What was done:
+
+- fixed the embedded F95 browser rewrite script so masked-page CTA links like `href="#"` no longer redirect to `https://f95zone.to/#`
+- added shared captcha continuation helpers in `src/shared/f95CaptchaFlow.js`
+- wired the reusable F95 browser window to:
+  - keep popup targets in the same window
+  - broadcast navigation changes back to renderer
+- search workspace now auto-detects when captcha flow has advanced to a real hoster page and retries install with that hoster URL
+- update modal now does the same through browser-navigation IPC, so GDrive/Gofile captcha completion can resume update flow without manual file download
+- exposed the new browser-navigation event through preload
+
+How it was implemented:
+
+- Main/browser layer:
+  - `src/main/f95/session.js`
+  - `src/main.js`
+  - the reusable browser window now installs a same-window popup policy and emits `f95-browser-navigation`
+- Renderer layer:
+  - `src/core/search/F95BrowserWorkspace.jsx`
+  - `src/App.jsx`
+  - both flows use the same continuation rule: once the captcha page advances to a real hoster URL, Atlas retries install/update against that URL instead of forcing manual download
+- Shared pure utility:
+  - `src/shared/f95CaptchaFlow.js`
+- Tests:
+  - `test/f95CaptchaFlow.test.js`
+
+Rationale:
+
+- The broken behavior was not "captcha exists"; it was that Atlas had no professional handoff after the captcha step.
+- Fixing only the resolver was not enough. The app needed a continuation contract between the manual captcha browser step and the automated download/install pipeline.
+- The redirect-to-home bug in the embedded browser was self-inflicted by wrong `#` link rewriting and had to be fixed at the browser behavior layer, not hidden behind more retry buttons.
+
+Checks run:
+
+- `node --test test\\f95CaptchaFlow.test.js test\\f95DirectDownload.test.js test\\f95DownloadSupport.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no live Electron smoke was run yet against the exact user-reported Gofile captcha case after this continuation patch
+- no live Electron smoke was run yet against the exact user-reported GDrive captcha/update case after this continuation patch
+- MEGA and Pixeldrain list mirrors are still out of scope for automatic install
+
+## 2026-04-05 — Stable ordering for concurrent downloads in the panel
+
+Progress: 76% of the current F95 download UX stabilization stage
+Overall roadmap impact: removes a visible UX regression where parallel downloads kept reordering themselves on every progress tick
+
+What was done:
+
+- fixed the downloads store ordering so active items no longer jump around when two or more downloads update at the same time
+- active entries now keep a stable queue order based on creation order instead of `updatedAt`
+- completed/error history still stays newest-first
+
+How it was implemented:
+
+- `src/main/f95/downloadsStore.js`
+  - introduced `isActiveStatus()`
+  - changed active sort behavior to prefer `createdAt`
+  - kept historical entries ordered by `updatedAt`
+  - added deterministic `id` tiebreaker
+- `test/downloadsStore.test.js`
+  - verifies stable ordering during concurrent progress updates
+  - verifies history ordering still prefers the newest completed items
+
+Rationale:
+
+- The bug was not in the panel markup. It was in the store policy.
+- Sorting active downloads by `updatedAt` is wrong because progress updates constantly mutate that field, which causes visible list thrashing.
+- Stable order belongs in the source-of-truth store, not as a renderer-side visual patch.
+
+Checks run:
+
+- `node --test test\\downloadsStore.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no manual Electron smoke was run yet with 2+ real simultaneous mirrors after this ordering fix
+- panel still has no pause/resume/cancel controls for active items
+
+## 2026-04-05 — Professional library sorting in the installed-games view
+
+Progress: 81% of the current library UX refinement stage
+Overall roadmap impact: turns the library list from a hardcoded pseudo-sort into a user-controlled ordering model that matches real library usage
+
+What was done:
+
+- added a real library sort control to the header of the installed library view
+- implemented library sorting modes for:
+  - newest installed
+  - oldest installed
+  - title A-Z
+  - title Z-A
+  - engine
+  - status
+- status sorting now normalizes common Atlas/F95 states into stable groups:
+  - in development
+  - on hold
+  - completed
+  - abandoned
+- blank/ongoing states are treated as "In development" instead of falling into random ordering
+- the same sorted collection now drives both the sidebar titles list and the main game grid, so they stay in sync
+
+How it was implemented:
+
+- new shared pure util:
+  - `src/shared/librarySort.js`
+  - owns:
+    - sort mode constants/options
+    - installed timestamp extraction from `versions.date_added`
+    - status normalization/grouping
+    - deterministic sorting logic
+- renderer wiring:
+  - `src/index.html`
+  - `src/App.jsx`
+  - added header select control and replaced the old hidden hardcoded `lastPlayed/date` sorting path with explicit `sortLibraryGames(...)`
+- tests:
+  - `test/librarySort.test.js`
+
+Rationale:
+
+- The old library order was not professional. It silently mixed search filtering with unrelated hardcoded sort behavior.
+- Sorting belongs in a shared pure helper so the sidebar and the grid do not drift apart and so the status-order contract is testable.
+- Status sorting needed normalization because Atlas data is inconsistent: blank/ongoing values should not randomly interleave with Completed/Onhold/Abandoned entries.
+
+Checks run:
+
+- `node --test test\\librarySort.test.js`
+- `npm run ci:check`
+
+What is still missing here:
+
+- no manual Electron smoke was run yet on a real mixed library with enough titles to visually verify every sort mode
+- there is still no secondary filter UI for narrowing by engine/status; this slice only adds ordering, not filtering
+
+## 2026-04-05 — Rebrand to F95 Game Zone App and prepare standalone repository
+
+Progress: 88% of the current productization stage
+Overall roadmap impact: shifts the project from an Atlas-branded fork surface to a standalone application surface with its own package/build metadata and public-facing docs
+
+What was done:
+
+- changed package/build branding to `F95 Game Zone App`
+- updated Electron packaging metadata:
+  - package name
+  - description
+  - product name
+  - app id
+  - GitHub publish owner/repo
+- rewrote the top-level README around the new app identity
+- documented cloud saves and the current bidirectional sync model honestly:
+  - local -> cloud backup
+  - cloud -> local restore
+  - local safety backup before restore
+- updated major user-facing window titles and settings copy to remove the old Atlas product branding
+- added `.codex/` to `.gitignore` so local Codex workspace files do not leak into the standalone repo
+
+How it was implemented:
+
+- packaging and release metadata:
+  - `package.json`
+  - `package-lock.json`
+  - `src/main/appUpdater.js`
+- user-facing docs:
+  - `README.md`
+- runtime branding:
+  - `src/index.html`
+  - `src/settings.html`
+  - `src/gamedetails.html`
+  - `src/core/ui/windows/importer.html`
+  - settings and cloud-save UI copy in the relevant React components
+
+Rationale:
+
+- Renaming only the README would be fake. The build metadata and updater target also needed to move or the app would still behave like Atlas under the hood.
+- Renaming every internal `atlas_*` identifier would be a bad idea right now. Those names are part of compatibility and storage/migration safety, not product branding.
+- The cloud-save docs needed to describe what is real today, not promise a background auto-merge system that does not exist yet.
+
+Checks run:
+
+- `npm run ci:check`
+
+What is still missing here:
+
+- manual smoke for branded window titles and updater target was not run yet
+- the actual standalone GitHub repo creation/push still needs to be executed after local changes are committed
 
 ## Current Next Tasks
 

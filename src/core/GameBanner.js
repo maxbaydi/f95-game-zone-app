@@ -1,6 +1,14 @@
 const { useState, useEffect } = window.React;
 
-// Inline CSS for hover effects
+const ATLAS_PREVIEW_W = 21;
+const ATLAS_PREVIEW_H = 9;
+const ATLAS_BANNER_WIDTH = 252;
+const ATLAS_BANNER_IMAGE_H = Math.round(
+  (ATLAS_BANNER_WIDTH * ATLAS_PREVIEW_H) / ATLAS_PREVIEW_W,
+);
+const ATLAS_BANNER_FOOTER_H = 100;
+const ATLAS_BANNER_HEIGHT = ATLAS_BANNER_IMAGE_H + ATLAS_BANNER_FOOTER_H;
+
 const bannerStyles = `
   .banner-root {
     perspective: 1000px;
@@ -9,7 +17,7 @@ const bannerStyles = `
     transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.38s ease;
   }
   .banner-root:hover {
-    transform: rotateX(5deg) translateY(-8px) scale(1.02);
+    transform: rotateX(5deg) translateY(-6px) scale(1.02);
     box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 32px rgba(44, 142, 169, 0.15);
   }
   .banner-root::before {
@@ -25,11 +33,11 @@ const bannerStyles = `
     transform-origin: top center;
     transform: skewX(0.001deg);
     transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.08s, opacity 0.45s ease 0.08s;
-    border-radius: 0.75rem;
+    border-radius: 0;
   }
   .banner-root:hover::before {
     opacity: 0.55;
-    transform: rotateX(5deg) translateY(-8px) scale(1.02);
+    transform: rotateX(5deg) translateY(-6px) scale(1.02);
   }
   @media (prefers-reduced-motion: reduce) {
     .banner-root,
@@ -47,24 +55,382 @@ const bannerStyles = `
   }
 `;
 
+const getEngineBackgroundColor = (engine) => {
+  const engineColors = {
+    ADRIFT: "#4F68D9",
+    Flash: "#D04220",
+    HTML: "#5B8600",
+    Java: "#6EA4B1",
+    Others: "#72A200",
+    QSP: "#BD3631",
+    RAGS: "#B67E00",
+    RPGM: "#4F68D9",
+    "Ren'Py": "#9B00EF",
+    Tads: "#4F68D9",
+    Unity: "#D35B00",
+    "Unreal Engine": "#3730A9",
+    WebGL: "#E56200",
+    "Wolf RPG": "#4B8926",
+  };
+  return engineColors[engine] || "#4B8926";
+};
+
+const getStatusBackgroundColor = (status) => {
+  const statusColors = {
+    Completed: "#4F68D9",
+    Onhold: "#649DFC",
+    Abandoned: "#B67E00",
+    "": "transparent",
+    null: "transparent",
+  };
+  return statusColors[status] || "transparent";
+};
+
+const getNewestVersion = (versions) => {
+  if (!versions || versions.length === 0) return "V 1.0";
+  let maxVersion = versions[0].version;
+  let maxValue = 0;
+  for (const version of versions) {
+    let current;
+    try {
+      current = parseInt(version.version.replace(/[^0-9]/g, ""), 10);
+    } catch {
+      current = 0;
+    }
+    if (current > maxValue) {
+      maxValue = current;
+      maxVersion = version.version;
+    }
+  }
+  return maxVersion || "V 1.0";
+};
+
+const pickVersionForLaunch = (versions) => {
+  if (!versions?.length) return null;
+  if (versions.length === 1) return versions[0];
+  let best = versions[0];
+  let maxValue = 0;
+  for (const v of versions) {
+    const n = parseInt(String(v.version).replace(/[^0-9]/g, ""), 10) || 0;
+    if (n > maxValue) {
+      maxValue = n;
+      best = v;
+    }
+  }
+  return best;
+};
+
+const getVersionLabelForCard = (game, installedLabel) => {
+  if (game.isUpdateAvailable && game.latestVersion) {
+    return String(game.latestVersion);
+  }
+  return installedLabel;
+};
+
+function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
+  const displayTitle = game.displayTitle || game.title || "Unknown";
+  const newestInstalledVersion =
+    game.newestInstalledVersion || getNewestVersion(game.versions);
+  const versionLabel = getVersionLabelForCard(game, newestInstalledVersion);
+  const launchable = pickVersionForLaunch(game.versions);
+  const canPlay = Boolean(launchable?.exec_path);
+
+  const handlePlay = (e) => {
+    e.stopPropagation();
+    if (!launchable?.exec_path) return;
+    const ext = launchable.exec_path.split(".").pop().toLowerCase() || "";
+    window.electronAPI.launchGame({
+      execPath: launchable.exec_path,
+      extension: ext,
+      recordId: game.record_id,
+    });
+  };
+
+  const thumbChildren = [];
+  if (game.banner_url) {
+    thumbChildren.push(
+      React.createElement("img", {
+        key: "img",
+        src: game.banner_url,
+        alt: displayTitle,
+        className: "w-full h-full object-cover",
+      }),
+    );
+  } else {
+    thumbChildren.push(
+      React.createElement("div", {
+        key: "ph",
+        className: "w-full h-full bg-[#1F2937]",
+      }),
+    );
+  }
+  if (game.isUpdateAvailable) {
+    thumbChildren.push(
+      React.createElement(
+        "button",
+        {
+          key: "upd",
+          type: "button",
+          className:
+            "absolute top-2 right-2 z-30 px-2 py-0.5 border border-yellow-400/90 text-yellow-300 text-[10px] pointer-events-auto bg-black/45 backdrop-blur-sm",
+          onClick: (e) => {
+            e.stopPropagation();
+            onUpdateGame?.(game);
+          },
+        },
+        game.latestVersion ? `Update ${game.latestVersion}` : "Update",
+      ),
+    );
+  }
+
+  const bodyChildren = [
+    React.createElement(
+      "div",
+      {
+        key: "labels",
+        className: "flex justify-between items-center gap-2 mb-1.5 shrink-0",
+      },
+      [
+        React.createElement("div", {
+          key: "engine",
+          className:
+            "text-white text-[10px] px-1.5 py-0.5 shrink-0 max-w-[52%] truncate",
+          style: { backgroundColor: getEngineBackgroundColor(game.engine) },
+          title: game.engine || "Unknown",
+          children: game.engine || "Unknown",
+        }),
+        React.createElement(
+          "div",
+          {
+            key: "sv",
+            className: "flex items-center shrink-0 min-w-0",
+          },
+          [
+            game.status &&
+              React.createElement("div", {
+                key: "st",
+                className:
+                  "text-white text-[10px] px-1.5 py-0.5 truncate max-w-[72px]",
+                style: {
+                  backgroundColor: getStatusBackgroundColor(game.status),
+                },
+                title: game.status,
+                children: game.status,
+              }),
+            React.createElement("div", {
+              key: "ver",
+              className: `text-white text-[10px] text-right truncate max-w-[100px] ${game.status ? "-ml-px" : ""} px-1.5 py-0.5`,
+              style: { backgroundColor: "#3F4043" },
+              title: newestInstalledVersion,
+              children: newestInstalledVersion,
+            }),
+          ],
+        ),
+      ],
+    ),
+    React.createElement("h2", {
+      key: "title",
+      className:
+        "text-white text-sm font-semibold leading-tight truncate mb-2 shrink-0",
+      title: displayTitle,
+      children: displayTitle,
+    }),
+    React.createElement(
+      "div",
+      {
+        key: "row",
+        className: "mt-auto flex items-center justify-between gap-2 min-h-0",
+      },
+      [
+        React.createElement("div", {
+          key: "vl",
+          className:
+            "text-white/75 text-[11px] truncate min-w-0 flex-1 tabular-nums",
+          title: versionLabel,
+          children: versionLabel,
+        }),
+        React.createElement("button", {
+          key: "play",
+          type: "button",
+          className: `shrink-0 px-3 py-1.5 text-xs font-semibold text-white pointer-events-auto transition-opacity ${
+            canPlay
+              ? "bg-accent hover:opacity-90"
+              : "bg-white/10 opacity-45 cursor-not-allowed"
+          }`,
+          disabled: !canPlay,
+          onClick: handlePlay,
+          children: "Play",
+        }),
+      ],
+    ),
+  ];
+
+  return React.createElement(
+    "div",
+    {
+      className:
+        "relative flex flex-col cursor-pointer overflow-hidden banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border",
+      style: {
+        width: ATLAS_BANNER_WIDTH,
+        height: ATLAS_BANNER_HEIGHT,
+      },
+      onClick: onSelect,
+      onContextMenu: onContextMenu,
+    },
+    [
+      React.createElement("style", { key: "banner-styles" }, bannerStyles),
+      React.createElement(
+        "div",
+        {
+          key: "thumb",
+          className: "relative w-full shrink-0 bg-[#1F2937] overflow-hidden",
+          style: { height: ATLAS_BANNER_IMAGE_H },
+        },
+        thumbChildren,
+      ),
+      React.createElement(
+        "div",
+        {
+          key: "body",
+          className:
+            "flex flex-col flex-1 min-h-0 px-2.5 pt-2 pb-2.5 border-t border-border bg-gradient-to-b from-white/[0.08] to-black/25 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]",
+        },
+        bodyChildren,
+      ),
+    ],
+  );
+}
+
+window.AtlasF95BannerCard = AtlasF95BannerCard;
+
 const GameBanner = ({ game, onSelect, onUpdateGame }) => {
   const [template, setTemplate] = useState(null);
-  const displayTitle = game.displayTitle || game.title || "Unknown";
-  const displayCreator = game.displayCreator || game.creator || "Unknown";
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    if (!game) {
+      return;
+    }
+
+    const versions = Array.isArray(game.versions) ? game.versions : [];
+    const playableVersions = versions.filter((version) =>
+      Boolean(version?.exec_path),
+    );
+    const folderVersions = versions.filter((version) =>
+      Boolean(version?.game_path),
+    );
+    const menuTemplate = [];
+
+    if (playableVersions.length === 1) {
+      const v = playableVersions[0];
+      const ext = v.exec_path ? v.exec_path.split(".").pop().toLowerCase() : "";
+      menuTemplate.push({
+        label: "Play",
+        enabled: Boolean(v.exec_path),
+        data: {
+          action: "launch",
+          execPath: v.exec_path,
+          extension: ext,
+          recordId: game.record_id,
+        },
+      });
+    } else if (playableVersions.length > 1) {
+      menuTemplate.push({
+        label: "Play",
+        submenu: playableVersions.map((v) => {
+          const ext = v.exec_path
+            ? v.exec_path.split(".").pop().toLowerCase()
+            : "";
+          return {
+            label: v.version || "Unknown version",
+            enabled: Boolean(v.exec_path),
+            data: {
+              action: "launch",
+              execPath: v.exec_path,
+              extension: ext,
+              recordId: game.record_id,
+            },
+          };
+        }),
+      });
+    }
+
+    if (menuTemplate.length > 0) {
+      menuTemplate.push({ type: "separator" });
+    }
+
+    if (folderVersions.length === 1) {
+      const v = folderVersions[0];
+      menuTemplate.push({
+        label: "Open Game Folder",
+        enabled: Boolean(v.game_path),
+        data: { action: "openFolder", gamePath: v.game_path },
+      });
+    } else if (folderVersions.length > 1) {
+      menuTemplate.push({
+        label: "Open Game Folder",
+        submenu: folderVersions.map((v) => ({
+          label: v.version || "Unknown version",
+          enabled: Boolean(v.game_path),
+          data: { action: "openFolder", gamePath: v.game_path },
+        })),
+      });
+    }
+
+    if (game.isUpdateAvailable && game.siteUrl) {
+      if (menuTemplate.length > 0) {
+        menuTemplate.push({ type: "separator" });
+      }
+
+      menuTemplate.push({
+        label: game.latestVersion
+          ? `Update to ${game.latestVersion}`
+          : "Update Game",
+        data: { action: "updateGame", recordId: game.record_id },
+      });
+    }
+
+    if (game.siteUrl) {
+      if (menuTemplate.length > 0) {
+        menuTemplate.push({ type: "separator" });
+      }
+
+      menuTemplate.push({
+        label: "Open Game Page",
+        data: { action: "openUrl", url: game.siteUrl },
+      });
+    }
+
+    if (menuTemplate.length > 0) {
+      menuTemplate.push({ type: "separator" });
+    }
+
+    menuTemplate.push({
+      label: "View Details",
+      data: { action: "properties", recordId: game.record_id },
+    });
+
+    menuTemplate.push({
+      label: "Remove Game",
+      data: { action: "removeGame", recordId: game.record_id },
+    });
+
+    window.electronAPI.showContextMenu(menuTemplate);
+  };
+
+  const DefaultBannerTemplate = (props) =>
+    React.createElement(AtlasF95BannerCard, {
+      ...props,
+      onContextMenu: handleContextMenu,
+    });
 
   useEffect(() => {
-    // Log banner_url on mount or update
-    console.log(
-      `GameBanner rendering for recordId: ${game.record_id}, banner_url: ${game.banner_url}`,
-    );
-    // Load the selected template from Appearance settings
     const loadTemplate = async () => {
       try {
         const selectedTemplate =
           await window.electronAPI.getSelectedBannerTemplate();
         if (selectedTemplate && selectedTemplate !== "Default") {
           try {
-            // Adjust path based on project structure
             const templateModule = await import(
               `./data/templates/banner/${selectedTemplate}.js`
             );
@@ -77,7 +443,7 @@ const GameBanner = ({ game, onSelect, onUpdateGame }) => {
             window.electronAPI.log(
               `Failed to import template ${selectedTemplate}: ${importErr.message}`,
             );
-            setTemplate(() => DefaultBannerTemplate); // Fallback to default
+            setTemplate(() => DefaultBannerTemplate);
           }
         } else {
           setTemplate(() => DefaultBannerTemplate);
@@ -85,314 +451,22 @@ const GameBanner = ({ game, onSelect, onUpdateGame }) => {
       } catch (err) {
         console.error("Error loading banner template:", err);
         window.electronAPI.log(`Error loading banner template: ${err.message}`);
-        setTemplate(() => DefaultBannerTemplate); // Fallback to default
+        setTemplate(() => DefaultBannerTemplate);
       }
     };
     loadTemplate();
-  }, [game.banner_url]); // Re-run when banner_url changes
-
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    if (!game || !game.versions || game.versions.length === 0) {
-      console.log("No versions available for context menu:", game.record_id);
-      return;
-    }
-
-    const template = [];
-
-    // Play
-    if (game.versions.length === 1) {
-      const v = game.versions[0];
-      const ext = v.exec_path ? v.exec_path.split(".").pop().toLowerCase() : "";
-      template.push({
-        label: "Play",
-        data: {
-          action: "launch",
-          execPath: v.exec_path,
-          extension: ext,
-          recordId: game.record_id,
-        },
-      });
-    } else {
-      template.push({
-        label: "Play",
-        submenu: game.versions.map((v) => {
-          const ext = v.exec_path
-            ? v.exec_path.split(".").pop().toLowerCase()
-            : "";
-          return {
-            label: v.version,
-            data: {
-              action: "launch",
-              execPath: v.exec_path,
-              extension: ext,
-              recordId: game.record_id,
-            },
-          };
-        }),
-      });
-    }
-
-    // Open Game Folder
-    if (game.versions.length === 1) {
-      const v = game.versions[0];
-      template.push({
-        label: "Open Game Folder",
-        data: { action: "openFolder", gamePath: v.game_path },
-      });
-    } else {
-      template.push({
-        label: "Open Game Folder",
-        submenu: game.versions.map((v) => ({
-          label: v.version,
-          data: { action: "openFolder", gamePath: v.game_path },
-        })),
-      });
-    }
-
-    // Open Web Link
-    if (game.siteUrl) {
-      template.push({
-        label: "Open Web Link",
-        data: { action: "openUrl", url: game.siteUrl },
-      });
-    }
-
-    // Properties
-    template.push({
-      label: "Properties",
-      data: { action: "properties", recordId: game.record_id },
-    });
-
-    console.log("Context menu template:", JSON.stringify(template, null, 2));
-    window.electronAPI.showContextMenu(template);
-  };
-
-  // Engine background color mapping based on C# DataTriggers
-  const getEngineBackgroundColor = (engine) => {
-    const engineColors = {
-      ADRIFT: "#4F68D9",
-      Flash: "#D04220",
-      HTML: "#5B8600",
-      Java: "#6EA4B1",
-      Others: "#72A200",
-      QSP: "#BD3631",
-      RAGS: "#B67E00",
-      RPGM: "#4F68D9",
-      "Ren'Py": "#9B00EF",
-      Tads: "#4F68D9",
-      Unity: "#D35B00",
-      "Unreal Engine": "#3730A9",
-      WebGL: "#E56200",
-      "Wolf RPG": "#4B8926",
-    };
-    return engineColors[engine] || "#4B8926"; // Default to Wolf RPG color
-  };
-
-  // Status background color mapping based on C# Style.Triggers
-  const getStatusBackgroundColor = (status) => {
-    const statusColors = {
-      Completed: "#4F68D9",
-      Onhold: "#649DFC",
-      Abandoned: "#B67E00",
-      "": "transparent",
-      null: "transparent",
-    };
-    return statusColors[status] || "transparent"; // Default to transparent
-  };
-
-  // Find the newest version for the game
-  const getNewestVersion = (versions) => {
-    if (!versions || versions.length === 0) return "V 1.0";
-    let maxVersion = versions[0].version;
-    let maxValue = 0;
-    for (const version of versions) {
-      let current;
-      try {
-        current = parseInt(version.version.replace(/[^0-9]/g, ""), 10);
-      } catch {
-        current = 0;
-      }
-      if (current > maxValue) {
-        maxValue = current;
-        maxVersion = version.version;
-      }
-    }
-    return maxVersion || "V 1.0";
-  };
-
-  const newestInstalledVersion =
-    game.newestInstalledVersion || getNewestVersion(game.versions);
-
-  // Default template
-  const DefaultBannerTemplate = ({ game, onSelect }) => {
-    const children = [
-      // Inline styles for hover effects
-      React.createElement(
-        "style",
-        { key: `banner-styles-${game.record_id}` },
-        bannerStyles,
-      ),
-      // Top overlay
-      React.createElement("div", {
-        key: `top-overlay-${game.record_id}`,
-        className:
-          "absolute top-0 left-0 w-full h-[28px] bg-black opacity-80 z-10",
-      }),
-      // Bottom overlay
-      React.createElement("div", {
-        key: `bottom-overlay-${game.record_id}`,
-        className:
-          "absolute bottom-0 left-0 w-full h-[28px] bg-black opacity-80 z-10",
-      }),
-      // Text and button elements
-      React.createElement(
-        "div",
-        {
-          key: `content-layer-${game.record_id}`,
-          className: "absolute inset-0 z-20",
-        },
-        [
-          // Creator in top-left of top overlay, vertically centered
-          React.createElement("div", {
-            key: `creator-${game.record_id}`,
-            className:
-              "absolute top-0 left-0 text-white text-xs ml-2.5 flex items-center h-[28px]",
-            children: displayCreator,
-          }),
-          // Update Available button at top-right, vertically centered
-          game.isUpdateAvailable &&
-            React.createElement(
-              "button",
-              {
-                key: `update-button-${game.record_id}`,
-                className:
-                  "absolute top-[4px] right-2.5 w-[116px] h-[20px] bg-transparent border border-yellow-400 text-yellow-400 text-[10px] rounded-sm z-30 pointer-events-auto",
-                onClick: (e) => {
-                  e.stopPropagation();
-                  onUpdateGame?.(game);
-                },
-              },
-              game.latestVersion
-                ? `Update ${game.latestVersion}`
-                : "Update Ready",
-            ),
-          // Bottom overlay content
-          React.createElement(
-            "div",
-            {
-              key: `bottom-content-${game.record_id}`,
-              className:
-                "absolute bottom-0 left-0 w-full h-[28px] flex items-center",
-            },
-            [
-              // Engine at bottom-left with rounded background
-              React.createElement("div", {
-                key: `engine-${game.record_id}`,
-                className: "text-white text-[10px] rounded-sm px-2 py-0.5 ml-2",
-                style: {
-                  backgroundColor: getEngineBackgroundColor(game.engine),
-                },
-                children: game.engine || "Unknown",
-              }),
-              // Title centered in bottom overlay
-              React.createElement("div", {
-                key: `title-${game.record_id}`,
-                className:
-                  "text-white text-xs font-semibold flex-1 text-center",
-                children: displayTitle,
-              }),
-              // Status and Newest Version at bottom-right
-              React.createElement(
-                "div",
-                {
-                  key: `status-version-${game.record_id}`,
-                  className: "flex items-center mr-2.5",
-                },
-                [
-                  // Status (if present) to the left of version
-                  game.status &&
-                    React.createElement("div", {
-                      key: `status-${game.record_id}`,
-                      className:
-                        "text-white text-[10px] rounded-l-sm px-2 py-0.5",
-                      style: {
-                        backgroundColor: getStatusBackgroundColor(game.status),
-                      },
-                      children: game.status,
-                    }),
-                  // Newest Version with fixed background color
-                  React.createElement("div", {
-                    key: `version-${game.record_id}`,
-                    className: `text-white text-[10px] ${game.status ? "rounded-r-sm -ml-0.5" : "rounded-sm"} px-2 py-0.5`,
-                    style: { backgroundColor: "#3F4043" },
-                    children: newestInstalledVersion,
-                  }),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ];
-
-    // Conditionally add banner image
-    if (game.banner_url) {
-      children.splice(
-        1,
-        0,
-        React.createElement(
-          "div",
-          {
-            key: `banner-image-container-${game.record_id}`,
-            className:
-              "absolute top-0 left-0 w-[537px] h-[251px] z-0 bg-[#1F2937]",
-          },
-          [
-            React.createElement("img", {
-              key: `banner-image-${game.record_id}`,
-              src: game.banner_url,
-              alt: displayTitle,
-              className: "w-[537px] h-[251px] object-contain",
-              onError: () =>
-                console.error(
-                  `Failed to load banner image for recordId ${game.record_id}: ${game.banner_url}`,
-                ),
-            }),
-          ],
-        ),
-      );
-    } else {
-      // Fallback background when no image
-      children.splice(
-        1,
-        0,
-        React.createElement("div", {
-          key: `banner-fallback-${game.record_id}`,
-          className:
-            "absolute top-0 left-0 w-[537px] h-[251px] bg-[#1F2937] z-0",
-        }),
-      );
-    }
-
-    return React.createElement(
-      "div",
-      {
-        key: `banner-root-${game.record_id}`,
-        className:
-          "relative w-[537px] h-[251px] cursor-pointer overflow-hidden banner-root rounded-xl border border-white/15 bg-black/20 shadow-glass-sm ring-1 ring-white/5",
-        onClick: onSelect,
-        onContextMenu: handleContextMenu,
-      },
-      children,
-    );
-  };
+  }, [game.banner_url]);
 
   if (!template) {
     return React.createElement("div", null, "Loading template...");
   }
 
-  return React.createElement(template, { game, onSelect });
+  return React.createElement(template, {
+    game,
+    onSelect,
+    onUpdateGame,
+    onContextMenu: handleContextMenu,
+  });
 };
 
 window.GameBanner = GameBanner;

@@ -100,8 +100,8 @@ function buildLatestReleaseUrl(owner, repo) {
  * }} input
  */
 function createAppUpdaterController(input) {
-  const owner = input.owner || "towerwatchman";
-  const repo = input.repo || "Atlas";
+  const owner = input.owner || "maxbaydi";
+  const repo = input.repo || "f95-game-zone-app";
   const autoUpdaterInstance =
     input.autoUpdaterInstance || require("electron-updater").autoUpdater;
   const httpGet =

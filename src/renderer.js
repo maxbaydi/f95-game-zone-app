@@ -81,7 +81,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getF95Downloads: () => ipcRenderer.invoke("get-f95-downloads"),
   getF95ThreadInstallState: (payload) =>
     ipcRenderer.invoke("get-f95-thread-install-state", payload),
-  inspectF95Thread: (payload) => ipcRenderer.invoke("inspect-f95-thread", payload),
+  inspectF95Thread: (payload) =>
+    ipcRenderer.invoke("inspect-f95-thread", payload),
   openF95Login: () => ipcRenderer.invoke("open-f95-login"),
   logoutF95: () => ipcRenderer.invoke("logout-f95"),
   installF95Thread: (payload) =>
@@ -108,6 +109,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // ─── FIXED: Added missing external URL opener for Update Available button ──
   openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),
+  openF95BrowserUrl: (payload) =>
+    ipcRenderer.invoke("open-f95-browser-url", payload),
 
   saveEmulatorConfig: (config) =>
     ipcRenderer.invoke("save-emulator-config", config),
@@ -241,6 +244,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // ────────────────────────────────────────────────────────────────
   countVersions: (recordId) => ipcRenderer.invoke("count-versions", recordId),
   deleteVersion: (params) => ipcRenderer.invoke("delete-version", params),
+  removeLibraryGame: (params) =>
+    ipcRenderer.invoke("remove-library-game", params),
   deleteGameCompletely: (recordId) =>
     ipcRenderer.invoke("delete-game-completely", recordId),
   onGameDeleted: (callback) => {
@@ -259,6 +264,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   onF95DownloadProgress: (callback) =>
     ipcRenderer.on("f95-download-progress", (event, payload) =>
+      callback(payload),
+    ),
+  onF95BrowserNavigation: (callback) =>
+    ipcRenderer.on("f95-browser-navigation", (event, payload) =>
       callback(payload),
     ),
   getUniqueFilterOptions: () => ipcRenderer.invoke("get-unique-filter-options"),

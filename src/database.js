@@ -453,13 +453,20 @@ const deleteGameCompletely = async (recordId, appPaths) => {
   try {
     await deleteBanner(recordId, appPaths);
     await deletePreviews(recordId, appPaths);
+    await fs
+      .rm(path.join(appPaths.images, String(recordId)), {
+        recursive: true,
+        force: true,
+      })
+      .catch(() => {});
 
     const tables = [
       "atlas_mappings",
       "steam_mappings",
       "f95_zone_mappings",
       "tag_mappings",
-      // add others if you have more
+      "save_profiles",
+      "save_sync_state",
     ];
 
     for (const tbl of tables) {

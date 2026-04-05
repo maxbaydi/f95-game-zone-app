@@ -67,7 +67,7 @@ const Library = () => {
         />
       </div>
       <p className="text-xs opacity-50 mb-2">
-        Atlas local path. This is dynamic and will change if you move the
+        App-managed local data path. This changes automatically if you move the
         program.
       </p>
       <div className="border-t border-text opacity-25 my-2"></div>

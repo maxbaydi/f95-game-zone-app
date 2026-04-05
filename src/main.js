@@ -10,17 +10,27 @@ const { toStoredImagePath } = require("./main/assetPaths");
 const { createAppUpdaterController } = require("./main/appUpdater");
 const { mergeImportedGameMetadata } = require("./main/importMetadata");
 const { resolveArchiveContentRoot } = require("./main/install/archiveLayout");
-const { selectPreferredExecutable } = require("./main/install/selectExecutable");
+const {
+  selectPreferredExecutable,
+} = require("./main/install/selectExecutable");
 const {
   clearF95Session,
+  createF95BrowserWindow,
   createF95LoginWindow,
   getF95AuthState,
   getF95Session,
 } = require("./main/f95/session");
 const { createDownloadsStore } = require("./main/f95/downloadsStore");
 const {
+  DIRECT_DOWNLOAD_USER_AGENT,
+  resolveDownloadFileName,
+  shouldUseDirectSessionDownload,
+  streamResponseBodyToFile,
+} = require("./main/f95/directDownload");
+const {
   DownloadValidationError,
   inspectDownloadedPackage,
+  MirrorActionRequiredError,
   normalizeHostname,
   parseF95ThreadTitle,
   prepareF95DownloadUrl,
@@ -32,6 +42,7 @@ const {
   getSaveProfileSnapshot,
   refreshSaveProfiles,
 } = require("./main/saveProfiles");
+const { removeLibraryGame } = require("./main/gameRemoval");
 const { upsertSaveSyncState } = require("./main/db/saveSyncStateStore");
 const {
   listScanSources,
@@ -360,7 +371,9 @@ function getConfiguredLibraryFolder() {
 
 function getPreferredInstalledPath(game) {
   const versions = Array.isArray(game?.versions) ? [...game.versions] : [];
-  versions.sort((left, right) => (right.date_added || 0) - (left.date_added || 0));
+  versions.sort(
+    (left, right) => (right.date_added || 0) - (left.date_added || 0),
+  );
 
   for (const version of versions) {
     if (version?.game_path) {
@@ -371,9 +384,15 @@ function getPreferredInstalledPath(game) {
   return "";
 }
 
-function findMatchingInstalledF95Game(installedGames, metadata, fallbackName = "") {
+function findMatchingInstalledF95Game(
+  installedGames,
+  metadata,
+  fallbackName = "",
+) {
   const normalizedF95Id = extractF95IdFromUrl(metadata?.threadUrl || "");
-  const normalizedTitle = normalizeLibraryMatchText(metadata?.title || fallbackName);
+  const normalizedTitle = normalizeLibraryMatchText(
+    metadata?.title || fallbackName,
+  );
   const normalizedCreator = normalizeLibraryMatchText(metadata?.creator || "");
 
   let existingGame = null;
@@ -436,9 +455,16 @@ async function getF95ThreadInstallState(input) {
   return {
     installed: true,
     recordId: existingGame.record_id,
-    title: existingGame.displayTitle || existingGame.title || parsedTitle.title || "",
+    title:
+      existingGame.displayTitle ||
+      existingGame.title ||
+      parsedTitle.title ||
+      "",
     creator:
-      existingGame.displayCreator || existingGame.creator || parsedTitle.creator || "",
+      existingGame.displayCreator ||
+      existingGame.creator ||
+      parsedTitle.creator ||
+      "",
     version:
       existingGame.newestInstalledVersion ||
       existingGame.latestVersion ||
@@ -457,7 +483,10 @@ async function resolveF95InstallTarget(metadata, fallbackName) {
   );
 
   const stableFolderName = sanitizePathSegment(metadata?.title, fallbackName);
-  const desiredInstallPath = path.join(getConfiguredLibraryFolder(), stableFolderName);
+  const desiredInstallPath = path.join(
+    getConfiguredLibraryFolder(),
+    stableFolderName,
+  );
 
   if (existingGame) {
     const existingPath = getPreferredInstalledPath(existingGame);
@@ -606,7 +635,11 @@ async function broadcastCloudAuthState() {
   return authState;
 }
 
-async function moveFileIntoDirectory(sourcePath, targetDirectory, options = {}) {
+async function moveFileIntoDirectory(
+  sourcePath,
+  targetDirectory,
+  options = {},
+) {
   await fs.promises.mkdir(targetDirectory, { recursive: true });
   const requestedTargetPath = path.join(
     targetDirectory,
@@ -667,6 +700,32 @@ function broadcastF95Downloads() {
   return payload;
 }
 
+function broadcastF95BrowserNavigation(payload) {
+  const normalizedPayload = {
+    url: String(payload?.url || "").trim(),
+    title: String(payload?.title || "").trim(),
+  };
+
+  BrowserWindow.getAllWindows().forEach((windowInstance) => {
+    if (!windowInstance.isDestroyed()) {
+      windowInstance.webContents.send(
+        "f95-browser-navigation",
+        normalizedPayload,
+      );
+    }
+  });
+
+  return normalizedPayload;
+}
+
+function broadcastGameDeleted(recordId) {
+  BrowserWindow.getAllWindows().forEach((windowInstance) => {
+    if (!windowInstance.isDestroyed()) {
+      windowInstance.webContents.send("game-deleted", recordId);
+    }
+  });
+}
+
 function queueF95InstallContext(metadata) {
   const normalizedUrl = normalizeF95DownloadUrl(metadata?.downloadUrl);
   const contextId = `f95-download-${++f95DownloadSequence}`;
@@ -674,7 +733,9 @@ function queueF95InstallContext(metadata) {
 
   if (!sourceHost) {
     try {
-      sourceHost = normalizedUrl ? normalizeHostname(new URL(normalizedUrl).hostname) : "";
+      sourceHost = normalizedUrl
+        ? normalizeHostname(new URL(normalizedUrl).hostname)
+        : "";
     } catch (error) {
       sourceHost = "";
     }
@@ -737,9 +798,325 @@ function resolveF95InstallContext(downloadItem) {
   return f95InstallQueue.shift() || null;
 }
 
+function removeF95InstallContext(context) {
+  if (!context) {
+    return;
+  }
+
+  if (
+    context.requestedUrl &&
+    f95InstallContexts.get(context.requestedUrl) === context
+  ) {
+    f95InstallContexts.delete(context.requestedUrl);
+  }
+
+  const queueIndex = f95InstallQueue.indexOf(context);
+  if (queueIndex >= 0) {
+    f95InstallQueue.splice(queueIndex, 1);
+  }
+}
+
+function sendF95DownloadProgress(payload) {
+  mainWindow?.webContents.send("f95-download-progress", payload);
+}
+
+async function cancelFetchResponseBody(response) {
+  try {
+    if (response?.body && typeof response.body.cancel === "function") {
+      await response.body.cancel();
+    }
+  } catch {
+    // Ignore body cancellation failures for already-consumed or auto-closed bodies.
+  }
+}
+
+async function finalizeF95DownloadedPackage({
+  context,
+  targetPath,
+  totalBytes,
+  receivedBytes,
+  mimeType,
+}) {
+  try {
+    const importResults = await importDownloadedF95Package(targetPath, {
+      ...context.metadata,
+      mimeType: mimeType || "",
+    });
+    const firstResult = Array.isArray(importResults) ? importResults[0] : null;
+    if (firstResult && firstResult.success === false) {
+      throw new Error(firstResult.error || "Unknown install error");
+    }
+
+    storePreferredF95Mirror({
+      threadUrl: context.metadata.threadUrl,
+      host: context.metadata.sourceHost,
+      label: context.metadata.downloadLabel,
+    });
+
+    f95DownloadsStore.complete(context.id, {
+      title: context.metadata.title,
+      fileName: path.basename(targetPath),
+      text: `Installed ${context.metadata.title}`,
+      totalBytes: totalBytes || 0,
+      receivedBytes: receivedBytes || 0,
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "completed",
+      text: `Installed ${context.metadata.title}`,
+      percent: 100,
+      totalBytes: totalBytes || 0,
+      receivedBytes: receivedBytes || 0,
+      fileName: path.basename(targetPath),
+    });
+  } catch (error) {
+    console.error(
+      "[f95.download] Failed to install downloaded package:",
+      error,
+    );
+    if (error instanceof DownloadValidationError && error.cleanupFile) {
+      await fs.promises.unlink(targetPath).catch(() => {});
+    }
+    f95DownloadsStore.fail(context.id, {
+      title: context.metadata.title,
+      fileName: path.basename(targetPath),
+      text: `Install failed for ${context.metadata.title}: ${error.message}`,
+      totalBytes: totalBytes || 0,
+      receivedBytes: receivedBytes || 0,
+      error: error.message,
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "error",
+      text: `Install failed for ${context.metadata.title}: ${error.message}`,
+      percent: 100,
+      totalBytes: totalBytes || 0,
+      receivedBytes: receivedBytes || 0,
+      fileName: path.basename(targetPath),
+    });
+  }
+}
+
+async function startDirectF95Download(context, preparedDownload) {
+  let response = null;
+  let targetPath = "";
+  let totalBytes = 0;
+  let receivedBytes = 0;
+  let mimeType = "";
+  let finalUrl = preparedDownload.resolvedUrl;
+
+  try {
+    f95DownloadsStore.start({
+      id: context.id,
+      title: context.metadata.title,
+      creator: context.metadata.creator,
+      version: context.metadata.version,
+      threadUrl: context.metadata.threadUrl,
+      requestedUrl: context.requestedUrl,
+      sourceHost: context.metadata.sourceHost,
+      sourceLabel: context.metadata.downloadLabel,
+      fileName: "",
+      text: `Connecting to ${context.metadata.sourceHost || "selected mirror"}`,
+      totalBytes: 0,
+      receivedBytes: 0,
+      percent: 0,
+      speedBytesPerSecond: 0,
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "downloading",
+      text: `Connecting to ${context.metadata.sourceHost || "selected mirror"}`,
+      percent: 0,
+      totalBytes: 0,
+      receivedBytes: 0,
+      fileName: "",
+    });
+
+    const fetchDirectResponse = async () => {
+      const headers = {
+        accept: "*/*",
+        "user-agent": DIRECT_DOWNLOAD_USER_AGENT,
+      };
+
+      const trySessionFetch = async () => {
+        if (typeof getReadyF95Session().fetch !== "function") {
+          throw new Error("Session fetch is unavailable.");
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        try {
+          return await getReadyF95Session().fetch(
+            preparedDownload.resolvedUrl,
+            {
+              method: "GET",
+              redirect: "follow",
+              headers,
+              signal: controller.signal,
+            },
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      try {
+        return await trySessionFetch();
+      } catch (error) {
+        console.warn(
+          "[f95.download] Session fetch failed for direct mirror, falling back to global fetch:",
+          error,
+        );
+        return fetch(preparedDownload.resolvedUrl, {
+          method: "GET",
+          redirect: "follow",
+          headers,
+        });
+      }
+    };
+
+    response = await fetchDirectResponse();
+
+    if (!response.ok) {
+      throw new Error(`Mirror download failed with HTTP ${response.status}.`);
+    }
+
+    finalUrl = response.url || preparedDownload.resolvedUrl;
+    mimeType = response.headers.get("content-type") || "";
+    totalBytes =
+      Number.parseInt(response.headers.get("content-length") || "0", 10) || 0;
+    const resolvedFileName = resolveDownloadFileName({
+      requestedUrl: preparedDownload.resolvedUrl,
+      finalUrl,
+      contentDisposition: response.headers.get("content-disposition") || "",
+    });
+    const fallbackFileName = `${sanitizePathSegment(
+      context.metadata.title || "f95-download",
+      "f95-download",
+    )}.bin`;
+    targetPath = ensureUniquePath(
+      path.join(
+        downloadsDir,
+        sanitizePathSegment(
+          resolvedFileName || fallbackFileName,
+          fallbackFileName,
+        ),
+      ),
+    );
+
+    f95DownloadsStore.start({
+      id: context.id,
+      title: context.metadata.title,
+      creator: context.metadata.creator,
+      version: context.metadata.version,
+      threadUrl: context.metadata.threadUrl,
+      requestedUrl: context.requestedUrl,
+      sourceHost: normalizeHostname(new URL(finalUrl).hostname),
+      sourceLabel: context.metadata.downloadLabel,
+      fileName: path.basename(targetPath),
+      text: `Downloading ${context.metadata.title}`,
+      totalBytes,
+      receivedBytes: 0,
+      percent: 0,
+      speedBytesPerSecond: 0,
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "downloading",
+      text: `Downloading ${context.metadata.title}`,
+      percent: 0,
+      totalBytes,
+      receivedBytes: 0,
+      fileName: path.basename(targetPath),
+    });
+
+    let lastBroadcastAt = Date.now();
+    let lastBroadcastBytes = 0;
+    receivedBytes = await streamResponseBodyToFile({
+      responseBody: response.body,
+      targetPath,
+      onProgress(nextReceivedBytes) {
+        const now = Date.now();
+        const shouldBroadcast =
+          nextReceivedBytes === totalBytes || now - lastBroadcastAt >= 150;
+        if (!shouldBroadcast) {
+          return;
+        }
+
+        const elapsedMs = Math.max(now - lastBroadcastAt, 1);
+        const deltaBytes = Math.max(nextReceivedBytes - lastBroadcastBytes, 0);
+        const percent =
+          totalBytes > 0
+            ? Math.min(
+                100,
+                Math.round((nextReceivedBytes / Math.max(totalBytes, 1)) * 100),
+              )
+            : 0;
+        const speedBytesPerSecond = Math.round((deltaBytes * 1000) / elapsedMs);
+
+        lastBroadcastAt = now;
+        lastBroadcastBytes = nextReceivedBytes;
+
+        f95DownloadsStore.progress(context.id, {
+          title: context.metadata.title,
+          fileName: path.basename(targetPath),
+          text: `Downloading ${context.metadata.title}`,
+          percent,
+          totalBytes,
+          receivedBytes: nextReceivedBytes,
+          speedBytesPerSecond,
+        });
+        broadcastF95Downloads();
+        sendF95DownloadProgress({
+          phase: "downloading",
+          text: `Downloading ${context.metadata.title}`,
+          percent,
+          totalBytes,
+          receivedBytes: nextReceivedBytes,
+          fileName: path.basename(targetPath),
+        });
+      },
+    });
+  } catch (error) {
+    console.error("[f95.download] Direct session download failed:", error);
+    if (targetPath) {
+      await fs.promises.unlink(targetPath).catch(() => {});
+    }
+    await cancelFetchResponseBody(response);
+    f95DownloadsStore.fail(context.id, {
+      title: context.metadata.title,
+      fileName: targetPath ? path.basename(targetPath) : "",
+      text: `Download failed for ${context.metadata.title}: ${error.message}`,
+      totalBytes,
+      receivedBytes,
+      error: error.message,
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "error",
+      text: `Download failed for ${context.metadata.title}: ${error.message}`,
+      percent: 0,
+      totalBytes,
+      receivedBytes,
+      fileName: targetPath ? path.basename(targetPath) : "",
+    });
+    return;
+  }
+
+  await finalizeF95DownloadedPackage({
+    context,
+    targetPath,
+    totalBytes,
+    receivedBytes,
+    mimeType,
+  });
+}
+
 async function persistF95InstalledGame(payload) {
   const atlasMetadata =
-    payload.atlasMetadata || (await prepareDownloadedGameMetadata(payload.metadata));
+    payload.atlasMetadata ||
+    (await prepareDownloadedGameMetadata(payload.metadata));
   const gameRecord = {
     title: payload.title,
     creator: payload.metadata?.creator || "Unknown",
@@ -772,7 +1149,10 @@ async function persistF95InstalledGame(payload) {
       payload.existingGame.record_id,
     );
 
-    if (gameRecord.atlasId && payload.existingGame.atlas_id !== gameRecord.atlasId) {
+    if (
+      gameRecord.atlasId &&
+      payload.existingGame.atlas_id !== gameRecord.atlasId
+    ) {
       await addAtlasMapping(payload.existingGame.record_id, gameRecord.atlasId);
     }
 
@@ -782,11 +1162,17 @@ async function persistF95InstalledGame(payload) {
         databaseConnection,
         payload.existingGame.record_id,
       ).catch((error) => {
-        console.warn("[save.profiles] Failed to refresh save profiles after update:", error);
+        console.warn(
+          "[save.profiles] Failed to refresh save profiles after update:",
+          error,
+        );
       });
     }
 
-    mainWindow?.webContents.send("game-imported", payload.existingGame.record_id);
+    mainWindow?.webContents.send(
+      "game-imported",
+      payload.existingGame.record_id,
+    );
     return [
       {
         success: true,
@@ -815,11 +1201,16 @@ async function persistF95InstalledGame(payload) {
     ? importResults[0]?.recordId
     : null;
   if (databaseConnection && importedRecordId) {
-    await refreshSaveProfiles(appPaths, databaseConnection, importedRecordId).catch(
-      (error) => {
-        console.warn("[save.profiles] Failed to refresh save profiles after install:", error);
-      },
-    );
+    await refreshSaveProfiles(
+      appPaths,
+      databaseConnection,
+      importedRecordId,
+    ).catch((error) => {
+      console.warn(
+        "[save.profiles] Failed to refresh save profiles after install:",
+        error,
+      );
+    });
   }
 
   return importResults;
@@ -883,7 +1274,10 @@ async function importDownloadedF95Package(downloadPath, metadata) {
           databaseConnection,
           installTarget.existingGame.record_id,
         ).catch((error) => {
-          console.warn("[save.profiles] Failed to load save profile snapshot:", error);
+          console.warn(
+            "[save.profiles] Failed to load save profile snapshot:",
+            error,
+          );
           return null;
         })
       : null;
@@ -893,7 +1287,10 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       ...saveVaultInput,
       profiles: existingSaveSnapshot?.profiles || [],
     }).catch((error) => {
-      console.warn("[save.vault] Failed to back up saves before update:", error);
+      console.warn(
+        "[save.vault] Failed to back up saves before update:",
+        error,
+      );
     });
   }
 
@@ -915,7 +1312,11 @@ async function importDownloadedF95Package(downloadPath, metadata) {
 
   if (payloadInfo.installKind === "archive") {
     const extractionStagingDirectory = ensureUniquePath(
-      path.join(downloadsDir, "_staging", sanitizePathSegment(`${title}-${Date.now()}`)),
+      path.join(
+        downloadsDir,
+        "_staging",
+        sanitizePathSegment(`${title}-${Date.now()}`),
+      ),
     );
 
     try {
@@ -965,7 +1366,10 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       ...saveVaultInput,
       overwrite: Boolean(installTarget.existingGame),
     }).catch((error) => {
-      console.warn("[save.vault] Failed to restore saves after archive install:", error);
+      console.warn(
+        "[save.vault] Failed to restore saves after archive install:",
+        error,
+      );
     });
 
     return persistF95InstalledGame({
@@ -1000,7 +1404,10 @@ async function importDownloadedF95Package(downloadPath, metadata) {
     ...saveVaultInput,
     overwrite: Boolean(installTarget.existingGame),
   }).catch((error) => {
-    console.warn("[save.vault] Failed to restore saves after file install:", error);
+    console.warn(
+      "[save.vault] Failed to restore saves after file install:",
+      error,
+    );
   });
 
   return persistF95InstalledGame({
@@ -1050,7 +1457,7 @@ function attachF95DownloadListener() {
     });
     broadcastF95Downloads();
 
-    mainWindow?.webContents.send("f95-download-progress", {
+    sendF95DownloadProgress({
       phase: "downloading",
       text: `Downloading ${context.metadata.title}`,
       percent: 0,
@@ -1070,7 +1477,7 @@ function attachF95DownloadListener() {
           error: "interrupted",
         });
         broadcastF95Downloads();
-        mainWindow?.webContents.send("f95-download-progress", {
+        sendF95DownloadProgress({
           phase: "error",
           text: `Download interrupted for ${context.metadata.title}`,
           percent: 0,
@@ -1101,7 +1508,7 @@ function attachF95DownloadListener() {
       });
       broadcastF95Downloads();
 
-      mainWindow?.webContents.send("f95-download-progress", {
+      sendF95DownloadProgress({
         phase: "downloading",
         text: `Downloading ${context.metadata.title}`,
         percent,
@@ -1122,7 +1529,7 @@ function attachF95DownloadListener() {
           error: state,
         });
         broadcastF95Downloads();
-        mainWindow?.webContents.send("f95-download-progress", {
+        sendF95DownloadProgress({
           phase: "error",
           text: `Download failed for ${context.metadata.title}: ${state}`,
           percent: 0,
@@ -1133,68 +1540,14 @@ function attachF95DownloadListener() {
         return;
       }
 
-      try {
-        const importResults = await importDownloadedF95Package(
-          targetPath,
-          {
-            ...context.metadata,
-            mimeType:
-              typeof item.getMimeType === "function" ? item.getMimeType() : "",
-          },
-        );
-        const firstResult = Array.isArray(importResults) ? importResults[0] : null;
-        if (firstResult && firstResult.success === false) {
-          throw new Error(firstResult.error || "Unknown install error");
-        }
-
-        storePreferredF95Mirror({
-          threadUrl: context.metadata.threadUrl,
-          host: context.metadata.sourceHost,
-          label: context.metadata.downloadLabel,
-        });
-
-        f95DownloadsStore.complete(context.id, {
-          title: context.metadata.title,
-          fileName: path.basename(targetPath),
-          text: `Installed ${context.metadata.title}`,
-          totalBytes: item.getTotalBytes() || 0,
-          receivedBytes: item.getReceivedBytes() || 0,
-        });
-        broadcastF95Downloads();
-        mainWindow?.webContents.send("f95-download-progress", {
-          phase: "completed",
-          text: `Installed ${context.metadata.title}`,
-          percent: 100,
-          totalBytes: item.getTotalBytes() || 0,
-          receivedBytes: item.getReceivedBytes() || 0,
-          fileName: path.basename(targetPath),
-        });
-      } catch (error) {
-        console.error(
-          "[f95.download] Failed to install downloaded package:",
-          error,
-        );
-        if (error instanceof DownloadValidationError && error.cleanupFile) {
-          await fs.promises.unlink(targetPath).catch(() => {});
-        }
-        f95DownloadsStore.fail(context.id, {
-          title: context.metadata.title,
-          fileName: path.basename(targetPath),
-          text: `Install failed for ${context.metadata.title}: ${error.message}`,
-          totalBytes: item.getTotalBytes() || 0,
-          receivedBytes: item.getReceivedBytes() || 0,
-          error: error.message,
-        });
-        broadcastF95Downloads();
-        mainWindow?.webContents.send("f95-download-progress", {
-          phase: "error",
-          text: `Install failed for ${context.metadata.title}: ${error.message}`,
-          percent: 100,
-          totalBytes: item.getTotalBytes() || 0,
-          receivedBytes: item.getReceivedBytes() || 0,
-          fileName: path.basename(targetPath),
-        });
-      }
+      await finalizeF95DownloadedPackage({
+        context,
+        targetPath,
+        totalBytes: item.getTotalBytes() || 0,
+        receivedBytes: item.getReceivedBytes() || 0,
+        mimeType:
+          typeof item.getMimeType === "function" ? item.getMimeType() : "",
+      });
     });
   });
 }
@@ -1257,15 +1610,17 @@ ipcMain.handle("delete-game-completely", async (_, recordId) => {
     const installDirectory = getPreferredInstalledPath(game);
     const saveSnapshot =
       databaseConnection && game
-        ? await getSaveProfileSnapshot(appPaths, databaseConnection, recordId).catch(
-            (error) => {
-              console.warn(
-                "[save.profiles] Failed to load save profile snapshot before delete:",
-                error,
-              );
-              return null;
-            },
-          )
+        ? await getSaveProfileSnapshot(
+            appPaths,
+            databaseConnection,
+            recordId,
+          ).catch((error) => {
+            console.warn(
+              "[save.profiles] Failed to load save profile snapshot before delete:",
+              error,
+            );
+            return null;
+          })
         : null;
 
     if (installDirectory && fs.existsSync(installDirectory)) {
@@ -1286,13 +1641,37 @@ ipcMain.handle("delete-game-completely", async (_, recordId) => {
   const result = await deleteGameCompletely(recordId, appPaths);
 
   if (result.success) {
-    // Notify all renderer windows (main library + any open details)
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send("game-deleted", recordId);
-    });
+    broadcastGameDeleted(recordId);
   }
 
   return result;
+});
+
+ipcMain.handle("remove-library-game", async (_, payload) => {
+  try {
+    const result = await removeLibraryGame(payload || {}, {
+      appPaths,
+      libraryRoot: getConfiguredLibraryFolder(),
+      databaseConnection,
+      getGame,
+      getGames,
+      getSaveProfileSnapshot,
+      deleteGameCompletely,
+    });
+
+    if (result?.success) {
+      broadcastGameDeleted(result.recordId);
+    }
+
+    return result;
+  } catch (error) {
+    console.error("[library.remove] Failed to remove game:", error);
+    return {
+      success: false,
+      code: "INTERNAL_REMOVE_ERROR",
+      error: "F95 Game Zone App could not remove the selected game.",
+    };
+  }
 });
 
 ipcMain.handle("get-game", async (event, recordId) => {
@@ -1435,7 +1814,10 @@ ipcMain.handle("save-settings", async (event, settings) => {
     appConfig = settings;
     fs.writeFileSync(configPath, ini.stringify(settings));
     await broadcastCloudAuthState().catch((error) => {
-      console.error("[cloud.auth] Failed to refresh auth state after settings save:", error);
+      console.error(
+        "[cloud.auth] Failed to refresh auth state after settings save:",
+        error,
+      );
     });
     return { success: true };
   } catch (err) {
@@ -1481,7 +1863,9 @@ ipcMain.handle("sign-in-cloud", async (_, payload) => {
 
 ipcMain.handle("sign-up-cloud", async (_, payload) => {
   try {
-    const result = await getReadyCloudSaveService().signUpWithPassword(payload || {});
+    const result = await getReadyCloudSaveService().signUpWithPassword(
+      payload || {},
+    );
     const state = await broadcastCloudAuthState();
     return {
       success: true,
@@ -1523,13 +1907,20 @@ ipcMain.handle("get-save-profile-snapshot", async (_, recordId) => {
       throw new Error("Database connection is not ready.");
     }
 
-    const snapshot = await getSaveProfileSnapshot(appPaths, databaseConnection, recordId);
+    const snapshot = await getSaveProfileSnapshot(
+      appPaths,
+      databaseConnection,
+      recordId,
+    );
     return {
       success: true,
       snapshot,
     };
   } catch (error) {
-    console.error("[save.profiles] Failed to get save profile snapshot:", error);
+    console.error(
+      "[save.profiles] Failed to get save profile snapshot:",
+      error,
+    );
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
@@ -1544,7 +1935,11 @@ ipcMain.handle("refresh-save-profiles", async (_, recordId) => {
       throw new Error("Database connection is not ready.");
     }
 
-    const snapshot = await refreshSaveProfiles(appPaths, databaseConnection, recordId);
+    const snapshot = await refreshSaveProfiles(
+      appPaths,
+      databaseConnection,
+      recordId,
+    );
     return {
       success: true,
       snapshot,
@@ -1561,7 +1956,9 @@ ipcMain.handle("refresh-save-profiles", async (_, recordId) => {
 
 ipcMain.handle("upload-cloud-saves", async (_, recordId) => {
   try {
-    const result = await getReadyCloudSaveService().uploadGameSaves({ recordId });
+    const result = await getReadyCloudSaveService().uploadGameSaves({
+      recordId,
+    });
     return {
       success: true,
       result,
@@ -1578,7 +1975,9 @@ ipcMain.handle("upload-cloud-saves", async (_, recordId) => {
 
 ipcMain.handle("restore-cloud-saves", async (_, recordId) => {
   try {
-    const result = await getReadyCloudSaveService().restoreGameSaves({ recordId });
+    const result = await getReadyCloudSaveService().restoreGameSaves({
+      recordId,
+    });
     return {
       success: true,
       result,
@@ -1608,7 +2007,10 @@ ipcMain.handle("get-f95-thread-install-state", async (event, payload) => {
   try {
     return await getF95ThreadInstallState(payload || {});
   } catch (error) {
-    console.error("[f95.install] Failed to resolve thread install state:", error);
+    console.error(
+      "[f95.install] Failed to resolve thread install state:",
+      error,
+    );
     return {
       installed: false,
       recordId: null,
@@ -1670,9 +2072,25 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
 
   let preparedDownload;
   try {
-    preparedDownload = await prepareF95DownloadUrl(getReadyF95Session(), downloadUrl);
+    preparedDownload = await prepareF95DownloadUrl(
+      getReadyF95Session(),
+      downloadUrl,
+    );
   } catch (error) {
     console.error("[f95.download] Failed to resolve requested mirror:", error);
+    if (
+      error instanceof MirrorActionRequiredError ||
+      error?.code === "captcha_required"
+    ) {
+      return {
+        success: false,
+        code: "captcha_required",
+        error:
+          error.userMessage ||
+          "This mirror needs captcha confirmation before F95 Game Zone App can continue.",
+        actionUrl: error.actionUrl || downloadUrl,
+      };
+    }
     return {
       success: false,
       error: error.message || "Failed to resolve the selected mirror.",
@@ -1697,6 +2115,17 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
     downloadLabel: payload?.downloadLabel || "",
   });
 
+  if (shouldUseDirectSessionDownload(preparedDownload.resolvedUrl)) {
+    removeF95InstallContext(context);
+    void startDirectF95Download(context, preparedDownload);
+    return {
+      success: true,
+      queued: true,
+      requestedUrl: context.requestedUrl,
+      sourceHost: preparedDownload.sourceHost,
+    };
+  }
+
   try {
     getReadyF95Session().downloadURL(preparedDownload.resolvedUrl);
     return {
@@ -1706,11 +2135,7 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
       sourceHost: preparedDownload.sourceHost,
     };
   } catch (error) {
-    f95InstallContexts.delete(context.requestedUrl);
-    const queueIndex = f95InstallQueue.indexOf(context);
-    if (queueIndex >= 0) {
-      f95InstallQueue.splice(queueIndex, 1);
-    }
+    removeF95InstallContext(context);
     f95DownloadsStore.fail(context.id, {
       title: context.metadata.title,
       text: `Failed to start download for ${context.metadata.title}`,
@@ -1987,6 +2412,32 @@ ipcMain.handle("open-external-url", async (event, url) => {
   } catch (err) {
     console.error("Error opening external URL:", url, err);
     return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("open-f95-browser-url", async (_, payload) => {
+  try {
+    const targetUrl = String(payload?.url || "").trim();
+    if (!/^https?:\/\//i.test(targetUrl)) {
+      return { success: false, error: "Invalid browser URL." };
+    }
+
+    createF95BrowserWindow({
+      BrowserWindow,
+      appConfig,
+      url: targetUrl,
+      title: String(payload?.title || "F95 Browser"),
+      reuseKey: "__atlasF95BrowserWindow",
+      onNavigation: broadcastF95BrowserNavigation,
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("[f95.browser] Failed to open browser window:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 });
 
@@ -3092,12 +3543,14 @@ function pickPreferredThreadLink(threadUrl, links) {
         preferredMirror.label &&
         preferredMirror.host &&
         link.label === preferredMirror.label &&
-        normalizeHostname(link.host) === normalizeHostname(preferredMirror.host),
+        normalizeHostname(link.host) ===
+          normalizeHostname(preferredMirror.host),
     ) ||
     links.find(
       (link) =>
         preferredMirror.host &&
-        normalizeHostname(link.host) === normalizeHostname(preferredMirror.host),
+        normalizeHostname(link.host) ===
+          normalizeHostname(preferredMirror.host),
     ) ||
     null
   );
@@ -3353,7 +3806,16 @@ async function launchGame({ execPath, extension, recordId }) {
   }
 }
 
-async function handleContextAction(data) {
+function forwardContextMenuCommand(targetWebContents, data) {
+  if (!targetWebContents || targetWebContents.isDestroyed()) {
+    console.error("Context menu command target is unavailable", data);
+    return;
+  }
+
+  targetWebContents.send("context-menu-command", data);
+}
+
+async function handleContextAction(targetWebContents, data) {
   if (!data || typeof data.action === "undefined") {
     console.error("handleContextAction: Invalid or missing data object", data);
     return;
@@ -3373,25 +3835,31 @@ async function handleContextAction(data) {
       console.log("Creating GameDetailsWindow for recordId:", data.recordId);
       createGameDetailsWindow(data.recordId);
       break;
+    case "removeGame":
+    case "updateGame":
+      forwardContextMenuCommand(targetWebContents, data);
+      break;
     default:
       console.error(`Unknown action: ${data.action}`);
   }
 }
 
-function processTemplate(items) {
+function processTemplate(items, targetWebContents) {
   return items.map((item) => {
     const newItem = { ...item };
     if (newItem.submenu) {
-      newItem.submenu = processTemplate(newItem.submenu);
+      newItem.submenu = processTemplate(newItem.submenu, targetWebContents);
     }
     if (newItem.data) {
       const id = contextMenuId++;
       contextMenuData.set(id, newItem.data);
       newItem.click = () => {
         const data = contextMenuData.get(id);
-        Promise.resolve(handleContextAction(data)).catch((error) => {
-          console.error("Context menu action failed:", error);
-        });
+        Promise.resolve(handleContextAction(targetWebContents, data)).catch(
+          (error) => {
+            console.error("Context menu action failed:", error);
+          },
+        );
         contextMenuData.delete(id);
       };
       delete newItem.data;
@@ -3536,7 +4004,8 @@ app.whenReady().then(async () => {
     getConfig: () => appConfig,
     getSaveProfileSnapshot: (recordId) =>
       getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
-    upsertSaveSyncState: (input) => upsertSaveSyncState(databaseConnection, input),
+    upsertSaveSyncState: (input) =>
+      upsertSaveSyncState(databaseConnection, input),
   });
   cloudSaveService.onAuthStateChange(() => {
     broadcastCloudAuthState().catch((error) => {

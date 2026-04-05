@@ -17,7 +17,7 @@ const ScanHubSummaryCard = ({ label, value, tone = "neutral" }) => {
       ? "border-accent/35 bg-accent/12 shadow-glow-accent"
       : tone === "warning"
         ? "border-amber-500/35 bg-amber-500/10"
-        : "border-white/10 bg-white/5 backdrop-blur-sm";
+        : "border-border bg-white/5 backdrop-blur-sm";
 
   return (
     <div className={`rounded-2xl border p-3 shadow-glass-sm ${toneClass}`}>
@@ -50,9 +50,9 @@ const ScanHubPanel = ({
   const latestJob = jobs[0];
 
   return (
-    <div className="absolute inset-0 z-[1200] bg-black/55 backdrop-blur-sm">
-      <div className="absolute bottom-[44px] right-0 top-[70px] w-[540px] border-l border-white/10 bg-primary/85 shadow-glass backdrop-blur-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-black/20 px-4 py-4 backdrop-blur-md">
+    <div className="fixed inset-0 z-[1200] bg-black/55 backdrop-blur-sm">
+      <div className="absolute bottom-[44px] right-0 top-[70px] w-[540px] border-l border-border bg-primary/85 shadow-glass backdrop-blur-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border bg-black/20 px-4 py-4 backdrop-blur-md">
           <div>
             <div className="text-[11px] uppercase tracking-[0.2em] opacity-55">
               Library Scan

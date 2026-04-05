@@ -2,6 +2,39 @@ const { useState, useEffect } = window.React;
 const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
 
+const DELETE_GAME_MODES = window.DeleteGameModes || {
+  LIBRARY_ONLY: "library_only",
+  DELETE_FILES_KEEP_SAVES: "delete_files_keep_saves",
+  DELETE_FILES_AND_SAVES: "delete_files_and_saves",
+};
+
+const createDefaultDeleteModalState = () => ({
+  isOpen: false,
+  isLoading: false,
+  isDeleting: false,
+  error: "",
+  mode: DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES,
+  installPaths: [],
+  saveProfiles: [],
+});
+
+const getInstallPaths = (game) => {
+  const seenPaths = new Set();
+  const installPaths = [];
+
+  for (const version of Array.isArray(game?.versions) ? game.versions : []) {
+    const targetPath = String(version?.game_path || "").trim();
+    if (!targetPath || seenPaths.has(targetPath)) {
+      continue;
+    }
+
+    seenPaths.add(targetPath);
+    installPaths.push(targetPath);
+  }
+
+  return installPaths;
+};
+
 const GameDetailWindow = () => {
   const [game, setGame] = useState(null);
   const [selectedVersion, setSelectedVersion] = useState(null);
@@ -48,6 +81,9 @@ const GameDetailWindow = () => {
     progress: 0,
     total: 0,
   });
+  const [deleteModalState, setDeleteModalState] = useState(
+    createDefaultDeleteModalState,
+  );
 
   useEffect(() => {
     console.log("Setting up onGameData listener");
@@ -328,6 +364,105 @@ const GameDetailWindow = () => {
     }
   };
 
+  const closeDeleteModal = () => {
+    setDeleteModalState(createDefaultDeleteModalState());
+  };
+
+  const openDeleteModal = async () => {
+    if (!game?.record_id) {
+      return;
+    }
+
+    setDeleteModalState({
+      isOpen: true,
+      isLoading: true,
+      isDeleting: false,
+      error: "",
+      mode: DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES,
+      installPaths: getInstallPaths(game),
+      saveProfiles: [],
+    });
+
+    try {
+      const snapshotResult = await window.electronAPI.getSaveProfileSnapshot(
+        game.record_id,
+      );
+
+      setDeleteModalState((previous) => ({
+        ...previous,
+        isLoading: false,
+        error: snapshotResult?.success
+          ? ""
+          : snapshotResult?.error ||
+            "F95 Game Zone App could not inspect save locations.",
+        saveProfiles: snapshotResult?.success
+          ? snapshotResult?.snapshot?.profiles || []
+          : [],
+      }));
+    } catch (error) {
+      console.error("Failed to prepare delete-game dialog:", error);
+      setDeleteModalState((previous) => ({
+        ...previous,
+        isLoading: false,
+        error:
+          error.message ||
+          "F95 Game Zone App could not inspect save locations.",
+        saveProfiles: [],
+      }));
+    }
+  };
+
+  const confirmDeleteGame = async () => {
+    if (!game?.record_id) {
+      return;
+    }
+
+    setDeleteModalState((previous) => ({
+      ...previous,
+      isDeleting: true,
+      error: "",
+    }));
+
+    try {
+      const result = await window.electronAPI.removeLibraryGame({
+        recordId: game.record_id,
+        mode: deleteModalState.mode,
+      });
+
+      if (!result?.success) {
+        setDeleteModalState((previous) => ({
+          ...previous,
+          isDeleting: false,
+          error:
+            result?.error || "F95 Game Zone App could not remove this game.",
+        }));
+        return;
+      }
+
+      if (result.warnings?.length) {
+        alert(result.warnings.join("\n"));
+      } else if (
+        deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
+      ) {
+        alert("Installed files were removed and detected saves were kept.");
+      } else if (
+        deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_AND_SAVES
+      ) {
+        alert("Installed files and detected saves were removed.");
+      }
+
+      window.electronAPI.closeWindow();
+    } catch (error) {
+      console.error("Failed to remove game:", error);
+      setDeleteModalState((previous) => ({
+        ...previous,
+        isDeleting: false,
+        error:
+          error.message || "F95 Game Zone App could not remove this game.",
+      }));
+    }
+  };
+
   const handleRemoveVersion = async () => {
     if (!selectedVersion) {
       alert("No version selected.");
@@ -335,113 +470,43 @@ const GameDetailWindow = () => {
     }
 
     const versionLabel = selectedVersion.version || "this version";
-
-    // Step 1: Check how many versions currently exist
     const currentCount = await window.electronAPI.countVersions(game.record_id);
-
-    let confirmed = false;
-
     if (currentCount <= 1) {
-      // Deleting last version → full game removal
-      confirmed = window.confirm(
-        `You are about to delete the last version ("${versionLabel}") of "${game.title}".\n\n` +
-          `This will completely remove the game from your library, including:\n` +
-          `• All metadata & mappings\n` +
-          `• Cached banner and preview images\n\n` +
-          `Continue?`,
-      );
-    } else {
-      // Normal version delete (no folder prompt here)
-      confirmed = window.confirm(
-        `Delete version "${versionLabel}" of "${game.title}"?\n\n` +
-          `The game entry will remain with ${currentCount - 1} other version(s).`,
-      );
+      openDeleteModal();
+      return;
     }
 
-    if (!confirmed) return;
+    const confirmed = window.confirm(
+      `Delete version "${versionLabel}" of "${game.title}"?\n\n` +
+        `The game entry will remain with ${currentCount - 1} other version(s).`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
 
     try {
-      if (currentCount <= 1) {
-        // Full game deletion
-        const dbResult = await window.electronAPI.deleteGameCompletely(
-          game.record_id,
+      const result = await window.electronAPI.deleteVersion({
+        recordId: game.record_id,
+        version: selectedVersion.version,
+      });
+
+      if (result.success) {
+        const updatedVersions = versions.filter(
+          (v) => v.version !== selectedVersion.version,
         );
-        if (!dbResult.success) {
-          alert(
-            "Failed to delete game from database: " +
-              (dbResult.error || "Unknown error"),
-          );
-          return;
-        }
+        setVersions(updatedVersions);
 
-        // Step 2: Ask about deleting folders (only for last version / full delete)
-        const foldersToDelete = versions
-          .map((v) => v.game_path)
-          .filter(Boolean);
-        let deleteFoldersConfirmed = false;
-
-        if (foldersToDelete.length > 0) {
-          const folderList = foldersToDelete.map((p) => `• ${p}`).join("\n");
-          deleteFoldersConfirmed = window.confirm(
-            `Game database entry removed successfully.\n\n` +
-              `Also delete the game folder(s) from disk?\n\n${folderList}\n\n` +
-              `This cannot be undone!`,
-          );
-        }
-
-        if (deleteFoldersConfirmed) {
-          let allDeleted = true;
-          for (const folderPath of foldersToDelete) {
-            const result =
-              await window.electronAPI.deleteFolderRecursive(folderPath);
-            if (!result.success) {
-              console.error(
-                `Folder deletion failed for ${folderPath}: ${result.error}`,
-              );
-              allDeleted = false;
-            }
-          }
-
-          if (allDeleted) {
-            alert("Game completely removed, including all folders.");
-          } else {
-            alert(
-              "Game removed from library, but some folders could not be deleted (check console).",
-            );
-          }
+        if (updatedVersions.length > 0) {
+          handleVersionSelect(updatedVersions[0]);
         } else {
-          alert(
-            `"${game.title}" has been completely removed from your library (folders kept).`,
-          );
+          setSelectedVersion(null);
+          setVersionData({});
         }
 
-        // Close the details window
-        window.electronAPI.closeWindow();
+        alert(`Version "${versionLabel}" deleted.`);
       } else {
-        // Delete single version (no folder deletion here)
-        const result = await window.electronAPI.deleteVersion({
-          recordId: game.record_id,
-          version: selectedVersion.version,
-        });
-
-        if (result.success) {
-          // Refresh local versions
-          const updatedVersions = versions.filter(
-            (v) => v.version !== selectedVersion.version,
-          );
-          setVersions(updatedVersions);
-
-          if (updatedVersions.length > 0) {
-            handleVersionSelect(updatedVersions[0]);
-          } else {
-            setSelectedVersion(null);
-            setVersionData({});
-          }
-
-          alert(`Version "${versionLabel}" deleted.`);
-        } else {
-          alert("Failed to delete version.");
-        }
+        alert("Failed to delete version.");
       }
     } catch (err) {
       console.error("Error during version/game deletion:", err);
@@ -1183,6 +1248,25 @@ const GameDetailWindow = () => {
           </div>
         </div>
 
+        <window.DeleteGameModal
+          isOpen={deleteModalState.isOpen}
+          game={game}
+          installPaths={deleteModalState.installPaths}
+          saveProfiles={deleteModalState.saveProfiles}
+          mode={deleteModalState.mode}
+          isLoading={deleteModalState.isLoading}
+          isDeleting={deleteModalState.isDeleting}
+          error={deleteModalState.error}
+          onSelectMode={(mode) =>
+            setDeleteModalState((previous) => ({
+              ...previous,
+              mode,
+            }))
+          }
+          onConfirm={confirmDeleteGame}
+          onClose={closeDeleteModal}
+        />
+
         {showModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-secondary p-4 rounded-md max-w-lg w-full">
@@ -1220,6 +1304,12 @@ const GameDetailWindow = () => {
         )}
 
         <div className="sticky bottom-0 p-4 bg-primary flex justify-end space-x-2 z-10">
+          <button
+            onClick={openDeleteModal}
+            className="px-4 py-1 rounded bg-red-500/15 text-red-100 hover:bg-red-500/25"
+          >
+            Remove Game
+          </button>
           <button
             onClick={handleSave}
             className="px-4 py-1 bg-tertiary hover:bg-button_hover rounded"

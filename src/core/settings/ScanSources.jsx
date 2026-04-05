@@ -110,7 +110,7 @@ const ScanSources = () => {
         <div>
           <h3 className="text-lg font-semibold">Scan Sources</h3>
           <p className="text-xs opacity-60 mt-1">
-            Root folders that Atlas will use for recursive game discovery.
+            Root folders that the app will use for recursive game discovery.
           </p>
         </div>
         <button

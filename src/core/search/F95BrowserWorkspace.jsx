@@ -2,11 +2,28 @@ const { useEffect, useMemo, useRef, useState } = window.React;
 
 const F95_SEARCH_URL = "https://f95zone.to/sam/latest_alpha/";
 const F95_THREAD_PATTERN = /https:\/\/f95zone\.to\/threads\//i;
+const { getCaptchaContinuationUrl: sharedGetCaptchaContinuationUrl } =
+  window.f95CaptchaFlow || {};
+const getCaptchaContinuationUrl =
+  sharedGetCaptchaContinuationUrl ||
+  ((actionUrl, currentUrl) => {
+    const normalizedActionUrl = String(actionUrl || "").trim();
+    const normalizedCurrentUrl = String(currentUrl || "").trim();
+    if (
+      !normalizedActionUrl ||
+      !normalizedCurrentUrl ||
+      normalizedActionUrl === normalizedCurrentUrl ||
+      /^about:/i.test(normalizedCurrentUrl)
+    ) {
+      return "";
+    }
+    return normalizedCurrentUrl;
+  });
 
 const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
   const isSameF95Host = (value) => {
     try {
-      const resolvedUrl = new URL(value, location.origin);
+      const resolvedUrl = new URL(value, location.href);
       return /(^|\.)f95zone\.to$/i.test(resolvedUrl.hostname);
     } catch {
       return false;
@@ -16,7 +33,7 @@ const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
   const rewriteAnchors = () => {
     document.querySelectorAll("a[href]").forEach((anchor) => {
       const href = anchor.getAttribute("href") || anchor.href;
-      if (!isSameF95Host(href)) {
+      if (!href || href.startsWith("#") || !isSameF95Host(href)) {
         return;
       }
 
@@ -45,11 +62,11 @@ const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
       }
 
       const href = anchor.getAttribute("href") || anchor.href;
-      if (!isSameF95Host(href)) {
+      if (!href || href.startsWith("#") || !isSameF95Host(href)) {
         return;
       }
 
-      const resolvedUrl = new URL(href, location.origin).href;
+      const resolvedUrl = new URL(href, location.href).href;
       if (resolvedUrl === location.href) {
         return;
       }
@@ -85,6 +102,7 @@ const F95BrowserWorkspace = () => {
   const webviewRef = useRef(null);
   const guestReadyRef = useRef(false);
   const authStatusRef = useRef(false);
+  const captchaRetryKeyRef = useRef("");
   const [authState, setAuthState] = useState({
     isAuthenticated: false,
   });
@@ -103,6 +121,7 @@ const F95BrowserWorkspace = () => {
   const [isInspectingThread, setIsInspectingThread] = useState(false);
   const [isStartingInstall, setIsStartingInstall] = useState(false);
   const [downloadState, setDownloadState] = useState(null);
+  const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
   const [threadInstallState, setThreadInstallState] = useState({
     checking: false,
     installed: false,
@@ -169,6 +188,8 @@ const F95BrowserWorkspace = () => {
     setThreadInfo(null);
     setInstallError("");
     setBrowserError("");
+    setPendingCaptchaAction(null);
+    captchaRetryKeyRef.current = "";
   }, [browserKey, authState.isAuthenticated]);
 
   useEffect(() => {
@@ -435,6 +456,7 @@ const F95BrowserWorkspace = () => {
       setAuthState(nextState || { isAuthenticated: false });
       setThreadInfo(null);
       setDownloadState(null);
+      setPendingCaptchaAction(null);
     } catch (error) {
       console.error("Failed to clear F95 session:", error);
       setInstallError(error.message);
@@ -497,11 +519,28 @@ const F95BrowserWorkspace = () => {
       });
 
       if (!result?.success) {
-        setInstallError(result?.error || "Failed to queue download.");
+        if (result?.code === "captcha_required") {
+          const captchaUrl = result?.actionUrl || link.url;
+          setPendingCaptchaAction({
+            payload,
+            link,
+            actionUrl: captchaUrl,
+          });
+          setThreadInfo(null);
+          setStatusMessage(
+            "This mirror needs a captcha before F95 Game Zone App can continue. Finish it in the browser below, then retry the install.",
+          );
+          withWebview((webview) => {
+            webview.loadURL(captchaUrl);
+          });
+        } else {
+          setInstallError(result?.error || "Failed to queue download.");
+        }
         return;
       }
 
       setThreadInfo(null);
+      setPendingCaptchaAction(null);
       setStatusMessage(
         `Queued ${payload.title} via ${
           result?.sourceHost || link.host || link.label
@@ -514,6 +553,69 @@ const F95BrowserWorkspace = () => {
       setIsStartingInstall(false);
     }
   };
+
+  const retryPendingCaptchaInstall = async () => {
+    if (!pendingCaptchaAction) {
+      return;
+    }
+
+    const continuationUrl = getCaptchaContinuationUrl(
+      pendingCaptchaAction.actionUrl,
+      currentUrl,
+    );
+
+    await startInstall(pendingCaptchaAction.payload, {
+      ...pendingCaptchaAction.link,
+      url: continuationUrl || pendingCaptchaAction.link.url,
+    });
+  };
+
+  const reopenCaptchaPage = () => {
+    if (!pendingCaptchaAction?.actionUrl) {
+      return;
+    }
+
+    withWebview((webview) => {
+      webview.loadURL(pendingCaptchaAction.actionUrl);
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingCaptchaAction) {
+      captchaRetryKeyRef.current = "";
+      return;
+    }
+
+    if (browserState.loading || isStartingInstall) {
+      return;
+    }
+
+    const continuationUrl = getCaptchaContinuationUrl(
+      pendingCaptchaAction.actionUrl,
+      currentUrl,
+    );
+
+    if (!continuationUrl) {
+      return;
+    }
+
+    const retryKey = `${pendingCaptchaAction.actionUrl}|${continuationUrl}`;
+    if (captchaRetryKeyRef.current === retryKey) {
+      return;
+    }
+
+    captchaRetryKeyRef.current = retryKey;
+    setStatusMessage("Captcha confirmed. Resuming install...");
+    void startInstall(pendingCaptchaAction.payload, {
+      ...pendingCaptchaAction.link,
+      url: continuationUrl,
+    });
+  }, [
+    pendingCaptchaAction,
+    currentUrl,
+    browserState.loading,
+    isStartingInstall,
+  ]);
 
   if (!authState.isAuthenticated) {
     return (
@@ -573,13 +675,11 @@ const F95BrowserWorkspace = () => {
   }
 
   return (
-    <div className="flex h-full flex-col bg-tertiary">
-      <div className="flex flex-wrap items-center gap-3 border-b border-border bg-primary/90 px-5 py-4">
+    <div className="isolate flex h-full flex-col bg-tertiary">
+      <div className="relative z-10 flex flex-wrap items-center gap-2 border-b border-border bg-primary/90 px-4 py-2">
         <button
           onClick={() =>
-            withWebview(
-              (webview) => webview.canGoBack() && webview.goBack(),
-            )
+            withWebview((webview) => webview.canGoBack() && webview.goBack())
           }
           disabled={!browserState.canGoBack}
           className="rounded border border-border bg-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 hover:bg-selected"
@@ -636,7 +736,7 @@ const F95BrowserWorkspace = () => {
         </button>
       </div>
 
-      <div className="flex items-center gap-3 border-b border-border bg-canvas/40 px-5 py-3 text-sm text-text/75">
+      <div className="relative z-10 flex items-center gap-2 border-b border-border bg-canvas/40 px-4 py-2 text-sm text-text/75">
         <div className="truncate font-medium text-text">
           {browserState.title || "F95"}
         </div>
@@ -654,7 +754,7 @@ const F95BrowserWorkspace = () => {
       </div>
 
       {threadInstallState.installed && isThreadPage && (
-        <div className="border-b border-emerald-500/30 bg-emerald-500/10 px-5 py-3 text-sm text-emerald-100">
+        <div className="relative z-10 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-100">
           {threadInstallState.title || "This thread"} is already installed
           {threadInstallState.version
             ? ` in the library (${threadInstallState.version}).`
@@ -664,7 +764,7 @@ const F95BrowserWorkspace = () => {
 
       {downloadState && (
         <div
-          className={`border-b px-5 py-3 text-sm ${
+          className={`relative z-10 border-b px-4 py-2 text-sm ${
             downloadState.phase === "error"
               ? "border-red-500/30 bg-red-500/10 text-red-100"
               : downloadState.phase === "completed"
@@ -683,19 +783,42 @@ const F95BrowserWorkspace = () => {
       )}
 
       {statusMessage && (
-        <div className="border-b border-border bg-secondary/40 px-5 py-3 text-sm text-text/75">
+        <div className="relative z-10 border-b border-border bg-secondary/40 px-4 py-2 text-sm text-text/75">
           {statusMessage}
         </div>
       )}
 
+      {pendingCaptchaAction && (
+        <div className="relative z-10 border-b border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[280px]">
+              Finish the captcha in the page below, then retry the install.
+            </div>
+            <button
+              onClick={reopenCaptchaPage}
+              className="rounded border border-amber-300/30 bg-white/5 px-3 py-2 text-xs font-medium text-amber-50 transition hover:bg-white/10"
+            >
+              Open Captcha Page
+            </button>
+            <button
+              onClick={retryPendingCaptchaInstall}
+              disabled={isStartingInstall}
+              className="rounded bg-accent px-3 py-2 text-xs font-medium text-black transition hover:bg-selected disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isStartingInstall ? "Retrying..." : "Retry Install"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {installError && (
-        <div className="border-b border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-100">
+        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
           {installError}
         </div>
       )}
 
       {browserError && (
-        <div className="border-b border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-100">
+        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
           {browserError}
         </div>
       )}
@@ -731,16 +854,16 @@ const F95BrowserWorkspace = () => {
               </div>
 
               <div className="max-h-[50vh] overflow-y-auto px-6 py-5">
-                <div className="mb-4 text-sm text-text/70">
-                  Choose the file you want to queue. Atlas now groups links by
+              <div className="mb-4 text-sm text-text/70">
+                  Choose the file you want to queue. F95 Game Zone App now groups links by
                   platform and skips unrelated URLs so this list stops turning
                   into a random wall of external links.
                 </div>
                 <div className="space-y-5">
-                  {(
-                    Array.isArray(threadInfo.variants) && threadInfo.variants.length > 0
-                      ? threadInfo.variants
-                      : [{ label: "Downloads", links: threadInfo.links }]
+                  {(Array.isArray(threadInfo.variants) &&
+                  threadInfo.variants.length > 0
+                    ? threadInfo.variants
+                    : [{ label: "Downloads", links: threadInfo.links }]
                   ).map((variant) => (
                     <div key={`${variant.id || "group"}-${variant.label}`}>
                       <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text/55">
@@ -752,13 +875,16 @@ const F95BrowserWorkspace = () => {
                             key={link.url}
                             onClick={() => startInstall(threadInfo, link)}
                             disabled={isStartingInstall}
-                            className="flex w-full items-center justify-between rounded-2xl border border-border bg-secondary/40 px-4 py-4 text-left transition-colors hover:bg-selected disabled:cursor-not-allowed disabled:opacity-60"
+                            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-secondary/40 px-4 py-4 text-left transition-colors hover:bg-selected disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <div>
-                              <div className="font-medium text-text">
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-medium text-text">
                                 {link.label || link.host}
                               </div>
-                              <div className="mt-1 text-xs text-text/55">
+                              <div
+                                className="mt-1 truncate text-xs text-text/55"
+                                title={link.url}
+                              >
                                 {link.url}
                               </div>
                             </div>

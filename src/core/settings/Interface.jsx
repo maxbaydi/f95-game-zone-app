@@ -78,7 +78,7 @@ const Interface = () => {
       </p>
       <div className="border-t border-text opacity-25 my-2"></div>
       <div className="flex items-center mb-2">
-        <label className="flex-1">When Atlas Starts:</label>
+        <label className="flex-1">When F95 Game Zone App Starts:</label>
         <select
           className="w-40 bg-secondary border border-border text-text rounded p-1"
           value={atlasStartup}
@@ -87,7 +87,9 @@ const Interface = () => {
           <option>Do Nothing</option>
         </select>
       </div>
-      <p className="text-xs opacity-50 mb-2">Select default Atlas behavior</p>
+      <p className="text-xs opacity-50 mb-2">
+        Select the default app behavior on launch
+      </p>
       <div className="border-t border-text opacity-25 my-2"></div>
       <div className="flex items-center mb-2">
         <label className="flex-1">When Game Starts:</label>
@@ -119,7 +121,7 @@ const Interface = () => {
       <div className="opacity-50">
         <div className="flex items-center mb-2">
           <label className="flex-1">
-            Minimize Atlas to system tray when the application window is closed
+            Minimize F95 Game Zone App to system tray when the application window is closed
           </label>
           <input
             type="checkbox"

@@ -54,7 +54,7 @@ const SiteSearchResults = ({
         {Array.from({ length: 3 }).map((_, index) => (
           <div
             key={index}
-            className="atlas-skeleton motion-reduce:animate-none h-[220px] animate-atlas-shimmer rounded-2xl border border-white/10 shadow-glass-sm"
+            className="atlas-skeleton motion-reduce:animate-none h-[220px] animate-atlas-shimmer rounded-2xl border border-border shadow-glass-sm"
           />
         ))}
       </div>
@@ -83,7 +83,7 @@ const SiteSearchResults = ({
           </div>
           <div className="mt-3 max-w-xl text-sm text-text/70">
             Tighten or loosen the site filters. This screen now searches the
-            Atlas/F95 metadata catalog, not your installed library.
+            F95 metadata catalog, not your installed library.
           </div>
         </div>
       </div>

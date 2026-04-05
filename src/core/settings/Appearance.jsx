@@ -62,7 +62,7 @@ const Appearance = () => {
         </div>
       </div>
       <p className="text-xs opacity-50 mb-2">
-        Default Atlas Theme. Changes are saved as soon as theme file is loaded
+        Default app theme. Changes are saved as soon as a theme file is loaded
       </p>
       <div className="border-t border-text opacity-25 my-2"></div>
       <div className="flex items-center mb-2">

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const TEXTUAL_MIME_TYPES = new Set([
   "text/html",
@@ -56,6 +57,12 @@ const F95_TITLE_NOISE_PREFIXES = [
   "collection",
 ];
 
+const GOFILE_CLIENT_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Atlas/1.0 Chrome/125.0.0.0 Safari/537.36";
+const GOFILE_CLIENT_LANGUAGE = "en-US";
+const GOFILE_WT_SALT = "5d4f7g8sd45fsd";
+const GOFILE_WT_WINDOW_SECONDS = 14400;
+
 class DownloadValidationError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -65,8 +72,20 @@ class DownloadValidationError extends Error {
   }
 }
 
+class MirrorActionRequiredError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "MirrorActionRequiredError";
+    this.code = options.code || "mirror_action_required";
+    this.actionUrl = options.actionUrl || "";
+    this.userMessage = options.userMessage || message;
+  }
+}
+
 function normalizeHostname(hostname) {
-  return String(hostname || "").replace(/^www\./i, "").toLowerCase();
+  return String(hostname || "")
+    .replace(/^www\./i, "")
+    .toLowerCase();
 }
 
 function normalizeText(value) {
@@ -117,9 +136,7 @@ function stripLeadingNoisePrefixes(value) {
       }
 
       result = normalizeText(
-        result
-          .replace(prefixPattern, " ")
-          .replace(/^[|:;,.!/?<>\-–—~]+/, " "),
+        result.replace(prefixPattern, " ").replace(/^[|:;,.!/?<>\-–—~]+/, " "),
       );
       changed = true;
     }
@@ -256,6 +273,17 @@ function parseHtmlTagAttributes(rawAttributes) {
   return attributes;
 }
 
+function decodeJavascriptEscapes(value) {
+  return String(value || "")
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) =>
+      String.fromCharCode(Number.parseInt(code, 16)),
+    )
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, code) =>
+      String.fromCharCode(Number.parseInt(code, 16)),
+    )
+    .replace(/\\\//g, "/");
+}
+
 function extractHtmlTagAttributes(html, tagName) {
   const pattern = new RegExp(`<${tagName}\\b([^>]*)>`, "i");
   const match = String(html || "").match(pattern);
@@ -269,7 +297,10 @@ function extractHtmlTagAttributes(html, tagName) {
 function readTagAttribute(attributes, names) {
   for (const name of names) {
     const normalizedName = String(name || "").toLowerCase();
-    if (attributes && Object.prototype.hasOwnProperty.call(attributes, normalizedName)) {
+    if (
+      attributes &&
+      Object.prototype.hasOwnProperty.call(attributes, normalizedName)
+    ) {
       return attributes[normalizedName];
     }
   }
@@ -282,12 +313,16 @@ function parseBooleanAttribute(value) {
 }
 
 function parseCountdownLandingConfig(html, pageUrl) {
-  const countdownAttributes = extractHtmlTagAttributes(html, "download-countdown");
+  const countdownAttributes = extractHtmlTagAttributes(
+    html,
+    "download-countdown",
+  );
   if (!countdownAttributes) {
     return null;
   }
 
-  const fileActionAttributes = extractHtmlTagAttributes(html, "file-actions") || {};
+  const fileActionAttributes =
+    extractHtmlTagAttributes(html, "file-actions") || {};
   const referer = readTagAttribute(countdownAttributes, ["referer"]) || pageUrl;
   const code =
     readTagAttribute(countdownAttributes, ["code"]) ||
@@ -301,7 +336,10 @@ function parseCountdownLandingConfig(html, pageUrl) {
     code,
     referer,
     rand: readTagAttribute(countdownAttributes, ["rand"]),
-    freeMethod: readTagAttribute(countdownAttributes, ["free-method", "freemethod"]),
+    freeMethod: readTagAttribute(countdownAttributes, [
+      "free-method",
+      "freemethod",
+    ]),
     premiumMethod: readTagAttribute(countdownAttributes, [
       "premium-method",
       "premiummethod",
@@ -316,11 +354,23 @@ function parseCountdownLandingConfig(html, pageUrl) {
       readTagAttribute(countdownAttributes, [":has-password", "has-password"]),
     ),
     hasCountdown: parseBooleanAttribute(
-      readTagAttribute(countdownAttributes, [":has-countdown", "has-countdown"]),
+      readTagAttribute(countdownAttributes, [
+        ":has-countdown",
+        "has-countdown",
+      ]),
     ),
     fileLink: readTagAttribute(fileActionAttributes, ["link"]),
     fileToken: readTagAttribute(fileActionAttributes, ["token"]),
   };
+}
+
+function isGoogleDriveHost(hostname) {
+  const normalizedHost = normalizeHostname(hostname);
+  return (
+    normalizedHost === "drive.google.com" ||
+    normalizedHost === "docs.google.com" ||
+    normalizedHost === "drive.usercontent.google.com"
+  );
 }
 
 function getHostFamily(hostname) {
@@ -360,7 +410,11 @@ function scoreHtmlDownloadCandidate(candidate) {
     score += 35;
   }
 
-  if (/pricing|terms|privacy|blog|help|contact|report|preview|show in browser/i.test(urlLower)) {
+  if (
+    /pricing|terms|privacy|blog|help|contact|report|preview|show in browser/i.test(
+      urlLower,
+    )
+  ) {
     score -= 120;
   }
 
@@ -368,7 +422,10 @@ function scoreHtmlDownloadCandidate(candidate) {
     score -= 80;
   }
 
-  if (candidate?.attributeName && /hx-get|href|formaction|action/i.test(candidate.attributeName)) {
+  if (
+    candidate?.attributeName &&
+    /hx-get|href|formaction|action/i.test(candidate.attributeName)
+  ) {
     score += 10;
   }
 
@@ -472,6 +529,159 @@ async function cancelResponseBody(response) {
   }
 }
 
+function extractGoogleDriveFileId(rawUrl) {
+  try {
+    const parsedUrl = new URL(rawUrl);
+    if (!isGoogleDriveHost(parsedUrl.hostname)) {
+      return "";
+    }
+
+    const searchParamId = normalizeText(parsedUrl.searchParams.get("id"));
+    if (searchParamId) {
+      return searchParamId;
+    }
+
+    const segments = parsedUrl.pathname.split("/").filter(Boolean);
+    const driveFileIndex = segments.findIndex((segment) => segment === "d");
+    if (driveFileIndex >= 0 && segments[driveFileIndex + 1]) {
+      return normalizeText(segments[driveFileIndex + 1]);
+    }
+
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function extractGoogleDriveResourceKey(rawUrl) {
+  try {
+    const parsedUrl = new URL(rawUrl);
+    if (!isGoogleDriveHost(parsedUrl.hostname)) {
+      return "";
+    }
+
+    return normalizeText(parsedUrl.searchParams.get("resourcekey"));
+  } catch {
+    return "";
+  }
+}
+
+function isGoogleDriveDownloadPath(pathname) {
+  return /(?:^|\/)(?:uc|download)(?:$|[/?#])/i.test(String(pathname || ""));
+}
+
+function isGoogleDriveDirectDownloadUrl(rawUrl) {
+  try {
+    const parsedUrl = new URL(rawUrl);
+    if (!isGoogleDriveHost(parsedUrl.hostname)) {
+      return false;
+    }
+
+    if (!isGoogleDriveDownloadPath(parsedUrl.pathname)) {
+      return false;
+    }
+
+    return Boolean(
+      normalizeText(parsedUrl.searchParams.get("id")) &&
+        (normalizeText(parsedUrl.searchParams.get("export")) === "download" ||
+          parsedUrl.pathname.toLowerCase().includes("/download") ||
+          normalizeText(parsedUrl.searchParams.get("confirm"))),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildGoogleDriveCandidateUrls(rawUrl) {
+  const fileId = extractGoogleDriveFileId(rawUrl);
+  if (!fileId) {
+    return [rawUrl];
+  }
+
+  const resourceKey = extractGoogleDriveResourceKey(rawUrl);
+  const candidates = new Set([rawUrl]);
+  const addCandidate = (hostname, pathname) => {
+    const candidateUrl = new URL(`https://${hostname}${pathname}`);
+    candidateUrl.searchParams.set("export", "download");
+    candidateUrl.searchParams.set("id", fileId);
+    if (resourceKey) {
+      candidateUrl.searchParams.set("resourcekey", resourceKey);
+    }
+    candidates.add(candidateUrl.toString());
+  };
+
+  addCandidate("drive.google.com", "/uc");
+  addCandidate("drive.usercontent.google.com", "/uc");
+  addCandidate("drive.usercontent.google.com", "/download");
+
+  return [...candidates];
+}
+
+function extractGoogleDriveDirectUrlFromHtml(html) {
+  const normalizedHtml = decodeJavascriptEscapes(String(html || ""));
+  const directUrlMatches =
+    normalizedHtml.match(
+      /https:\/\/drive(?:\.usercontent)?\.google\.com\/(?:u\/\d+\/)?(?:uc|download)\?[^"'<>\\\s]+/gi,
+    ) || [];
+
+  for (const rawMatch of directUrlMatches) {
+    const directUrl = safeDecodeHtmlEntities(rawMatch).trim();
+    if (isGoogleDriveDirectDownloadUrl(directUrl)) {
+      return directUrl;
+    }
+  }
+
+  return "";
+}
+
+function extractGoogleDriveConfirmUrl(html, pageUrl) {
+  const normalizedHtml = decodeJavascriptEscapes(String(html || ""));
+  const formPattern = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
+  let formMatch = null;
+
+  while ((formMatch = formPattern.exec(normalizedHtml))) {
+    const formAttributes = parseHtmlTagAttributes(formMatch[1]);
+    const actionUrl = buildAbsoluteUrl(pageUrl, formAttributes.action || "");
+    if (!actionUrl) {
+      continue;
+    }
+
+    let parsedAction = null;
+    try {
+      parsedAction = new URL(actionUrl);
+    } catch {
+      continue;
+    }
+
+    if (
+      !isGoogleDriveHost(parsedAction.hostname) ||
+      !isGoogleDriveDownloadPath(parsedAction.pathname)
+    ) {
+      continue;
+    }
+
+    const inputPattern = /<input\b([^>]*)>/gi;
+    let inputMatch = null;
+    while ((inputMatch = inputPattern.exec(formMatch[2]))) {
+      const inputAttributes = parseHtmlTagAttributes(inputMatch[1]);
+      const inputName = normalizeText(inputAttributes.name);
+      if (!inputName) {
+        continue;
+      }
+
+      parsedAction.searchParams.set(inputName, inputAttributes.value || "");
+    }
+
+    if (!parsedAction.searchParams.get("export")) {
+      parsedAction.searchParams.set("export", "download");
+    }
+
+    return parsedAction.toString();
+  }
+
+  return "";
+}
+
 function extractGofileContentId(rawUrl) {
   try {
     const parsedUrl = new URL(rawUrl);
@@ -507,16 +717,16 @@ function extractNestedDownloadUrl(value) {
     return "";
   }
 
-  if (typeof value.directLink === "string" && value.directLink.trim()) {
-    return value.directLink.trim();
-  }
+  const normalizedType = normalizeText(value.type).toLowerCase();
 
-  if (typeof value.link === "string" && value.link.trim()) {
-    return value.link.trim();
-  }
+  if (normalizedType === "file") {
+    if (typeof value.directLink === "string" && value.directLink.trim()) {
+      return value.directLink.trim();
+    }
 
-  if (typeof value.downloadPage === "string" && value.downloadPage.trim()) {
-    return value.downloadPage.trim();
+    if (typeof value.link === "string" && value.link.trim()) {
+      return value.link.trim();
+    }
   }
 
   if (Array.isArray(value.children)) {
@@ -537,19 +747,34 @@ function extractNestedDownloadUrl(value) {
     }
   }
 
+  if (value.directLinks && typeof value.directLinks === "object") {
+    for (const directLink of Object.values(value.directLinks)) {
+      if (typeof directLink === "string" && directLink.trim()) {
+        return directLink.trim();
+      }
+    }
+  }
+
   return "";
 }
 
 async function createGofileGuestToken(session) {
-  const response = await fetchWithSession(session, "https://api.gofile.io/accounts", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
+  const response = await fetchWithSession(
+    session,
+    "https://api.gofile.io/accounts",
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "user-agent": GOFILE_CLIENT_USER_AGENT,
+      },
     },
-  });
+  );
 
   if (!response.ok) {
-    throw new Error(`Gofile account bootstrap failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Gofile account bootstrap failed with HTTP ${response.status}.`,
+    );
   }
 
   const payload = await response.json().catch(() => null);
@@ -561,6 +786,44 @@ async function createGofileGuestToken(session) {
   return token;
 }
 
+function generateGofileWebsiteToken(token, options = {}) {
+  const userAgent = options.userAgent || GOFILE_CLIENT_USER_AGENT;
+  const language = options.language || GOFILE_CLIENT_LANGUAGE;
+  const nowMs = typeof options.nowMs === "number" ? options.nowMs : Date.now();
+  const windowBucket = Math.floor(
+    Math.floor(nowMs / 1000) / GOFILE_WT_WINDOW_SECONDS,
+  ).toString();
+  const signatureInput = `${userAgent}::${language}::${token}::${windowBucket}::${GOFILE_WT_SALT}`;
+
+  return crypto.createHash("sha256").update(signatureInput).digest("hex");
+}
+
+async function syncGofileGuestAccount(session, token) {
+  const response = await fetchWithSession(
+    session,
+    "https://api.gofile.io/accounts/website",
+    {
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+        "user-agent": GOFILE_CLIENT_USER_AGENT,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Gofile account sync failed with HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (payload?.status !== "ok" || !payload?.data?.token) {
+    throw new Error("Gofile did not return a usable synced account.");
+  }
+
+  return payload.data;
+}
+
 async function resolveGofileUrl(session, rawUrl) {
   const contentId = extractGofileContentId(rawUrl);
   if (!contentId) {
@@ -568,19 +831,29 @@ async function resolveGofileUrl(session, rawUrl) {
   }
 
   const guestToken = await createGofileGuestToken(session);
+  const account = await syncGofileGuestAccount(session, guestToken);
+  const websiteToken = generateGofileWebsiteToken(account.token, {
+    userAgent: GOFILE_CLIENT_USER_AGENT,
+    language: GOFILE_CLIENT_LANGUAGE,
+  });
   const response = await fetchWithSession(
     session,
     `https://api.gofile.io/contents/${encodeURIComponent(contentId)}`,
     {
       headers: {
         accept: "application/json",
-        authorization: `Bearer ${guestToken}`,
+        authorization: `Bearer ${account.token}`,
+        "x-website-token": websiteToken,
+        "x-bl": GOFILE_CLIENT_LANGUAGE,
+        "user-agent": GOFILE_CLIENT_USER_AGENT,
       },
     },
   );
 
   if (!response.ok) {
-    throw new Error(`Gofile content lookup failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Gofile content lookup failed with HTTP ${response.status}.`,
+    );
   }
 
   const payload = await response.json().catch(() => null);
@@ -602,10 +875,116 @@ async function resolveGofileUrl(session, rawUrl) {
 
   const resolvedUrl = extractNestedDownloadUrl(payload?.data || {});
   if (!resolvedUrl) {
-    throw new Error("Gofile did not expose a downloadable file URL for this mirror.");
+    throw new Error(
+      "Gofile did not expose a downloadable file URL for this mirror.",
+    );
   }
 
   return resolvedUrl;
+}
+
+async function resolveGoogleDriveCandidateUrl(session, candidateUrl, seenUrls) {
+  if (!candidateUrl || seenUrls.has(candidateUrl)) {
+    return "";
+  }
+
+  seenUrls.add(candidateUrl);
+
+  const response = await fetchWithSession(session, candidateUrl, {
+    method: "GET",
+    redirect: "follow",
+  });
+
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    throw new Error(`Google Drive mirror failed with HTTP ${response.status}.`);
+  }
+
+  const finalUrl = response.url || candidateUrl;
+  const contentType = response.headers.get("content-type") || "";
+  const contentDisposition = response.headers.get("content-disposition") || "";
+
+  if (
+    /attachment/i.test(contentDisposition) ||
+    !isHtmlLikeContentType(contentType)
+  ) {
+    await cancelResponseBody(response);
+    return finalUrl;
+  }
+
+  const html = await response.text();
+  if (
+    /Google Drive - Quota exceeded|too many users have viewed or downloaded this file|can't view or download this file at this time/i.test(
+      html,
+    )
+  ) {
+    throw new Error(
+      "This Google Drive mirror is temporarily unavailable because its public download quota is exceeded.",
+    );
+  }
+
+  const embeddedDirectUrl = extractGoogleDriveDirectUrlFromHtml(html);
+  if (embeddedDirectUrl && !seenUrls.has(embeddedDirectUrl)) {
+    const resolvedEmbeddedUrl = await resolveGoogleDriveCandidateUrl(
+      session,
+      embeddedDirectUrl,
+      seenUrls,
+    );
+    if (resolvedEmbeddedUrl) {
+      return resolvedEmbeddedUrl;
+    }
+  }
+
+  const confirmUrl = extractGoogleDriveConfirmUrl(html, finalUrl);
+  if (confirmUrl && !seenUrls.has(confirmUrl)) {
+    const resolvedConfirmUrl = await resolveGoogleDriveCandidateUrl(
+      session,
+      confirmUrl,
+      seenUrls,
+    );
+    if (resolvedConfirmUrl) {
+      return resolvedConfirmUrl;
+    }
+  }
+
+  throw new Error(
+    "Google Drive returned an unsupported interstitial page instead of a direct download.",
+  );
+}
+
+async function resolveGoogleDriveUrl(session, rawUrl) {
+  try {
+    if (!isGoogleDriveHost(new URL(rawUrl).hostname)) {
+      return rawUrl;
+    }
+  } catch {
+    return rawUrl;
+  }
+
+  const seenUrls = new Set();
+  const candidateUrls = buildGoogleDriveCandidateUrls(rawUrl);
+  let lastError = null;
+
+  for (const candidateUrl of candidateUrls) {
+    try {
+      const resolvedUrl = await resolveGoogleDriveCandidateUrl(
+        session,
+        candidateUrl,
+        seenUrls,
+      );
+      if (resolvedUrl) {
+        return resolvedUrl;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return rawUrl;
 }
 
 async function resolveMaskedF95Url(session, maskedUrl) {
@@ -637,8 +1016,14 @@ async function resolveMaskedF95Url(session, maskedUrl) {
   }
 
   if (payload.status === "captcha") {
-    throw new Error(
+    throw new MirrorActionRequiredError(
       "This masked F95 link now requires captcha confirmation. Open the mirror in the embedded browser and finish the captcha there.",
+      {
+        code: "captcha_required",
+        actionUrl: maskedUrl,
+        userMessage:
+          "This mirror needs captcha confirmation before Atlas can continue. Finish the captcha, then retry the install.",
+      },
     );
   }
 
@@ -662,7 +1047,10 @@ async function resolveCountdownLandingDownloadUrl(session, rawUrl) {
   const contentType = response.headers.get("content-type") || "";
   const contentDisposition = response.headers.get("content-disposition") || "";
 
-  if (/attachment/i.test(contentDisposition) || !isHtmlLikeContentType(contentType)) {
+  if (
+    /attachment/i.test(contentDisposition) ||
+    !isHtmlLikeContentType(contentType)
+  ) {
     await cancelResponseBody(response);
     return finalUrl;
   }
@@ -674,8 +1062,14 @@ async function resolveCountdownLandingDownloadUrl(session, rawUrl) {
   }
 
   if (countdownConfig.hasCaptcha) {
-    throw new Error(
+    throw new MirrorActionRequiredError(
       "This mirror now requires captcha confirmation. Open it in the embedded browser and finish the captcha there.",
+      {
+        code: "captcha_required",
+        actionUrl: finalUrl,
+        userMessage:
+          "This mirror needs captcha confirmation before Atlas can continue. Finish the captcha, then retry the install.",
+      },
     );
   }
 
@@ -762,7 +1156,11 @@ function resolveKnownFileHostUrl(rawUrl) {
   return rawUrl;
 }
 
-async function resolveHtmlLandingDownloadUrl(session, rawUrl, seenUrls = new Set()) {
+async function resolveHtmlLandingDownloadUrl(
+  session,
+  rawUrl,
+  seenUrls = new Set(),
+) {
   if (!rawUrl || seenUrls.has(rawUrl)) {
     return rawUrl;
   }
@@ -783,7 +1181,10 @@ async function resolveHtmlLandingDownloadUrl(session, rawUrl, seenUrls = new Set
   const contentType = response.headers.get("content-type") || "";
   const contentDisposition = response.headers.get("content-disposition") || "";
 
-  if (/attachment/i.test(contentDisposition) || !isHtmlLikeContentType(contentType)) {
+  if (
+    /attachment/i.test(contentDisposition) ||
+    !isHtmlLikeContentType(contentType)
+  ) {
     await cancelResponseBody(response);
     return finalUrl;
   }
@@ -823,6 +1224,8 @@ async function prepareF95DownloadUrl(session, rawUrl) {
   ) {
     resolvedUrl = await resolveMaskedF95Url(session, rawUrl);
   }
+
+  resolvedUrl = await resolveGoogleDriveUrl(session, resolvedUrl);
 
   const resolvedParsedUrl = new URL(resolvedUrl);
   const resolvedHostname = normalizeHostname(resolvedParsedUrl.hostname);
@@ -890,7 +1293,7 @@ async function inspectDownloadedPackage(input) {
     TEXTUAL_PAGE_EXTENSIONS.has(extension)
   ) {
     throw new DownloadValidationError(
-      "Mirror returned an HTML/text page instead of a game package. Atlas must not treat that as a successful install.",
+      "Mirror returned an HTML/text page instead of a game package. F95 Game Zone App must not treat that as a successful install.",
       {
         code: "html_payload",
       },
@@ -919,6 +1322,7 @@ async function inspectDownloadedPackage(input) {
 
 module.exports = {
   DownloadValidationError,
+  MirrorActionRequiredError,
   detectArchiveTypeFromBuffer,
   inspectDownloadedPackage,
   looksLikeHtmlDocument,
@@ -928,8 +1332,13 @@ module.exports = {
   prepareF95DownloadUrl,
   extractHtmlDownloadCandidates,
   extractGofileContentId,
+  extractGoogleDriveConfirmUrl,
+  extractGoogleDriveDirectUrlFromHtml,
+  extractGoogleDriveFileId,
+  generateGofileWebsiteToken,
   resolveCountdownLandingDownloadUrl,
   resolveGofileUrl,
+  resolveGoogleDriveUrl,
   resolveHtmlLandingDownloadUrl,
   resolveKnownFileHostUrl,
   sanitizeF95ThreadTitle,

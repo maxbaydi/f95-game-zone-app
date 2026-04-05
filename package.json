@@ -1,17 +1,19 @@
 {
-  "name": "atlas",
-  "version": "1.0.55",
+  "name": "f95-game-zone-app",
+  "version": "1.1.0",
   "author": {
-    "name": "towerwatchman",
-    "email": "towerwatchman@atlas.com"
+    "name": "maxbaydi",
+    "email": "maxbaydi@users.noreply.github.com"
   },
-  "description": "Atlas: Open-source game and visual novel manager",
+  "description": "F95 Game Zone App: desktop library, installs, updates, and cloud save sync for F95 games",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "atlas": "npm run build:css && electron .",
+    "f95-game-zone-app": "npm run build:css && electron .",
     "build": "npm run build:css && electron-builder --win --x64",
-    "dev": "npm run build:css && electron . --dev",
+    "dev:css:watch": "postcss src/assets/css/tailwind.css -o src/assets/css/tailwind.output.css --watch",
+    "dev:web": "node scripts/dev-serve.js",
+    "dev": "npm run build:css && concurrently -k -n css,electron,web -c cyan,magenta,green \"npm run dev:css:watch\" \"electron . --dev\" \"node scripts/dev-serve.js\"",
     "build:css": "postcss src/assets/css/tailwind.css -o src/assets/css/tailwind.output.css",
     "rebuild": "npx electron-rebuild --version=37.0.0",
     "structure": "node scripts/generate-structure.js > scripts/project-structure.txt",
@@ -23,12 +25,12 @@
     "ci:check": "npm run build:css && npm run lint && npm run typecheck && npm run test"
   },
   "build": {
-    "appId": "com.towerwatchman.atlas",
-    "productName": "Atlas",
+    "appId": "com.maxbaydi.f95gamezoneapp",
+    "productName": "F95 Game Zone App",
     "publish": {
       "provider": "github",
-      "owner": "towerwatchman",
-      "repo": "Atlas",
+      "owner": "maxbaydi",
+      "repo": "f95-game-zone-app",
       "releaseType": "release",
       "vPrefixedTagName": true
     },
@@ -110,7 +112,9 @@
     "eslint": "^8.57.0",
     "postcss": "^8.5.6",
     "postcss-cli": "^10.1.0",
+    "concurrently": "^9.2.1",
     "prettier": "3.6.2",
+    "serve": "^14.2.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.4.5"
   }

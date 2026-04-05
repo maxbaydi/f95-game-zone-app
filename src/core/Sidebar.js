@@ -44,7 +44,7 @@ const Sidebar = ({
     "div",
     {
       className:
-        "w-[60px] flex min-w-[60px] flex-col items-center border-r border-white/10 bg-primary/80 py-px backdrop-blur-xl fixed z-50 h-full shadow-glass-sm",
+        "w-[60px] flex min-w-[60px] flex-col items-center border-r border-border bg-primary/80 py-px backdrop-blur-xl fixed z-50 h-full shadow-glass-sm",
     },
     items.map((item) => {
       const isActive = activeSection === item.id && !item.isExternal;
@@ -77,7 +77,7 @@ const Sidebar = ({
           "div",
           {
             className:
-              "pointer-events-none absolute left-[68px] whitespace-nowrap rounded-lg border border-white/15 bg-primary/95 px-3 py-1.5 text-xs text-text opacity-0 shadow-glass backdrop-blur-md transition-opacity group-hover:opacity-100",
+              "pointer-events-none absolute left-[68px] whitespace-nowrap rounded-lg border border-border bg-primary/95 px-3 py-1.5 text-xs text-text opacity-0 shadow-glass backdrop-blur-md transition-opacity group-hover:opacity-100",
           },
           item.label,
         ),

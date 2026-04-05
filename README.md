@@ -1,53 +1,69 @@
-<div align="center">
-  <a href="https://atlas-gamesdb.com/">
-    <img height="180px" src="https://github.com/towerwatchman/Atlas/blob/main/src/assets/images/atlas_logo.svg" alt="atlas logo">
-  </a>
-  
-<!--![GitHub release (with filter)](https://img.shields.io/github/v/release/towerwatchman/Atlas?style=flat&logo=github&logoColor=white&label=)-->
-[![React](https://img.shields.io/badge/-ReactJs-21222B?&logo=react&logoColor=8ED5FF&style=for-the-badge)](#)
-[![Windows](https://custom-icon-badges.demolab.com/badge/Windows-0078D6?logo=windows11&logoColor=white&style=for-the-badge)](#)
-[![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](#)
-[![Electron](https://img.shields.io/badge/-electron-61DBFB?style=for-the-badge&labelColor=17202A&logo=electron&logoColor=61DBFB)](#)
-[![SQLite](https://img.shields.io/badge/SQLite-%2307405e.svg?logo=sqlite&logoColor=white&style=for-the-badge)](#)
-<!--[![MacOS](https://shields.io/badge/MacOS--9cf?logo=Apple&style=social)](#)-->
+# F95 Game Zone App
 
-<!--![Static Badge](https://img.shields.io/badge/-docs-green.svg?logo=Wikipedia)-->
+F95 Game Zone App is a desktop manager for F95 games on Windows. It focuses on four things that actually matter in day-to-day use:
 
-![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/towerwatchman/Atlas/.github%2Fworkflows%2Fmain.yml?event=push&label=release&style=for-the-badge)
-![GitHub issues](https://img.shields.io/github/issues-raw/towerwatchman/Atlas?style=for-the-badge)
-![GitHub pull requests](https://img.shields.io/github/issues-pr-raw/towerwatchman/Atlas?style=for-the-badge)
-![GitHub all releases](https://img.shields.io/github/downloads/towerwatchman/Atlas/total?style=for-the-badge)
-<!--![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/towerwatchman/Atlas/.github%2Fworkflows%2Fpr-test-build.yml?event=push&label=pr)-->
-</div>
+- a reliable installed library
+- live F95 thread search and update flow
+- download/install directly into the library
+- save protection with local vault backups and cloud sync
 
-#
-Atlas is an open source game manager and launcher for Windows, and Linux with a modern interface for viewing, finding, and easily installing 3rd party games and visual novels.
-We currently support adding games from [F95Zone](https://f95zone.to/) and plan on adding more sources as the project progresses (See features below).
-It's meant to replace [Game-List](https://www.game-list.org) ([Github](https://github.com/game-list/game-list)) but also expand on it's feature set.
+This project started from Atlas foundations, but it is now being shipped as its own application and release line.
 
-Atlas is for the user that wants ease of use, quality of life and have the software do the heavy lifting for you.
+## What it does
 
-For discussion about future releases and new features please visit our [Discord Server](https://discord.gg/XpTHvYbYyz).
+- scans local folders and builds a real installed-games library
+- opens live F95 threads inside the app through a logged-in session
+- installs or updates games from thread mirrors into the correct library folder
+- keeps a downloads queue with background progress and history
+- detects save locations in both the game folder and common `%AppData%/RenPy/...` paths
+- backs up saves before destructive operations
+- supports account-based cloud saves through Supabase
 
-## Features:
-A summary of planned features is listed below. We do not have a timeline for all features yet
-- Fast and Snappy UI.
-- Easy to understand UI written htmls/js
-- Custom themes and color schemes.
-- Game file management (moves or copies game install files for you)
-- Easy to edit metadata and tags per title.
-- Navigate titles with a Banner/Thumbnail gallery grid (Images are not automatically downloaded yet).
-- View or add previews for a title.
-- Filter titles based on titles, creators, tags, ID's, description contents and urls.
-- Bulk install/import multiple titles and versions with a single click.
-- Compresses all banner and preview images to smaller webp files for storage optimization.
+## Cloud saves
 
-## Download
-Grab the latest version from the [releases](https://github.com/towerwatchman/Atlas/releases) page. Once installed, Atlas will automatically notify you once there is a new version available. 
+Cloud saves are account-scoped. A user signs in once, and the app can back up and restore that user's saves across machines.
 
-##Questions & Issues
-Please report any bugs by filing an issue. Please attach the log in the root of the Atlas directory.
+Current cloud-save behavior:
 
+- local save detection covers install-relative save folders and common Ren'Py AppData locations
+- upload creates a cloud backup from the current local save set
+- restore pulls the latest backup back to the current machine
+- before restore, the app creates a local safety backup so local data is not silently lost
+- deleting a game can preserve saves in the local vault for later reinstall
 
-## Roadmap
-All planned versions with their features are listed in the [milstones overview](https://github.com/towerwatchman/Atlas/milestones)
+This is a bidirectional sync foundation:
+
+- local -> cloud: back up current saves from this machine
+- cloud -> local: restore the latest backup onto this machine
+
+It is not pretending to be a silent merge engine yet. The current behavior is explicit and safety-first.
+
+## Update and install flow
+
+- inspect a live F95 thread
+- choose a mirror by platform
+- resolve masked F95 links and supported host flows
+- queue the download
+- unpack or move the payload into the library
+- register the installed version in the local database
+
+When a mirror requires captcha confirmation, the app now keeps that flow resumable instead of dumping the user into a dead end.
+
+## Development
+
+```powershell
+npm install
+npm run dev
+```
+
+Checks:
+
+```powershell
+npm run ci:check
+```
+
+## Releases
+
+Releases are published from this repository:
+
+- [GitHub Releases](https://github.com/maxbaydi/f95-game-zone-app/releases)

@@ -69,7 +69,7 @@ const Settings = () => {
         {/* Settings Sidebar */}
         <div className="w-[180px] bg-primary h-full border-r border-border -webkit-app-region-no-drag">
           <div className="text-center text-accent font-bold text-md mt-4 mb-4 antialiased -webkit-app-region-drag">
-            ATLAS SETTINGS
+            F95 GAME ZONE APP
           </div>
           <ul>
             {window.settingsIcons.map((item) => (

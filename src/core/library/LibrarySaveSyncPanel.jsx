@@ -17,7 +17,7 @@ const SaveSyncPill = ({ children, tone = "neutral" }) => {
       ? "border-accent/45 bg-accent/25 text-text shadow-glow-accent"
       : tone === "warning"
         ? "border-amber-500/40 bg-amber-500/15 text-amber-50"
-        : "border-white/12 bg-white/5 text-text backdrop-blur-sm";
+        : "border-border/85 bg-white/5 text-text backdrop-blur-sm";
 
   return (
     <span
@@ -260,7 +260,7 @@ const LibrarySaveSyncPanel = ({ game }) => {
 
           {profiles.length === 0 ? (
             <div className="text-sm opacity-60">
-              No save files were found yet. Atlas checks the game folder and common
+              No save files were found yet. The app checks the game folder and common
               Ren&apos;Py save locations automatically.
             </div>
           ) : (

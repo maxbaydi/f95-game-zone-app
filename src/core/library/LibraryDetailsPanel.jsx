@@ -65,7 +65,7 @@ const DetailPill = ({ children, tone = "neutral" }) => {
       ? "border-accent/45 bg-accent/25 text-text shadow-glow-accent"
       : tone === "warning"
         ? "border-amber-500/40 bg-amber-500/15 text-amber-50"
-        : "border-white/12 bg-white/5 text-text backdrop-blur-sm";
+        : "border-border/85 bg-white/5 text-text backdrop-blur-sm";
 
   return (
     <span
@@ -94,6 +94,7 @@ const LibraryDetailsPanel = ({
   onPlayGame,
   onUpdateGame,
   onOpenFolder,
+  onRemoveGame,
   onPreviewSelect,
 }) => {
   const primaryVersion = useMemo(() => getPrimaryVersion(game), [game]);
@@ -119,14 +120,14 @@ const LibraryDetailsPanel = ({
   const displayCreator = game?.displayCreator || game?.creator || "";
 
   return (
-    <aside className="atlas-glass-panel w-[420px] shrink-0 border-l border-white/10 shadow-glass">
+    <aside className="atlas-glass-panel w-[420px] shrink-0 border-l border-border shadow-glass">
       <div className="flex h-full flex-col">
-        <div className="flex items-start justify-between gap-3 border-b border-white/10 bg-black/15 px-4 py-4 backdrop-blur-sm">
+        <div className="relative z-10 flex items-start justify-between gap-3 border-b border-border bg-black/15 px-4 py-2.5 backdrop-blur-sm">
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.22em] opacity-50">
               Game Overview
             </div>
-            <div className="truncate text-xl font-semibold text-text">
+            <div className="truncate text-lg font-semibold leading-tight text-text">
               {isLoading ? "Loading..." : displayTitle}
             </div>
             <div className="truncate text-sm opacity-70">
@@ -136,7 +137,7 @@ const LibraryDetailsPanel = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10"
+            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-sm text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10"
           >
             Close
           </button>
@@ -243,6 +244,12 @@ const LibraryDetailsPanel = ({
                           disabled={!game.siteUrl}
                         >
                           Open Game Page
+                        </button>
+                        <button
+                          onClick={() => onRemoveGame?.(game)}
+                          className="rounded border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-100 transition hover:bg-red-500/20"
+                        >
+                          Remove Game
                         </button>
                       </div>
                     </div>

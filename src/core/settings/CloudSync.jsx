@@ -90,7 +90,7 @@ const CloudSync = () => {
           <div>
             <h3 className="text-lg font-semibold">Cloud Saves</h3>
             <p className="text-xs opacity-60 mt-1">
-              Sign in once and Atlas will use your account for save backups and restore.
+              Sign in once and F95 Game Zone App will use your account for save backups and restore.
             </p>
           </div>
           <div className="text-xs opacity-70 text-right">
@@ -106,12 +106,33 @@ const CloudSync = () => {
           <div>
             <h3 className="text-lg font-semibold">Account</h3>
             <p className="text-xs opacity-60 mt-1">
-              Use your email and password to keep your saves tied to your account.
+              Use your email and password to keep your save history tied to your account across machines.
             </p>
           </div>
           <div className="text-xs opacity-70 text-right">
             <div>
               {authState.configured ? "Cloud saves are ready" : "Cloud saves are unavailable"}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-border bg-black/15 p-3 text-sm">
+            <div className="font-medium">Back up to cloud</div>
+            <div className="mt-1 text-xs opacity-60">
+              Send your current local saves to your account backup.
+            </div>
+          </div>
+          <div className="rounded border border-border bg-black/15 p-3 text-sm">
+            <div className="font-medium">Restore to this PC</div>
+            <div className="mt-1 text-xs opacity-60">
+              Pull your latest cloud backup back onto the current machine.
+            </div>
+          </div>
+          <div className="rounded border border-border bg-black/15 p-3 text-sm">
+            <div className="font-medium">Protect local progress</div>
+            <div className="mt-1 text-xs opacity-60">
+              The app keeps a local safety backup before a restore replaces anything.
             </div>
           </div>
         </div>
@@ -138,7 +159,7 @@ const CloudSync = () => {
           </div>
         ) : (
           <div className="mt-4 space-y-4">
-            <div className="inline-flex rounded-lg border border-white/10 bg-black/20 p-1">
+            <div className="inline-flex rounded-lg border border-border bg-black/20 p-1">
               <button
                 type="button"
                 className={`rounded-md px-3 py-2 text-sm transition ${

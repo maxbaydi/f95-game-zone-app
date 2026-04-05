@@ -1,5 +1,9 @@
 const MAX_HISTORY_ITEMS = 40;
 
+function isActiveStatus(status) {
+  return status === "queued" || status === "downloading" || status === "installing";
+}
+
 function sortDownloads(entries) {
   const statusPriority = {
     downloading: 0,
@@ -17,6 +21,23 @@ function sortDownloads(entries) {
       return leftPriority - rightPriority;
     }
 
+    if (isActiveStatus(left.status) && isActiveStatus(right.status)) {
+      const createdAtDelta = (left.createdAt || 0) - (right.createdAt || 0);
+      if (createdAtDelta !== 0) {
+        return createdAtDelta;
+      }
+    } else {
+      const updatedAtDelta = (right.updatedAt || 0) - (left.updatedAt || 0);
+      if (updatedAtDelta !== 0) {
+        return updatedAtDelta;
+      }
+    }
+
+    const idCompare = String(left.id || "").localeCompare(String(right.id || ""));
+    if (idCompare !== 0) {
+      return idCompare;
+    }
+
     return (right.updatedAt || 0) - (left.updatedAt || 0);
   });
 }
@@ -28,7 +49,7 @@ function trimHistory(entries) {
   const installingEntries = entries.filter((entry) => entry.status === "installing");
   const historicalEntries = entries
     .filter(
-      (entry) => entry.status !== "queued" && entry.status !== "downloading" && entry.status !== "installing",
+      (entry) => !isActiveStatus(entry.status),
     )
     .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))
     .slice(0, MAX_HISTORY_ITEMS);
@@ -130,10 +151,7 @@ function createDownloadsStore() {
     },
     activeCount() {
       return entries.filter(
-        (entry) =>
-          entry.status === "queued" ||
-          entry.status === "downloading" ||
-          entry.status === "installing",
+        (entry) => isActiveStatus(entry.status),
       ).length;
     },
   };
