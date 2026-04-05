@@ -3,6 +3,8 @@ const path = require("path");
 const crypto = require("crypto");
 const AdmZip = require("adm-zip");
 const { buildSaveManifest } = require("../shared/saveManifest");
+const { decideSaveSyncPlan } = require("../shared/saveSyncPlan");
+const { getCloudSyncErrorDetails } = require("../shared/cloudSyncErrors");
 const {
   createSupabaseDesktopClient,
   resolveSupabaseSettings,
@@ -66,6 +68,102 @@ function getArchiveRoot(profile, index) {
       ? `renpy-${profile.strategy?.payload?.folderName || index}`
       : `local-${index}`;
   return `profiles/${suffix}`;
+}
+
+function getRemotePaths(authUserId, cloudIdentity) {
+  const remoteBase = `${authUserId}/${cloudIdentity}`;
+
+  return {
+    remoteBase,
+    latestArchivePath: `${remoteBase}/latest.zip`,
+    latestManifestPath: `${remoteBase}/latest.manifest.json`,
+    historyArchivePath: `${remoteBase}/history/${Date.now()}.zip`,
+  };
+}
+
+function isStorageNotFoundError(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    error?.statusCode === 404 ||
+    error?.status === 404 ||
+    message.includes("not found") ||
+    message.includes("no such object")
+  );
+}
+
+async function buildLocalSaveManifest(identity, profiles) {
+  const manifestProfiles = [];
+  const manifestEntries = [];
+
+  for (const [index, profile] of profiles.entries()) {
+    const archiveRoot = getArchiveRoot(profile, index);
+    const files = await walkFiles(profile.rootPath);
+
+    for (const file of files) {
+      const archivePath = `${archiveRoot}/${file.relativePath}`.replace(/\\/g, "/");
+      manifestEntries.push({
+        path: archivePath,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        sha256: await hashFile(file.filePath),
+      });
+    }
+
+    manifestProfiles.push({
+      provider: profile.provider,
+      rootPath: profile.rootPath,
+      strategy: profile.strategy,
+      archiveRoot,
+      confidence: profile.confidence,
+      reasons: profile.reasons,
+    });
+  }
+
+  return buildSaveManifest({
+    identity,
+    profiles: manifestProfiles,
+    entries: manifestEntries,
+  });
+}
+
+function getPrimaryInstallDirectory(game) {
+  const versions = Array.isArray(game?.versions) ? [...game.versions] : [];
+  versions.sort((left, right) => (right.date_added || 0) - (left.date_added || 0));
+
+  for (const version of versions) {
+    if (version?.game_path) {
+      return version.game_path;
+    }
+  }
+
+  return "";
+}
+
+function buildVaultBackupInput(appPaths, snapshot) {
+  const game = snapshot?.game || null;
+  if (!game) {
+    return null;
+  }
+
+  return {
+    appPaths,
+    threadUrl: game?.siteUrl || "",
+    atlasId: game?.atlas_id || "",
+    title: game?.displayTitle || game?.title || "",
+    creator: game?.displayCreator || game?.creator || "",
+    installDirectory: getPrimaryInstallDirectory(game),
+    profiles: snapshot?.profiles || [],
+  };
+}
+
+async function refreshLocalVaultCopy(appPaths, snapshot) {
+  const backupInput = buildVaultBackupInput(appPaths, snapshot);
+  if (!backupInput) {
+    return null;
+  }
+
+  return backupGameSaves(backupInput);
 }
 
 async function buildCloudSaveArchive(appPaths, identity, profiles) {
@@ -141,6 +239,7 @@ function createCloudSaveService({
   appPaths,
   getConfig,
   getSaveProfileSnapshot,
+  refreshSaveProfiles,
   upsertSaveSyncState,
 }) {
   let cachedBundle = null;
@@ -297,14 +396,46 @@ function createCloudSaveService({
     }
   };
 
-  const uploadGameSaves = async ({ recordId }) => {
+  const fetchRemoteManifest = async ({ bundle, authUserId, cloudIdentity }) => {
+    const remotePaths = getRemotePaths(authUserId, cloudIdentity);
+    const downloadResult = await bundle.client.storage
+      .from(bundle.settings.storageBucket)
+      .download(remotePaths.latestManifestPath);
+
+    if (downloadResult.error || !downloadResult.data) {
+      if (isStorageNotFoundError(downloadResult.error)) {
+        return {
+          exists: false,
+          manifest: null,
+          remotePaths,
+        };
+      }
+
+      throw (
+        downloadResult.error ||
+        new Error("Failed to download cloud save manifest.")
+      );
+    }
+
+    const manifest = JSON.parse(
+      Buffer.from(await downloadResult.data.arrayBuffer()).toString("utf8"),
+    );
+
+    return {
+      exists: true,
+      manifest,
+      remotePaths,
+    };
+  };
+
+  const uploadGameSaves = async ({ recordId, snapshot: providedSnapshot = null }) => {
     const bundle = await withConfiguredClient();
     const authState = await getAuthState();
     if (!authState.user?.id) {
       throw new Error("Cloud save upload requires a signed-in Supabase user.");
     }
 
-    const snapshot = await getSaveProfileSnapshot(recordId);
+    const snapshot = providedSnapshot || (await getSaveProfileSnapshot(recordId));
     const game = snapshot?.game || null;
     const profiles = snapshot?.profiles || [];
     if (profiles.length === 0) {
@@ -315,6 +446,11 @@ function createCloudSaveService({
     if (!cloudIdentity) {
       throw new Error("No cloud identity is registered for this game.");
     }
+
+    await refreshLocalVaultCopy(appPaths, snapshot).catch((error) => {
+      console.warn("[save.vault] Failed to refresh local vault copy:", error);
+    });
+
     const { archivePath, manifest } = await buildCloudSaveArchive(
       appPaths,
       cloudIdentity,
@@ -322,15 +458,12 @@ function createCloudSaveService({
     );
     const archiveBuffer = await fs.promises.readFile(archivePath);
     const manifestBuffer = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
-    const remoteBase = `${authState.user.id}/${cloudIdentity}`;
-    const latestArchivePath = `${remoteBase}/latest.zip`;
-    const latestManifestPath = `${remoteBase}/latest.manifest.json`;
-    const historyArchivePath = `${remoteBase}/history/${Date.now()}.zip`;
+    const remotePaths = getRemotePaths(authState.user.id, cloudIdentity);
 
     try {
       const archiveUpload = await bundle.client.storage
         .from(bundle.settings.storageBucket)
-        .upload(latestArchivePath, archiveBuffer, {
+        .upload(remotePaths.latestArchivePath, archiveBuffer, {
           contentType: "application/zip",
           upsert: true,
         });
@@ -340,7 +473,7 @@ function createCloudSaveService({
 
       const manifestUpload = await bundle.client.storage
         .from(bundle.settings.storageBucket)
-        .upload(latestManifestPath, manifestBuffer, {
+        .upload(remotePaths.latestManifestPath, manifestBuffer, {
           contentType: "application/json",
           upsert: true,
         });
@@ -350,7 +483,7 @@ function createCloudSaveService({
 
       await bundle.client.storage
         .from(bundle.settings.storageBucket)
-        .upload(historyArchivePath, archiveBuffer, {
+        .upload(remotePaths.historyArchivePath, archiveBuffer, {
           contentType: "application/zip",
           upsert: false,
         });
@@ -361,19 +494,27 @@ function createCloudSaveService({
         lastLocalManifestHash: manifest.manifestHash,
         lastRemoteManifestHash: manifest.manifestHash,
         lastUploadedAt: new Date().toISOString(),
-        lastRemotePath: latestArchivePath,
+        lastRemotePath: remotePaths.latestArchivePath,
         syncStatus: "uploaded",
         lastError: "",
       });
 
       return {
         uploaded: true,
-        remotePath: latestArchivePath,
+        remotePath: remotePaths.latestArchivePath,
         manifestHash: manifest.manifestHash,
         game,
         syncState: state,
       };
     } catch (error) {
+      const normalizedError = getCloudSyncErrorDetails(error, {
+        action: "upload",
+        archiveBytes: archiveBuffer.length,
+      });
+      console.error("[cloud.sync] Upload failed:", {
+        code: normalizedError.code,
+        rawMessage: normalizedError.rawMessage,
+      });
       await upsertSaveSyncState({
         recordId,
         cloudIdentity,
@@ -383,15 +524,18 @@ function createCloudSaveService({
         lastDownloadedAt: snapshot?.syncState?.lastDownloadedAt || "",
         lastRemotePath: snapshot?.syncState?.lastRemotePath || "",
         syncStatus: "error",
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: normalizedError.userMessage,
       });
-      throw error;
+      throw new Error(normalizedError.userMessage);
     } finally {
       await fs.promises.unlink(archivePath).catch(() => {});
     }
   };
 
-  const restoreGameSaves = async ({ recordId }) => {
+  const restoreGameSaves = async ({
+    recordId,
+    remoteArchivePath: requestedRemoteArchivePath = "",
+  }) => {
     const bundle = await withConfiguredClient();
     const authState = await getAuthState();
     if (!authState.user?.id) {
@@ -405,35 +549,41 @@ function createCloudSaveService({
       throw new Error("No cloud identity is registered for this game.");
     }
 
+    const remotePaths = getRemotePaths(authState.user.id, syncState.cloudIdentity);
     const remoteArchivePath =
+      requestedRemoteArchivePath ||
       syncState.lastRemotePath ||
-      `${authState.user.id}/${syncState.cloudIdentity}/latest.zip`;
-    const downloadResult = await bundle.client.storage
-      .from(bundle.settings.storageBucket)
-      .download(remoteArchivePath);
-    if (downloadResult.error || !downloadResult.data) {
-      throw downloadResult.error || new Error("Failed to download cloud save archive.");
-    }
-
-    const arrayBuffer = await downloadResult.data.arrayBuffer();
+      remotePaths.latestArchivePath;
     const archivePath = createTempPath(appPaths, "cloud-restore.zip");
     const extractionPath = createTempPath(appPaths, "cloud-restore");
     const installDirectory =
       game?.versions?.find((version) => version.game_path)?.game_path || "";
 
-    if (snapshot?.profiles?.length > 0) {
-      await backupGameSaves({
-        appPaths,
-        threadUrl: game?.siteUrl || "",
-        atlasId: game?.atlas_id || "",
-        title: game?.displayTitle || game?.title || "",
-        creator: game?.displayCreator || game?.creator || "",
-        installDirectory,
-        profiles: snapshot.profiles,
-      });
-    }
-
     try {
+      const downloadResult = await bundle.client.storage
+        .from(bundle.settings.storageBucket)
+        .download(remoteArchivePath);
+      if (downloadResult.error || !downloadResult.data) {
+        throw (
+          downloadResult.error ||
+          new Error("Failed to download cloud save archive.")
+        );
+      }
+
+      const arrayBuffer = await downloadResult.data.arrayBuffer();
+
+      if (snapshot?.profiles?.length > 0) {
+        await backupGameSaves({
+          appPaths,
+          threadUrl: game?.siteUrl || "",
+          atlasId: game?.atlas_id || "",
+          title: game?.displayTitle || game?.title || "",
+          creator: game?.displayCreator || game?.creator || "",
+          installDirectory,
+          profiles: snapshot.profiles,
+        });
+      }
+
       await fs.promises.writeFile(archivePath, Buffer.from(arrayBuffer));
       const { extractArchiveSafely } = require("./archive/extractArchive");
       await extractArchiveSafely({
@@ -475,6 +625,29 @@ function createCloudSaveService({
         lastError: "",
       });
 
+      if (refreshSaveProfiles) {
+        const refreshedSnapshot = await refreshSaveProfiles(recordId).catch(
+          (refreshError) => {
+            console.warn(
+              "[save.profiles] Failed to refresh save profiles after cloud restore:",
+              refreshError,
+            );
+            return null;
+          },
+        );
+
+        if (refreshedSnapshot) {
+          await refreshLocalVaultCopy(appPaths, refreshedSnapshot).catch(
+            (vaultError) => {
+              console.warn(
+                "[save.vault] Failed to refresh local vault after cloud restore:",
+                vaultError,
+              );
+            },
+          );
+        }
+      }
+
       return {
         restored: true,
         game,
@@ -482,6 +655,13 @@ function createCloudSaveService({
         syncState: state,
       };
     } catch (error) {
+      const normalizedError = getCloudSyncErrorDetails(error, {
+        action: "restore",
+      });
+      console.error("[cloud.sync] Restore failed:", {
+        code: normalizedError.code,
+        rawMessage: normalizedError.rawMessage,
+      });
       await upsertSaveSyncState({
         recordId,
         cloudIdentity: syncState.cloudIdentity,
@@ -491,15 +671,148 @@ function createCloudSaveService({
         lastDownloadedAt: syncState.lastDownloadedAt || "",
         lastRemotePath: remoteArchivePath,
         syncStatus: "error",
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: normalizedError.userMessage,
       });
-      throw error;
+      throw new Error(normalizedError.userMessage);
     } finally {
       await fs.promises
         .rm(extractionPath, { recursive: true, force: true })
         .catch(() => {});
       await fs.promises.unlink(archivePath).catch(() => {});
     }
+  };
+
+  const reconcileGameSaves = async ({ recordId }) => {
+    const bundle = await withConfiguredClient();
+    const authState = await getAuthState();
+
+    if (!authState.user?.id) {
+      return {
+        reconciled: false,
+        action: "noop",
+        reason: "not-authenticated",
+      };
+    }
+
+    const snapshot = refreshSaveProfiles
+      ? await refreshSaveProfiles(recordId)
+      : await getSaveProfileSnapshot(recordId);
+    const cloudIdentity = snapshot?.syncState?.cloudIdentity || "";
+
+    if (!snapshot?.game || !cloudIdentity) {
+      return {
+        reconciled: false,
+        action: "noop",
+        reason: "missing-game",
+      };
+    }
+
+    const localManifest =
+      Array.isArray(snapshot?.profiles) && snapshot.profiles.length > 0
+        ? await buildLocalSaveManifest(cloudIdentity, snapshot.profiles)
+        : null;
+
+    if (localManifest) {
+      await refreshLocalVaultCopy(appPaths, snapshot).catch((error) => {
+        console.warn(
+          "[save.vault] Failed to refresh local vault before cloud reconcile:",
+          error,
+        );
+      });
+    }
+
+    const remoteResult = await fetchRemoteManifest({
+      bundle,
+      authUserId: authState.user.id,
+      cloudIdentity,
+    });
+    const remoteManifest = remoteResult.manifest;
+    const plan = decideSaveSyncPlan({
+      localManifest,
+      remoteManifest,
+      syncState: snapshot?.syncState || null,
+    });
+
+    if (plan.action === "upload") {
+      const result = await uploadGameSaves({
+        recordId,
+        snapshot,
+      });
+
+      return {
+        reconciled: true,
+        action: "upload",
+        reason: plan.reason,
+        result,
+      };
+    }
+
+    if (plan.action === "restore") {
+      const result = await restoreGameSaves({
+        recordId,
+        remoteArchivePath: remoteResult.remotePaths.latestArchivePath,
+      });
+
+      return {
+        reconciled: true,
+        action: "restore",
+        reason: plan.reason,
+        result,
+      };
+    }
+
+    if (plan.action === "conflict") {
+      const state = await upsertSaveSyncState({
+        recordId,
+        cloudIdentity,
+        lastLocalManifestHash: localManifest?.manifestHash || "",
+        lastRemoteManifestHash: remoteManifest?.manifestHash || "",
+        lastUploadedAt: snapshot?.syncState?.lastUploadedAt || "",
+        lastDownloadedAt: snapshot?.syncState?.lastDownloadedAt || "",
+        lastRemotePath:
+          remoteResult.remotePaths?.latestArchivePath ||
+          snapshot?.syncState?.lastRemotePath ||
+          "",
+        syncStatus: "conflict",
+        lastError:
+          "Cloud and local saves changed independently with the same timestamp. Review before overwriting either copy.",
+      });
+
+      return {
+        reconciled: false,
+        action: "conflict",
+        reason: plan.reason,
+        syncState: state,
+      };
+    }
+
+    const syncStatus =
+      plan.reason === "already-synced" ? "synced" : snapshot?.syncState?.syncStatus || "idle";
+    const state = await upsertSaveSyncState({
+      recordId,
+      cloudIdentity,
+      lastLocalManifestHash:
+        localManifest?.manifestHash || snapshot?.syncState?.lastLocalManifestHash || "",
+      lastRemoteManifestHash:
+        remoteManifest?.manifestHash ||
+        snapshot?.syncState?.lastRemoteManifestHash ||
+        "",
+      lastUploadedAt: snapshot?.syncState?.lastUploadedAt || "",
+      lastDownloadedAt: snapshot?.syncState?.lastDownloadedAt || "",
+      lastRemotePath:
+        remoteResult.remotePaths?.latestArchivePath ||
+        snapshot?.syncState?.lastRemotePath ||
+        "",
+      syncStatus,
+      lastError: "",
+    });
+
+    return {
+      reconciled: false,
+      action: "noop",
+      reason: plan.reason,
+      syncState: state,
+    };
   };
 
   const onAuthStateChange = (listener) => {
@@ -515,6 +828,7 @@ function createCloudSaveService({
     signInWithPassword,
     signOut,
     signUpWithPassword,
+    reconcileGameSaves,
     uploadGameSaves,
     restoreGameSaves,
   };

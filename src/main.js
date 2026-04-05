@@ -118,6 +118,7 @@ let importerWindow;
 let appConfig;
 let databaseConnection = null;
 let cloudSaveService = null;
+let cloudSaveQueue = Promise.resolve();
 
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 
@@ -600,6 +601,67 @@ function getReadyCloudSaveService() {
   }
 
   return cloudSaveService;
+}
+
+function queueCloudSaveTask(taskName, task) {
+  cloudSaveQueue = cloudSaveQueue
+    .catch(() => null)
+    .then(async () => {
+      try {
+        return await task();
+      } catch (error) {
+        console.error(`[cloud.sync] ${taskName} failed:`, error);
+        return null;
+      }
+    });
+
+  return cloudSaveQueue;
+}
+
+function scheduleCloudSaveReconcile(recordId, reason) {
+  if (!recordId) {
+    return Promise.resolve(null);
+  }
+
+  return queueCloudSaveTask(
+    `auto reconcile record ${recordId} (${reason})`,
+    async () => {
+      const authState = await getReadyCloudSaveService().getAuthState();
+      if (!authState?.authenticated) {
+        return null;
+      }
+
+      return getReadyCloudSaveService().reconcileGameSaves({
+        recordId,
+      });
+    },
+  );
+}
+
+function scheduleCloudLibraryReconcile(reason) {
+  return queueCloudSaveTask(`auto reconcile library (${reason})`, async () => {
+    if (!databaseConnection) {
+      return null;
+    }
+
+    const authState = await getReadyCloudSaveService().getAuthState();
+    if (!authState?.authenticated) {
+      return null;
+    }
+
+    const games = await getGames(appPaths, 0, null);
+    for (const game of games || []) {
+      if (!game?.record_id) {
+        continue;
+      }
+
+      await getReadyCloudSaveService().reconcileGameSaves({
+        recordId: game.record_id,
+      });
+    }
+
+    return true;
+  });
 }
 
 async function broadcastCloudAuthState() {
@@ -1167,6 +1229,10 @@ async function persistF95InstalledGame(payload) {
           error,
         );
       });
+      scheduleCloudSaveReconcile(
+        payload.existingGame.record_id,
+        "post-install-update",
+      );
     }
 
     mainWindow?.webContents.send(
@@ -1211,6 +1277,7 @@ async function persistF95InstalledGame(payload) {
         error,
       );
     });
+    scheduleCloudSaveReconcile(importedRecordId, "post-install-import");
   }
 
   return importResults;
@@ -1847,6 +1914,9 @@ ipcMain.handle("sign-in-cloud", async (_, payload) => {
   try {
     await getReadyCloudSaveService().signInWithPassword(payload || {});
     const state = await broadcastCloudAuthState();
+    if (state?.authenticated) {
+      scheduleCloudLibraryReconcile("sign-in");
+    }
     return {
       success: true,
       state,
@@ -1867,6 +1937,9 @@ ipcMain.handle("sign-up-cloud", async (_, payload) => {
       payload || {},
     );
     const state = await broadcastCloudAuthState();
+    if (state?.authenticated) {
+      scheduleCloudLibraryReconcile("sign-up");
+    }
     return {
       success: true,
       state,
@@ -1940,6 +2013,7 @@ ipcMain.handle("refresh-save-profiles", async (_, recordId) => {
       databaseConnection,
       recordId,
     );
+    scheduleCloudSaveReconcile(recordId, "manual-refresh");
     return {
       success: true,
       snapshot,
@@ -4004,6 +4078,8 @@ app.whenReady().then(async () => {
     getConfig: () => appConfig,
     getSaveProfileSnapshot: (recordId) =>
       getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
+    refreshSaveProfiles: (recordId) =>
+      refreshSaveProfiles(appPaths, databaseConnection, recordId),
     upsertSaveSyncState: (input) =>
       upsertSaveSyncState(databaseConnection, input),
   });
@@ -4020,9 +4096,13 @@ app.whenReady().then(async () => {
     });
   });
   createWindow();
-  broadcastCloudAuthState().catch((error) => {
+  const initialCloudAuthState = await broadcastCloudAuthState().catch((error) => {
     console.error("[cloud.auth] Failed to initialize auth state:", error);
+    return null;
   });
+  if (initialCloudAuthState?.authenticated) {
+    scheduleCloudLibraryReconcile("startup");
+  }
   broadcastF95AuthState().catch((error) => {
     console.error("[f95.auth] Failed to initialize auth state:", error);
   });

@@ -26,9 +26,13 @@ Cloud saves are account-scoped. A user signs in once, and the app can back up an
 Current cloud-save behavior:
 
 - local save detection covers install-relative save folders and common Ren'Py AppData locations
+- the app now auto-reconciles saves on startup, after sign-in, and after install/update
+- when only one side exists, that side is used automatically
+- when both sides exist, the app compares manifest hashes and latest save-file mtimes to choose upload vs restore
 - upload creates a cloud backup from the current local save set
 - restore pulls the latest backup back to the current machine
 - before restore, the app creates a local safety backup so local data is not silently lost
+- local safety copies live on disk under the app profile vault, not inside SQLite blobs
 - deleting a game can preserve saves in the local vault for later reinstall
 
 This is a bidirectional sync foundation:
@@ -36,7 +40,7 @@ This is a bidirectional sync foundation:
 - local -> cloud: back up current saves from this machine
 - cloud -> local: restore the latest backup onto this machine
 
-It is not pretending to be a silent merge engine yet. The current behavior is explicit and safety-first.
+It is still safety-first, not a blind merge engine. If local and cloud copies diverge with the same timestamp, the app flags the game for review instead of silently overwriting either side.
 
 ## Update and install flow
 

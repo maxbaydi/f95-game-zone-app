@@ -1,4 +1,11 @@
 const CloudSync = () => {
+  const { getCloudSyncErrorDetails: sharedGetCloudSyncErrorDetails } =
+    window.cloudSyncErrors || {};
+  const getCloudSyncErrorDetails =
+    sharedGetCloudSyncErrorDetails ||
+    ((error) => ({
+      userMessage: String(error?.message || error || "").trim(),
+    }));
   const [authMode, setAuthMode] = React.useState("sign-in");
   const [authState, setAuthState] = React.useState({
     configured: false,
@@ -12,6 +19,11 @@ const CloudSync = () => {
   const [statusMessage, setStatusMessage] = React.useState("");
   const [errorMessage, setErrorMessage] = React.useState("");
   const [isAuthBusy, setIsAuthBusy] = React.useState(false);
+  const userFacingError =
+    errorMessage ||
+    getCloudSyncErrorDetails(authState.error, {
+      action: "upload",
+    }).userMessage;
 
   const loadState = React.useCallback(async () => {
     try {
@@ -238,15 +250,15 @@ const CloudSync = () => {
         )}
       </section>
 
-      {(statusMessage || errorMessage || authState.error) && (
+      {(statusMessage || userFacingError) && (
         <div
           className={`rounded border p-3 text-sm ${
-            errorMessage || authState.error
+            userFacingError
               ? "border-red-500/40 bg-red-500/10 text-red-200"
               : "border-green-500/30 bg-green-500/10 text-green-100"
           }`}
         >
-          {errorMessage || authState.error || statusMessage}
+          {userFacingError || statusMessage}
         </div>
       )}
     </div>

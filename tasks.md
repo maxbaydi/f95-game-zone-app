@@ -2356,3 +2356,76 @@ What is still missing here:
 - `src/database.js` remains a legacy-heavy module. It is safer than before, but still oversized.
 - Existing Atlas dependency tree has inherited security warnings and deprecated packages. I did not mix that cleanup into the storage/migration slice on purpose.
 - `AGENTS.md` and `ТЗ.md` are local workspace files and are intentionally left untracked relative to upstream Atlas.
+
+## 2026-04-05 — Cloud save error text normalization
+
+What was done:
+
+- removed raw Supabase/storage error text from the save backup and restore UI
+- added a shared cloud error normalizer for upload, restore, auth, network, and generic fallback cases
+- normalized persisted `save_sync_state.last_error` values in main-process cloud sync handling
+- applied the same user-facing error mapping to the `Cloud Saves` settings screen so auth/storage failures do not leak backend text there either
+
+How it was implemented:
+
+- added `src/shared/cloudSyncErrors.js` with `getCloudSyncErrorDetails()` and `formatByteSize()`
+- mapped upload and restore failures through the shared normalizer inside `src/main/cloudSaveSync.js`
+- loaded the shared mapper in both `src/index.html` and `src/settings.html`
+- updated `src/core/library/LibrarySaveSyncPanel.jsx` and `src/core/settings/CloudSync.jsx` to render normalized user-facing messages instead of raw backend text
+- added regression coverage in `test/cloudSyncErrors.test.js`
+
+What remains:
+
+- run a manual smoke on a real oversized cloud-backup case to confirm the new message is shown in renderer after a live Supabase failure
+- expand friendly mapping later if new host/provider-specific sync failures appear
+
+Current stage progress:
+
+- cloud-save UI hardening: 82%
+- overall roadmap progress relative to the current fork scope: 74%
+
+Impact on overall progress:
+
+- improves product polish and keeps backend/storage implementation details out of user UI, which was an explicit project rule
+- reduces the chance of future regressions where raw technical storage/auth text leaks back into save-related flows
+
+## 2026-04-05 — Automatic cloud/local save reconcile
+
+What was done:
+
+- added automatic save reconcile on app startup with an existing cloud session
+- added automatic save reconcile right after successful cloud sign-in/sign-up with a live session
+- added automatic save reconcile after install/update flows once save profiles are refreshed
+- introduced a deterministic reconcile policy that compares local and remote manifests before choosing upload or restore
+- kept binary local safety copies in the file-based save vault and refreshed that vault after successful sync operations
+- added explicit `synced` and `conflict` sync states so the library panel does not pretend everything is merely “ready”
+
+How it was implemented:
+
+- added `src/shared/saveSyncPlan.js` as a pure decision module for `upload` / `restore` / `noop` / `conflict`
+- extended `src/main/cloudSaveSync.js` with:
+  - remote manifest fetch
+  - local manifest build from detected save profiles
+  - automatic reconcile per game
+  - vault refresh before upload and after restore
+- extended `src/main.js` with a serialized cloud-save task queue and startup/auth/post-install triggers
+- updated `src/core/library/LibrarySaveSyncPanel.jsx` to show the new sync states honestly
+- documented the behavior change in `README.md`
+- added ADR `docs/adr/0003-auto-cloud-save-reconcile.md`
+- added regression coverage in `test/saveSyncPlan.test.js`
+
+What remains:
+
+- run a real manual smoke with a real Supabase user and two machines or two app profiles
+- verify the end-to-end case where a freshly reinstalled game restores from cloud because cloud is newer than the local vault
+- add continuous save-folder watching later if we want near-real-time upload, instead of startup/auth/install reconciliation only
+
+Current stage progress:
+
+- cloud save architecture + reconcile policy: 90%
+- overall roadmap progress relative to the current fork scope: 79%
+
+Impact on overall progress:
+
+- closes the gap between “manual backup UI exists” and “cloud save continuity actually works in product terms”
+- keeps the architecture aligned with the project rule that binary user data belongs in managed filesystem storage, not SQLite blobs

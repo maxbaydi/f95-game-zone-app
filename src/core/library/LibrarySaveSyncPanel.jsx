@@ -11,6 +11,14 @@ const formatSyncDate = (value) => {
   return date.toLocaleString();
 };
 
+const { getCloudSyncErrorDetails: sharedGetCloudSyncErrorDetails } =
+  window.cloudSyncErrors || {};
+const getCloudSyncErrorDetails =
+  sharedGetCloudSyncErrorDetails ||
+  ((error) => ({
+    userMessage: String(error?.message || error || "").trim(),
+  }));
+
 const SaveSyncPill = ({ children, tone = "neutral" }) => {
   const toneClass =
     tone === "accent"
@@ -47,6 +55,14 @@ const getSyncStatusLabel = (syncStatus) => {
 
   if (syncStatus === "restored") {
     return "Restored";
+  }
+
+  if (syncStatus === "synced") {
+    return "Synced";
+  }
+
+  if (syncStatus === "conflict") {
+    return "Review needed";
   }
 
   if (syncStatus === "error") {
@@ -165,6 +181,9 @@ const LibrarySaveSyncPanel = ({ game }) => {
   const profiles = snapshot?.profiles || [];
   const syncState = snapshot?.syncState || null;
   const hasRemoteArchive = Boolean(syncState?.lastRemotePath);
+  const userFacingError =
+    errorMessage ||
+    getCloudSyncErrorDetails(syncState?.lastError || authState.error).userMessage;
 
   return (
     <section className="rounded-2xl border border-border bg-secondary/10 p-4">
@@ -202,7 +221,12 @@ const LibrarySaveSyncPanel = ({ game }) => {
                     : "Cloud unavailable"}
               </SaveSyncPill>
               <SaveSyncPill
-                tone={syncState?.syncStatus === "error" ? "warning" : "neutral"}
+                tone={
+                  syncState?.syncStatus === "error" ||
+                  syncState?.syncStatus === "conflict"
+                    ? "warning"
+                    : "neutral"
+                }
               >
                 {getSyncStatusLabel(syncState?.syncStatus)}
               </SaveSyncPill>
@@ -287,15 +311,15 @@ const LibrarySaveSyncPanel = ({ game }) => {
             </div>
           )}
 
-          {(message || errorMessage || syncState?.lastError || authState.error) && (
+          {(message || userFacingError) && (
             <div
               className={`rounded border p-3 text-sm ${
-                errorMessage || syncState?.lastError || authState.error
+                userFacingError
                   ? "border-red-500/40 bg-red-500/10 text-red-200"
                   : "border-green-500/30 bg-green-500/10 text-green-100"
               }`}
             >
-              {errorMessage || syncState?.lastError || authState.error || message}
+              {userFacingError || message}
             </div>
           )}
         </div>
