@@ -120,6 +120,37 @@
       };
     }
 
+    if (
+      normalizedMessage.includes("invalid_mime") ||
+      normalizedMessage.includes("mime type") ||
+      normalizedMessage.includes("mimetype") ||
+      (normalizedMessage.includes("mime") &&
+        (normalizedMessage.includes("not allowed") ||
+          normalizedMessage.includes("invalid") ||
+          normalizedMessage.includes("reject")))
+    ) {
+      return {
+        code: "cloud_storage_mime",
+        rawMessage,
+        userMessage:
+          "Supabase Storage rejected the file MIME type. Open Storage → your bucket → Configuration and allow application/json and application/zip (or remove MIME restrictions).",
+      };
+    }
+
+    if (
+      normalizedMessage.includes("row-level security") ||
+      normalizedMessage.includes("violates policy") ||
+      normalizedMessage.includes("rls policy") ||
+      normalizedMessage.includes("permission denied")
+    ) {
+      return {
+        code: "cloud_storage_rls",
+        rawMessage,
+        userMessage:
+          "Storage access was denied by Supabase policies. Apply the SQL in docs/supabase/cloud-save-setup.sql so authenticated users can read/write under their user id folder.",
+      };
+    }
+
     return {
       code: "cloud_sync_failed",
       rawMessage,

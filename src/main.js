@@ -1081,7 +1081,7 @@ function scheduleCloudInstalledSavesReconcile(reason) {
 async function syncCloudLibraryCatalogNow(reason) {
   const authState = await getReadyCloudSaveService().getAuthState();
   if (!authState?.authenticated) {
-    return null;
+    throw new Error("Cloud library sync requires a signed-in account.");
   }
 
   const result = await getReadyCloudSaveService().syncLibraryCatalog();
@@ -1089,6 +1089,16 @@ async function syncCloudLibraryCatalogNow(reason) {
     result?.remoteOnlyEntries || [],
     `cloud-catalog-${reason}`,
   );
+
+  console.info("[cloud.library] catalog sync", {
+    reason,
+    local: result?.localEntries?.length ?? 0,
+    remote: result?.remoteEntries?.length ?? 0,
+    remoteOnly: result?.remoteOnlyEntries?.length ?? 0,
+    materialized,
+  });
+
+  broadcastGamesLibrarySynced({ materialized, reason });
 
   return {
     ...result,
@@ -1133,6 +1143,16 @@ async function broadcastCloudAuthState() {
   }
 
   return authState;
+}
+
+function broadcastGamesLibrarySynced(payload) {
+  for (const windowInstance of [mainWindow, settingsWindow]) {
+    if (!windowInstance || windowInstance.isDestroyed()) {
+      continue;
+    }
+
+    windowInstance.webContents.send("games-library-synced", payload ?? {});
+  }
 }
 
 async function moveFileIntoDirectory(
@@ -2561,9 +2581,26 @@ ipcMain.handle("run-bulk-cloud-save-action", async (_, mode) => {
 ipcMain.handle("get-cloud-library-catalog", async () => {
   try {
     const result = await getReadyCloudSaveService().getCloudLibraryCatalog();
+    const materialized = await materializeCloudLibraryCatalogEntries(
+      result?.remoteOnlyEntries || [],
+      "cloud-catalog-panel-read",
+    );
+    if (
+      materialized.added > 0 ||
+      materialized.updated > 0 ||
+      materialized.failed > 0
+    ) {
+      console.info("[cloud.library] catalog read materialized", {
+        materialized,
+      });
+      broadcastGamesLibrarySynced({ materialized, reason: "panel-read" });
+    }
     return {
       success: true,
-      result,
+      result: {
+        ...result,
+        materialized,
+      },
     };
   } catch (error) {
     console.error("[cloud.library] Failed to load cloud catalog:", error);

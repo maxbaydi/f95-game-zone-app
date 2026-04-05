@@ -222,6 +222,7 @@
     onF95DownloadsChanged: listen,
     onCloudAuthChanged: listenUnsub,
     onCloudBulkProgress: listenUnsub,
+    onGamesLibrarySynced: listenUnsub,
     onF95DownloadProgress: listen,
     getUniqueFilterOptions: () =>
       Promise.resolve({

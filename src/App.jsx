@@ -1197,6 +1197,30 @@ const App = () => {
     window.electronAPI.onDbUpdateProgress(handleDbUpdateProgress);
     window.electronAPI.onImportProgress(handleImportProgress);
     window.electronAPI.onGameImported(handleGameImported);
+    const handleGamesLibrarySynced = () => {
+      window.electronAPI
+        .getGames()
+        .then((allGames) => {
+          const gamesArray = Array.isArray(allGames) ? allGames : [];
+          setGames(gamesArray);
+          setTotalVersions(
+            gamesArray.reduce(
+              (sum, game) => sum + (game.versionCount || 0),
+              0,
+            ),
+          );
+        })
+        .catch((error) => {
+          console.error(
+            "Failed to refresh games after cloud library sync:",
+            error,
+          );
+        });
+    };
+    const unsubscribeGamesLibrarySynced =
+      typeof window.electronAPI.onGamesLibrarySynced === "function"
+        ? window.electronAPI.onGamesLibrarySynced(handleGamesLibrarySynced)
+        : null;
     window.electronAPI.onGameUpdated(handleGameUpdated);
     window.electronAPI.onImportComplete(handleImportComplete);
     window.electronAPI.onUpdateStatus(handleUpdateStatus);
@@ -1321,6 +1345,7 @@ const App = () => {
       window.electronAPI.onImportComplete(() => {});
       window.electronAPI.onUpdateStatus(() => {});
       window.electronAPI.removeAllListeners("f95-browser-navigation");
+      unsubscribeGamesLibrarySynced?.();
     };
   }, [refreshLibraryGrid]);
 

@@ -24,6 +24,7 @@ const {
   normalizeIdentityToken,
   resolveSaveProfileDestinationPath,
 } = require("./saveProfileStrategies");
+const { enrichSupabaseStorageError } = require("../shared/supabaseStorageErrors");
 
 function createTempPath(appPaths, name) {
   const targetPath = path.join(
@@ -56,33 +57,45 @@ function getArchiveRoot(profile, index) {
 
 function getRemotePaths(authUserId, cloudIdentity) {
   const remoteBase = `${authUserId}/${cloudIdentity}`;
+  const historyStamp = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
 
   return {
     remoteBase,
     latestArchivePath: `${remoteBase}/latest.zip`,
     latestManifestPath: `${remoteBase}/latest.manifest.json`,
-    historyArchivePath: `${remoteBase}/history/${Date.now()}.zip`,
+    historyArchivePath: `${remoteBase}/history/${historyStamp}.zip`,
   };
 }
 
 function getCloudLibraryRemotePaths(authUserId) {
   const remoteBase = `${authUserId}/library`;
+  const historyStamp = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
 
   return {
     remoteBase,
     latestManifestPath: `${remoteBase}/catalog.json`,
-    historyManifestPath: `${remoteBase}/history/${Date.now()}.json`,
+    historyManifestPath: `${remoteBase}/history/${historyStamp}.json`,
   };
 }
 
 function isStorageNotFoundError(error) {
-  const message = String(error?.message || "").toLowerCase();
+  if (!error) {
+    return false;
+  }
+
+  const message = String(error.message || "").toLowerCase();
+  const original = error.originalError;
+  const responseStatus =
+    original instanceof Response ? original.status : null;
 
   return (
-    error?.statusCode === 404 ||
-    error?.status === 404 ||
+    error.statusCode === 404 ||
+    error.status === 404 ||
+    responseStatus === 404 ||
     message.includes("not found") ||
-    message.includes("no such object")
+    message.includes("no such object") ||
+    message.includes("does not exist") ||
+    message.includes("object not found")
   );
 }
 
@@ -409,18 +422,19 @@ function createCloudSaveService({
       .download(remotePaths.latestManifestPath);
 
     if (downloadResult.error || !downloadResult.data) {
-      if (isStorageNotFoundError(downloadResult.error)) {
-        return {
-          exists: false,
-          manifest: null,
-          remotePaths,
-        };
+      if (downloadResult.error) {
+        const enriched = await enrichSupabaseStorageError(downloadResult.error);
+        if (isStorageNotFoundError(enriched)) {
+          return {
+            exists: false,
+            manifest: null,
+            remotePaths,
+          };
+        }
+        throw enriched;
       }
 
-      throw (
-        downloadResult.error ||
-        new Error("Failed to download cloud save manifest.")
-      );
+      throw new Error("Failed to download cloud save manifest.");
     }
 
     const manifest = JSON.parse(
@@ -441,18 +455,19 @@ function createCloudSaveService({
       .download(remotePaths.latestManifestPath);
 
     if (downloadResult.error || !downloadResult.data) {
-      if (isStorageNotFoundError(downloadResult.error)) {
-        return {
-          exists: false,
-          manifest: parseCloudLibraryCatalogManifest(null),
-          remotePaths,
-        };
+      if (downloadResult.error) {
+        const enriched = await enrichSupabaseStorageError(downloadResult.error);
+        if (isStorageNotFoundError(enriched)) {
+          return {
+            exists: false,
+            manifest: parseCloudLibraryCatalogManifest(null),
+            remotePaths,
+          };
+        }
+        throw enriched;
       }
 
-      throw (
-        downloadResult.error ||
-        new Error("Failed to download cloud library catalog.")
-      );
+      throw new Error("Failed to download cloud library catalog.");
     }
 
     const manifest = parseCloudLibraryCatalogManifest(
@@ -482,15 +497,22 @@ function createCloudSaveService({
         upsert: true,
       });
     if (uploadResult.error) {
-      throw uploadResult.error;
+      throw await enrichSupabaseStorageError(uploadResult.error);
     }
 
-    await bundle.client.storage
+    const historyUpload = await bundle.client.storage
       .from(bundle.settings.storageBucket)
       .upload(remotePaths.historyManifestPath, manifestBuffer, {
         contentType: "application/json",
         upsert: false,
       });
+    if (historyUpload.error) {
+      const historyErr = await enrichSupabaseStorageError(historyUpload.error);
+      console.warn(
+        "[cloud.library] History manifest upload skipped:",
+        historyErr.message,
+      );
+    }
 
     return {
       manifest,
@@ -538,7 +560,7 @@ function createCloudSaveService({
           upsert: true,
         });
       if (archiveUpload.error) {
-        throw archiveUpload.error;
+        throw await enrichSupabaseStorageError(archiveUpload.error);
       }
 
       const manifestUpload = await bundle.client.storage
@@ -548,15 +570,22 @@ function createCloudSaveService({
           upsert: true,
         });
       if (manifestUpload.error) {
-        throw manifestUpload.error;
+        throw await enrichSupabaseStorageError(manifestUpload.error);
       }
 
-      await bundle.client.storage
+      const historyArchive = await bundle.client.storage
         .from(bundle.settings.storageBucket)
         .upload(remotePaths.historyArchivePath, archiveBuffer, {
           contentType: "application/zip",
           upsert: false,
         });
+      if (historyArchive.error) {
+        const historyErr = await enrichSupabaseStorageError(historyArchive.error);
+        console.warn(
+          "[cloud.sync] History archive upload skipped:",
+          historyErr.message,
+        );
+      }
 
       const state = await upsertSaveSyncState({
         recordId,
@@ -577,10 +606,13 @@ function createCloudSaveService({
         syncState: state,
       };
     } catch (error) {
-      const normalizedError = getCloudSyncErrorDetails(error, {
-        action: "upload",
-        archiveBytes: archiveBuffer.length,
-      });
+      const normalizedError = getCloudSyncErrorDetails(
+        await enrichSupabaseStorageError(error),
+        {
+          action: "upload",
+          archiveBytes: archiveBuffer.length,
+        },
+      );
       console.error("[cloud.sync] Upload failed:", {
         code: normalizedError.code,
         rawMessage: normalizedError.rawMessage,
@@ -634,9 +666,9 @@ function createCloudSaveService({
         .from(bundle.settings.storageBucket)
         .download(remoteArchivePath);
       if (downloadResult.error || !downloadResult.data) {
-        throw (
+        throw await enrichSupabaseStorageError(
           downloadResult.error ||
-          new Error("Failed to download cloud save archive.")
+            new Error("Failed to download cloud save archive."),
         );
       }
 
@@ -725,9 +757,12 @@ function createCloudSaveService({
         syncState: state,
       };
     } catch (error) {
-      const normalizedError = getCloudSyncErrorDetails(error, {
-        action: "restore",
-      });
+      const normalizedError = getCloudSyncErrorDetails(
+        await enrichSupabaseStorageError(error),
+        {
+          action: "restore",
+        },
+      );
       console.error("[cloud.sync] Restore failed:", {
         code: normalizedError.code,
         rawMessage: normalizedError.rawMessage,

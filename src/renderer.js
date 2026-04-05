@@ -275,6 +275,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("cloud-bulk-progress", listener);
     return () => ipcRenderer.removeListener("cloud-bulk-progress", listener);
   },
+  onGamesLibrarySynced: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("games-library-synced", listener);
+    return () => ipcRenderer.removeListener("games-library-synced", listener);
+  },
   onF95DownloadProgress: (callback) =>
     ipcRenderer.on("f95-download-progress", (event, payload) =>
       callback(payload),
