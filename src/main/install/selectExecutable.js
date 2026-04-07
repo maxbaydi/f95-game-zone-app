@@ -25,6 +25,46 @@ function compactToken(value) {
     .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+function compareVersionParts(leftParts, rightParts) {
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+    if (leftPart !== rightPart) {
+      return leftPart - rightPart;
+    }
+  }
+
+  return 0;
+}
+
+function extractVersionParts(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/\\/g, "/");
+  const versionPattern = /(?:^|[^a-z0-9])v?(\d+(?:[._-]\d+){1,5})(?=[^a-z0-9]|$)/g;
+  const candidates = [];
+  let match = null;
+
+  while ((match = versionPattern.exec(normalized))) {
+    const parts = String(match[1] || "")
+      .split(/[._-]+/)
+      .map((entry) => Number.parseInt(entry, 10))
+      .filter((entry) => Number.isFinite(entry));
+
+    if (parts.length > 0) {
+      candidates.push(parts);
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return candidates.sort((left, right) => compareVersionParts(right, left))[0];
+}
+
 function scoreExecutable(relativePath, context = {}) {
   const normalizedPath = String(relativePath || "").replace(/\\/g, "/");
   const extension = path.posix.extname(normalizedPath).toLowerCase();
@@ -91,11 +131,26 @@ function selectPreferredExecutable(executables, context = {}) {
       return scoreDifference;
     }
 
+    const leftVersion = extractVersionParts(left);
+    const rightVersion = extractVersionParts(right);
+
+    if (leftVersion && rightVersion) {
+      const versionDifference = compareVersionParts(rightVersion, leftVersion);
+      if (versionDifference !== 0) {
+        return versionDifference;
+      }
+    } else if (!leftVersion && rightVersion) {
+      return 1;
+    } else if (leftVersion && !rightVersion) {
+      return -1;
+    }
+
     return String(left).localeCompare(String(right));
   })[0];
 }
 
 module.exports = {
+  extractVersionParts,
   scoreExecutable,
   selectPreferredExecutable,
 };

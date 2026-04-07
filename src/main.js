@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
@@ -13,6 +13,7 @@ const { resolveArchiveContentRoot } = require("./main/install/archiveLayout");
 const {
   selectPreferredExecutable,
 } = require("./main/install/selectExecutable");
+const { getErrorMessage } = require("./main/errorMessage");
 const {
   clearF95Session,
   createF95BrowserWindow,
@@ -161,16 +162,65 @@ const f95InstallContexts = new Map();
 const f95DownloadsStore = createDownloadsStore();
 let f95DownloadSequence = 0;
 
+const MAIN_WINDOW_DEFAULT_WIDTH = 1280;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 800;
+const MAIN_WINDOW_MIN_WIDTH = 1024;
+const MAIN_WINDOW_MIN_HEIGHT = 680;
+const MAIN_WINDOW_EDGE_PADDING = 48;
+const MAIN_WINDOW_SAFE_MIN_WIDTH = 900;
+const MAIN_WINDOW_SAFE_MIN_HEIGHT = 620;
+
 // ────────────────────────────────────────────────
 // WINDOW CREATION FUNCTIONS
 // ────────────────────────────────────────────────
 
+function resolveMainWindowBounds() {
+  const workArea =
+    screen.getPrimaryDisplay()?.workAreaSize || {
+      width: MAIN_WINDOW_DEFAULT_WIDTH,
+      height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    };
+  const screenWidth = Math.max(
+    Number(workArea.width) || MAIN_WINDOW_DEFAULT_WIDTH,
+    MAIN_WINDOW_SAFE_MIN_WIDTH,
+  );
+  const screenHeight = Math.max(
+    Number(workArea.height) || MAIN_WINDOW_DEFAULT_HEIGHT,
+    MAIN_WINDOW_SAFE_MIN_HEIGHT,
+  );
+  const maxWidth = Math.max(
+    MAIN_WINDOW_SAFE_MIN_WIDTH,
+    screenWidth - MAIN_WINDOW_EDGE_PADDING,
+  );
+  const maxHeight = Math.max(
+    MAIN_WINDOW_SAFE_MIN_HEIGHT,
+    screenHeight - MAIN_WINDOW_EDGE_PADDING,
+  );
+  const width = Math.max(
+    MAIN_WINDOW_SAFE_MIN_WIDTH,
+    Math.min(MAIN_WINDOW_DEFAULT_WIDTH, maxWidth),
+  );
+  const height = Math.max(
+    MAIN_WINDOW_SAFE_MIN_HEIGHT,
+    Math.min(MAIN_WINDOW_DEFAULT_HEIGHT, maxHeight),
+  );
+
+  return {
+    width,
+    height,
+    minWidth: Math.min(MAIN_WINDOW_MIN_WIDTH, width),
+    minHeight: Math.min(MAIN_WINDOW_MIN_HEIGHT, height),
+  };
+}
+
 function createWindow() {
+  const mainWindowBounds = resolveMainWindowBounds();
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 720,
-    minWidth: 1400,
-    minHeight: 720,
+    width: mainWindowBounds.width,
+    height: mainWindowBounds.height,
+    minWidth: mainWindowBounds.minWidth,
+    minHeight: mainWindowBounds.minHeight,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -1390,6 +1440,7 @@ async function finalizeF95DownloadedPackage({
       fileName: path.basename(targetPath),
     });
   } catch (error) {
+    const errorMessage = getErrorMessage(error, "Unknown install error.");
     console.error(
       "[f95.download] Failed to install downloaded package:",
       error,
@@ -1400,15 +1451,15 @@ async function finalizeF95DownloadedPackage({
     f95DownloadsStore.fail(context.id, {
       title: context.metadata.title,
       fileName: path.basename(targetPath),
-      text: `Install failed for ${context.metadata.title}: ${error.message}`,
+      text: `Install failed for ${context.metadata.title}: ${errorMessage}`,
       totalBytes: totalBytes || 0,
       receivedBytes: receivedBytes || 0,
-      error: error.message,
+      error: errorMessage,
     });
     broadcastF95Downloads();
     sendF95DownloadProgress({
       phase: "error",
-      text: `Install failed for ${context.metadata.title}: ${error.message}`,
+      text: `Install failed for ${context.metadata.title}: ${errorMessage}`,
       percent: 100,
       totalBytes: totalBytes || 0,
       receivedBytes: receivedBytes || 0,
@@ -1599,6 +1650,7 @@ async function startDirectF95Download(context, preparedDownload) {
       },
     });
   } catch (error) {
+    const errorMessage = getErrorMessage(error, "Unknown download error.");
     console.error("[f95.download] Direct session download failed:", error);
     if (targetPath) {
       await fs.promises.unlink(targetPath).catch(() => {});
@@ -1607,15 +1659,15 @@ async function startDirectF95Download(context, preparedDownload) {
     f95DownloadsStore.fail(context.id, {
       title: context.metadata.title,
       fileName: targetPath ? path.basename(targetPath) : "",
-      text: `Download failed for ${context.metadata.title}: ${error.message}`,
+      text: `Download failed for ${context.metadata.title}: ${errorMessage}`,
       totalBytes,
       receivedBytes,
-      error: error.message,
+      error: errorMessage,
     });
     broadcastF95Downloads();
     sendF95DownloadProgress({
       phase: "error",
-      text: `Download failed for ${context.metadata.title}: ${error.message}`,
+      text: `Download failed for ${context.metadata.title}: ${errorMessage}`,
       percent: 0,
       totalBytes,
       receivedBytes,
@@ -2758,7 +2810,10 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
     }
     return {
       success: false,
-      error: error.message || "Failed to resolve the selected mirror.",
+      error: getErrorMessage(
+        error,
+        "Failed to resolve the selected mirror.",
+      ),
     };
   }
 
@@ -2800,17 +2855,18 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
       sourceHost: preparedDownload.sourceHost,
     };
   } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to start download.");
     removeF95InstallContext(context);
     f95DownloadsStore.fail(context.id, {
       title: context.metadata.title,
       text: `Failed to start download for ${context.metadata.title}`,
-      error: error.message,
+      error: errorMessage,
     });
     broadcastF95Downloads();
 
     return {
       success: false,
-      error: error.message,
+      error: errorMessage,
     };
   }
 });

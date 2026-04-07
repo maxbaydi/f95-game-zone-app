@@ -6,7 +6,7 @@ const path = require("path");
 const cp = require("child_process");
 const { pipeline } = require("stream/promises");
 const AdmZip = require("adm-zip");
-const Seven = require("node-7z");
+const sevenZipBin = require("7zip-bin");
 const Unrar = require("unrar");
 
 /**
@@ -184,30 +184,82 @@ async function extractZipArchiveWithPowerShell(archivePath, destinationPath) {
 }
 
 /**
+ * @param {string[]} args
+ * @returns {Promise<string>}
+ */
+async function runBundled7zCommand(args) {
+  const binaryPath = sevenZipBin.path7za;
+
+  if (!binaryPath || !fs.existsSync(binaryPath)) {
+    throw new Error(
+      "Bundled 7-Zip binary is unavailable. Reinstall dependencies to restore node_modules/7zip-bin.",
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = cp.spawn(binaryPath, args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      reject(
+        new Error(
+          `Failed to launch bundled 7-Zip binary: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+
+      const normalizedStderr = stderr.trim();
+      const normalizedStdout = stdout.trim();
+      const detail = normalizedStderr || normalizedStdout;
+      reject(
+        new Error(
+          detail
+            ? `7-Zip command failed (exit ${code ?? "unknown"}): ${detail}`
+            : `7-Zip command failed with exit code ${code ?? "unknown"}.`,
+        ),
+      );
+    });
+  });
+}
+
+/**
  * @param {string} archivePath
  * @returns {Promise<string[]>}
  */
 async function list7zEntries(archivePath) {
-  return new Promise((resolve, reject) => {
-    const archive = new Seven();
-    const names = new Set();
+  const stdout = await runBundled7zCommand(["l", "-slt", "-ba", archivePath]);
+  const entries = new Set();
 
-    archive
-      .list(archivePath)
-      .progress((entries) => {
-        if (!Array.isArray(entries)) {
-          return;
-        }
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.startsWith("Path = ")) {
+      continue;
+    }
 
-        for (const entry of entries) {
-          if (entry?.name) {
-            names.add(entry.name);
-          }
-        }
-      })
-      .then(() => resolve([...names]))
-      .catch(reject);
-  });
+    const entryName = line.slice("Path = ".length).trim();
+    if (!entryName) {
+      continue;
+    }
+
+    entries.add(entryName.replace(/\\/g, "/"));
+  }
+
+  return [...entries];
 }
 
 /**
@@ -262,14 +314,7 @@ async function listArchiveEntries(archivePath) {
  * @param {string} destinationPath
  */
 async function extract7zArchive(archivePath, destinationPath) {
-  return new Promise((resolve, reject) => {
-    const archive = new Seven();
-
-    archive
-      .extractFull(archivePath, destinationPath)
-      .then(resolve)
-      .catch(reject);
-  });
+  await runBundled7zCommand(["x", "-y", `-o${destinationPath}`, archivePath]);
 }
 
 /**

@@ -34,3 +34,17 @@ test("resolveArchiveContentRoot keeps the root when archive already contains dir
 
   assert.equal(resolved, root);
 });
+
+test("resolveArchiveContentRoot unwraps when root has one game folder plus auxiliary docs", async () => {
+  const root = makeTempDir();
+  const nested = path.join(root, "Apartment69-0.12-pc");
+
+  fs.mkdirSync(path.join(nested, "game"), { recursive: true });
+  fs.writeFileSync(path.join(nested, "Apartment69.exe"), "");
+  fs.writeFileSync(path.join(root, "README.txt"), "Install notes");
+  fs.writeFileSync(path.join(root, "changelog.md"), "v0.12 fixes");
+
+  const resolved = await resolveArchiveContentRoot(root);
+
+  assert.equal(resolved, nested);
+});

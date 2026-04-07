@@ -936,7 +936,7 @@ const F95BrowserWorkspace = () => {
 
         {threadInfo && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6">
-            <div className="max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
+            <div className="max-h-[80vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
               <div className="border-b border-border px-6 py-4">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
                   Thread Install
@@ -954,49 +954,12 @@ const F95BrowserWorkspace = () => {
               </div>
 
               <div className="max-h-[50vh] overflow-y-auto px-6 py-5">
-              <div className="mb-4 text-sm text-text/70">
-                  Choose the file you want to queue. F95 Game Zone App now groups links by
-                  platform and skips unrelated URLs so this list stops turning
-                  into a random wall of external links.
-                </div>
-                <div className="space-y-5">
-                  {(Array.isArray(threadInfo.variants) &&
-                  threadInfo.variants.length > 0
-                    ? threadInfo.variants
-                    : [{ label: "Downloads", links: threadInfo.links }]
-                  ).map((variant) => (
-                    <div key={`${variant.id || "group"}-${variant.label}`}>
-                      <div className="mb-2 text-[11px] uppercase tracking-[0.18em] text-text/55">
-                        {variant.label}
-                      </div>
-                      <div className="space-y-3">
-                        {(variant.links || []).map((link) => (
-                          <button
-                            key={link.url}
-                            onClick={() => startInstall(threadInfo, link)}
-                            disabled={isStartingInstall}
-                            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-secondary/40 px-4 py-4 text-left transition-colors hover:bg-selected disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium text-text">
-                                {link.label || link.host}
-                              </div>
-                              <div
-                                className="mt-1 truncate text-xs text-text/55"
-                                title={link.url}
-                              >
-                                {link.url}
-                              </div>
-                            </div>
-                            <div className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-text">
-                              {link.host}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <window.F95MirrorColumns
+                  variants={threadInfo.variants}
+                  links={threadInfo.links}
+                  onSelectLink={(link) => startInstall(threadInfo, link)}
+                  disabled={isStartingInstall}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">

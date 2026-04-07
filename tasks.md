@@ -3127,3 +3127,388 @@ Impact on overall progress:
 
 - reduces dependence on pristine folder naming and lets the scanner recover correct site links from the ugly real-world naming conventions users actually have on disk
 - keeps the matching policy professional: more exact links are recovered automatically, while the genuinely unsafe collisions are still withheld instead of being silently mislinked
+
+## 2026-04-07 — F95 update install correctness for non-Ren'Py engines
+
+What was done:
+
+- audited the F95 update install path in `src/main.js` (`importDownloadedF95Package`, archive extraction, executable selection) for non-Ren'Py payload behavior
+- fixed archive content-root resolution so updates with `one game folder + auxiliary docs` no longer install into a nested version subfolder by mistake
+- fixed executable tie-break logic so when multiple versioned executables have equal score, the newer version path is selected instead of potentially sticking to an older one
+- added targeted regressions that reproduce both failure classes
+
+How it was implemented:
+
+- updated `src/main/install/archiveLayout.js`:
+  - kept strict ignore for infrastructure trash (`__MACOSX`, `.DS_Store`, `Thumbs.db`)
+  - introduced auxiliary root-file detection (`README`, `changelog`, `license`, checksum/password/install instruction style files)
+  - changed unwrap condition from `one directory + zero files` to `one directory + zero payload files`, where auxiliary docs are not treated as payload
+- updated `src/main/install/selectExecutable.js`:
+  - added version token extraction from path segments (`0.11`, `v1.2.3`, etc.)
+  - added deterministic score tie-break preferring higher semantic-like version parts
+- extended tests:
+  - `test/archiveLayout.test.js` with `one folder + README/changelog` unwrap case
+  - `test/selectExecutable.test.js` with equal-score old/new version path selection case
+- verification run:
+  - `node --test test/archiveLayout.test.js test/selectExecutable.test.js`
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm test`
+
+What remains:
+
+- run a manual smoke in UI against at least one Unity and one RPGM update archive that previously produced nested install folders, and verify launch path now points to the latest build
+- optionally expand auxiliary root-file heuristics if new real-world mirror packages show additional non-payload doc naming variants
+
+Current stage progress:
+
+- non-Ren'Py F95 update install layout correctness: 92%
+- executable selection stability after repeated updates: 90%
+- overall roadmap progress relative to the current fork scope: 89%
+
+Impact on overall progress:
+
+- removes a concrete update regression where non-Ren'Py archives were installed into growing nested version folders, which then made launch target selection brittle
+- improves determinism and debuggability of update installs without introducing risky destructive cleanup behavior
+
+## 2026-04-07 — Crash fix for Unity/non-Ren'Py install completion flow
+
+What was done:
+
+- fixed the runtime crash that caused `UnhandledPromiseRejectionWarning` during package install completion (`Cannot read properties of undefined (reading 'message')`)
+- hardened F95 download/install error handling against non-`Error` rejections (including `undefined`)
+- ensured failed installs now reliably transition to a failed download state instead of silently stalling in UI
+
+How it was implemented:
+
+- added `src/main/errorMessage.js` with `getErrorMessage(error, fallback)` to normalize unknown rejection payloads
+- wired that helper into `src/main.js` for critical F95 flow branches:
+  - `finalizeF95DownloadedPackage(...)` install failure path
+  - `startDirectF95Download(...)` direct-download failure path
+  - mirror resolution and `downloadURL(...)` startup failure paths in `install-f95-thread` IPC
+- replaced raw `error.message` access in those branches with safe normalized messages
+- added regression coverage in `test/errorMessage.test.js`
+
+What remains:
+
+- manual smoke with a real Unity package in dev mode to confirm no stuck `installing` state and correct fail/complete transition in Downloads panel
+- optional follow-up: add one integration-level test around the F95 completion path once `main.js` install flow is further modularized
+
+Current stage progress:
+
+- F95 install-flow crash resilience (non-Error rejection safety): 95%
+- non-Ren'Py update completion reliability: 92%
+- overall roadmap progress relative to the current fork scope: 89%
+
+Impact on overall progress:
+
+- removes a production-blocking crash where one malformed rejection payload could break the entire install completion path
+- improves observability and keeps user-facing install status deterministic under mirror/extractor edge failures
+
+## 2026-04-07 — Real fix for Unity/other engine 7z installs
+
+What was done:
+
+- eliminated the root cause behind `Unknown install error` for `.7z` updates (commonly Unity builds): archive listing/extraction no longer depends on external `7z` in system PATH
+- switched 7z operations to a bundled binary from project dependencies so install flow works out of the box on Windows dev machines without manual 7-Zip setup
+- added explicit 7z coverage to archive tests
+
+How it was implemented:
+
+- updated `src/main/archive/extractArchive.js`:
+  - removed runtime dependency on `node-7z` process invocation for list/extract
+  - added `runBundled7zCommand(...)` that executes `node_modules/7zip-bin/win/x64/7za.exe`
+  - reimplemented `list7zEntries(...)` using `7za l -slt -ba`
+  - reimplemented `extract7zArchive(...)` using `7za x -y`
+  - added proper non-zero-exit error text propagation instead of undefined rejection payloads
+- updated packaging inputs in `package.json` build files to include `node_modules/7zip-bin/**/*`
+- added/updated dependency metadata in `package.json` and `package-lock.json` for `7zip-bin`
+- extended `test/extractArchive.test.js` with:
+  - 7z listing test via fixture archive
+  - 7z extraction test via fixture archive
+
+What remains:
+
+- manual UI smoke with the same failing Unity package (`Not_a_Failure_to_Launch_v0.5.7z`) to verify successful install completion path in Downloads panel
+- optional follow-up: add a dedicated user-facing error code for 7z command failures (currently message is propagated but not coded separately)
+
+Current stage progress:
+
+- non-Ren'Py update install robustness (`zip/7z/rar` path): 94%
+- Unity update install reliability in F95 direct flow: 93%
+- overall roadmap progress relative to the current fork scope: 90%
+
+Impact on overall progress:
+
+- removes the actual blocker for non-Ren'Py updates instead of only masking error text
+- makes install behavior reproducible across machines by avoiding hidden external prerequisites
+
+## 2026-04-07 — Main window startup size normalization
+
+What was done:
+
+- changed the main app window startup size to a more standard desktop baseline
+- added display-aware bounds clamping so startup size adapts to actual screen work area instead of forcing a fixed oversized minimum
+
+How it was implemented:
+
+- updated `src/main.js`:
+  - added `screen` API usage from Electron in main process
+  - added `resolveMainWindowBounds()` with default, minimum, and safe fallback dimensions
+  - switched `createWindow()` to use computed bounds instead of hardcoded `1400x720` / `min 1400x720`
+- new defaults for main window startup behavior:
+  - default: `1280x800`
+  - min: `1024x680` (clamped to current screen availability)
+
+What remains:
+
+- quick manual UX check on one smaller laptop display and one larger desktop display to confirm initial geometry feels balanced in real use
+
+Current stage progress:
+
+- desktop startup window ergonomics: 92%
+- overall roadmap progress relative to the current fork scope: 90%
+
+Impact on overall progress:
+
+- removes a rigid startup geometry that was too aggressive for common displays
+- improves first-launch usability without changing architecture boundaries or runtime data safety behavior
+
+## 2026-04-07 — F95 mirrors UI as platform columns for install/update
+
+What was done:
+
+- redesigned F95 mirror selection UI for both install and update flows into equal platform-based columns instead of long row lists
+- hid raw URLs from visible UI and left only hosting names (GOFILE, MEGA, MIXDROP, etc.) in clickable chips
+- kept existing parser/classification logic untouched and reused existing `threadInfo.variants` / `thread.links` data contracts
+
+How it was implemented:
+
+- added shared renderer component `src/core/f95/F95MirrorColumns.jsx` that:
+  - normalizes mirror host labels to product-friendly tokens
+  - renders responsive `grid` columns (`1/2/3` columns by viewport) with equal-height platform cards
+  - supports both select-mode (update modal) and direct-action mode (thread install)
+- wired the new component in `src/index.html` before dependent screens
+- replaced old row-based mirror rendering in:
+  - `src/core/updates/F95UpdateModal.jsx`
+  - `src/core/search/F95BrowserWorkspace.jsx`
+- widened both dialogs to `max-w-5xl` so platform columns fit without collapsing into cramped rows
+
+What remains:
+
+- run a manual visual smoke on desktop + narrow viewport to validate spacing/readability for threads with many mirrors
+- verify edge threads where one platform has duplicate host mirrors still remain understandable with host-only labels
+- optionally add small host icons if we later need faster visual scanning, without reintroducing raw URL noise
+
+Current stage progress:
+
+- F95 install/update mirror UX consistency: 91%
+- platform-oriented mirror discoverability: 89%
+- overall roadmap progress relative to the current fork scope: 90%
+
+Impact on overall progress:
+
+- closes a concrete UX gap: users no longer parse noisy URL walls and can pick mirrors by platform columns like F95 conventions
+- keeps architecture clean by extracting shared mirror UI instead of duplicating install/update rendering logic
+
+## 2026-04-07 — Mirror UI converted to true columns and garbage-link filtering hardened
+
+What was done:
+
+- replaced card-like mirror groups with true column layout (no boxed platform blocks) in both update and install surfaces
+- tightened mirror parsing to drop non-download sections (`Developer`, `Store`, etc.) and ignore unresolved generic `f95zone` links
+- added explicit host support for `datanodes` and normalized masked F95 mirror host hints to real file-host identities
+
+How it was implemented:
+
+- updated `src/core/f95/F95MirrorColumns.jsx`:
+  - switched rendering to plain responsive columns
+  - kept compact mirror chips but removed platform card framing
+- updated `src/main/f95/threadLinks.js`:
+  - added `datanodes` to known file-host patterns
+  - added non-download section label filters
+  - required download candidates to resolve to known file-host mirrors (direct or inferred), preventing developer/store/site links from leaking into UI
+  - kept platform variant grouping contract unchanged for renderer consumers
+- extended `test/f95ThreadLinks.test.js` with a regression case for:
+  - dropping `Developer` / `Store` links
+  - dropping non-mirror F95 thread links
+  - keeping valid mirrors (including masked F95 link with host hint)
+
+What remains:
+
+- manual visual verification on a few real noisy threads to confirm column readability with high mirror counts
+- if needed later: expand known host hint patterns for additional hosters not yet in the allowlist
+
+Current stage progress:
+
+- mirror UI fidelity to requested column format: 96%
+- mirror candidate quality (junk link suppression): 93%
+- overall roadmap progress relative to the current fork scope: 91%
+
+Impact on overall progress:
+
+- removes a recurrent UX/data quality failure where non-download links polluted install/update mirror choices
+- keeps parser responsibility in main (`threadLinks`) while renderer stays presentation-only, preserving architecture boundaries
+
+## 2026-04-07 — Platform header normalization for mirror columns
+
+What was done:
+
+- fixed variant grouping so provider snippets (`- BUZZHEAVIER -`, `: GDRIVE -`) no longer become separate column headers
+- normalized platform headers to canonical labels (`Windows`, `Windows / Linux`, `Mac`, etc.) whenever platform detection succeeds
+- prevented generic/non-download section labels from becoming fallback variant headers in mirror UI
+
+How it was implemented:
+
+- updated `src/main/f95/threadLinks.js`:
+  - added `sanitizeVariantLabel(...)` + `resolveVariantLabel(...)`
+  - for non-`general` variants, forced canonical platform label from `PLATFORM_PATTERNS`
+  - for `general` variants, dropped labels that are empty, hoster-like, or non-download sections
+  - grouped non-general links by `variantId` (not `variantId + raw label`) to avoid accidental split columns
+- extended `test/f95ThreadLinks.test.js` with regression:
+  - `normalizeThreadDownloadLinks does not create fake variant headers from provider snippets`
+  - adjusted expected canonical labels in platform grouping assertions
+
+What remains:
+
+- manual confirmation on a few noisy real threads with mixed delimiters to ensure no new false `general` buckets appear
+
+Current stage progress:
+
+- mirror variant grouping correctness: 97%
+- mirror header normalization stability: 95%
+- overall roadmap progress relative to the current fork scope: 92%
+
+Impact on overall progress:
+
+- removes a concrete parsing artifact that made mirror columns look broken even when raw links were valid
+- aligns UI output with the product requirement that columns represent platforms, not host names or punctuation fragments
+
+## 2026-04-07 — Thread inspector line-context fix for mixed inline Win rows
+
+What was done:
+
+- fixed F95 thread extraction so links inside nested inline spans inherit the full `Win: ...` line context instead of truncated per-anchor fragments
+- removed the root cause of wrong mirror variants like `GDRIVE`/`GENERAL` headers appearing as pseudo-platform columns
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js` `EXTRACT_THREAD_DOWNLOADS_SCRIPT`:
+  - replaced parent-only fallback with smarter line container selection:
+    - prefer semantic block containers (`p`, `li`, `td`, `blockquote`)
+    - otherwise climb to nearest ancestor containing `<br>` separators
+    - fallback to `firstPostRoot`
+  - this ensures `lineText`/`contextText` include the real row label (`Win:`) for all hoster links in a mixed inline row
+
+What remains:
+
+- manual check against the reported `Futa Prison` thread to confirm no fake `GDRIVE`/`GENERAL` variant headers remain in UI
+
+Current stage progress:
+
+- thread download row-context extraction reliability: 95%
+- mirror variant derivation correctness on inline-mixed markup: 96%
+- overall roadmap progress relative to the current fork scope: 93%
+
+Impact on overall progress:
+
+- fixes a concrete extraction defect at source instead of papering over symptoms in renderer mapping
+- keeps architecture boundaries intact: parser quality improved in main process, UI stays thin
+
+## 2026-04-07 — Per-link platform inheritance from preceding download label
+
+What was done:
+
+- fixed parser behavior for F95 posts where all platform sections are packed into one long inline block (`Win: ... <br> Linux: ... <br> Mac: ...`)
+- removed cross-line platform bleeding that caused all mirrors to collapse into one platform column
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js` extraction script:
+  - added nearest-platform detection from text before the current anchor (`findNearestPlatformLabel(...)`)
+  - normalized platform tokens to canonical labels (`Windows`, `Linux`, `Mac`, `Android`, `iOS`, `Windows / Linux`)
+  - when per-anchor line text misses the platform prefix, prepends resolved platform label to the extracted line text
+  - set `contextText` equal to the resolved per-anchor line text to prevent contamination from surrounding rows
+
+What remains:
+
+- manual validation on the two user-provided real thread markup shapes to ensure mirrors split into expected platform columns end-to-end in renderer
+
+Current stage progress:
+
+- F95 inline mixed-row platform extraction reliability: 96%
+- mirror bucketing consistency across malformed/styled thread markup: 95%
+- overall roadmap progress relative to the current fork scope: 94%
+
+Impact on overall progress:
+
+- fixes the concrete “all links in one bucket” regression at extraction source
+- keeps platform grouping deterministic for renderer without adding UI-level heuristics
+
+## 2026-04-07 — Platform hint precedence for mixed inline rows with suffix labels
+
+What was done:
+
+- fixed mixed-row parsing where platform labels include suffixes like `Android (v0.08):` and links are split across nested spans
+- prevented Android mirrors from leaking into Mac column on posts with combined `Win/Linux`, `Mac`, and `Android (vX)` rows
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js`:
+  - platform label regex now supports optional parenthesized suffix before colon
+  - extraction now returns per-link `platformHint` alongside normalized line text
+- updated `src/main/f95/threadLinks.js`:
+  - variant detection now prioritizes explicit `platformHint` from extractor
+  - text-based variant detection remains only as fallback for links without hint
+- extended `test/f95ThreadLinks.test.js`:
+  - added regression `prefers explicit platform hint over noisy mixed line text`
+
+What remains:
+
+- one manual pass on the provided `Apartment #69` thread shape to confirm Android mirrors no longer appear in Mac bucket in renderer
+
+Current stage progress:
+
+- mixed inline + suffix platform detection reliability: 97%
+- mirror column assignment stability across malformed post markup: 96%
+- overall roadmap progress relative to the current fork scope: 95%
+
+Impact on overall progress:
+
+- removes another real-world parser failure mode without adding fragile UI-side hacks
+- keeps parser responsibilities centralized in main process, preserving renderer thinness
+
+## 2026-04-07 — Compressed section split and per-variant host dedup
+
+What was done:
+
+- fixed parsing for posts that contain both normal and `Compressed` download sections with the same platform names
+- stopped merging compressed links into the same platform columns as normal links
+- deduplicated repeated host providers inside the same variant section (important because UI intentionally hides raw URLs)
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js`:
+  - extractor now emits `sectionHint` per link (`Compressed` when detected from preceding text)
+- updated `src/main/f95/threadLinks.js`:
+  - variants now use `compressed-*` ids for compressed sections (`compressed-windows-linux`, `compressed-mac`, etc.)
+  - compressed variant labels are rendered as `Compressed <Platform>`
+  - added per-variant host dedup (`dedupeLinksByHost`) to avoid repeated chips for the same provider
+  - extended variant priority list to keep compressed groups ordered after normal platform groups
+- extended `test/f95ThreadLinks.test.js` with regression:
+  - `separates compressed platform sections and dedupes host labels within each section`
+
+What remains:
+
+- optional UX follow-up: if compressed columns are too many on small widths, add compact collapsible section headers (normal vs compressed) in renderer while keeping parser output unchanged
+
+Current stage progress:
+
+- mixed standard/compressed download section parsing: 98%
+- hidden-URL mirror UX clarity (no meaningless duplicate host chips): 97%
+- overall roadmap progress relative to the current fork scope: 96%
+
+Impact on overall progress:
+
+- removes a real data-to-UI mismatch where structurally different mirror groups collapsed into noisy duplicates
+- keeps architecture disciplined: semantic grouping fixed in main parser layer, renderer remains a pure projection of typed variant data

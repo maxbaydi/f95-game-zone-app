@@ -37,6 +37,68 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     "wolf rpg",
   ];
   const ignoredBracketTokens = new Set(ignoredTitlePrefixes);
+  const platformMatchPattern =
+    /\b(win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux|win(?:dows)?|pc|linux|mac(?:os)?|osx|android|ios)\b(?:\s*\([^)]*\))?\s*:/gi;
+
+  const normalizePlatformLabel = (rawValue) => {
+    const token = cleanText(rawValue).toLowerCase();
+    if (!token) {
+      return "";
+    }
+
+    if (
+      /win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux/i.test(
+        token,
+      )
+    ) {
+      return "Windows / Linux";
+    }
+    if (/^(win(?:dows)?|pc)$/i.test(token)) {
+      return "Windows";
+    }
+    if (/^linux$/i.test(token)) {
+      return "Linux";
+    }
+    if (/^(mac|macos|osx)$/i.test(token)) {
+      return "Mac";
+    }
+    if (/^android$/i.test(token)) {
+      return "Android";
+    }
+    if (/^ios$/i.test(token)) {
+      return "iOS";
+    }
+    return "";
+  };
+
+  const findNearestPlatformLabel = (beforeText) => {
+    const normalizedBefore = String(beforeText || "");
+    if (!normalizedBefore) {
+      return "";
+    }
+
+    let matchedLabel = "";
+    let match = platformMatchPattern.exec(normalizedBefore);
+    while (match) {
+      matchedLabel = normalizePlatformLabel(match[1] || "");
+      match = platformMatchPattern.exec(normalizedBefore);
+    }
+    platformMatchPattern.lastIndex = 0;
+    return matchedLabel;
+  };
+
+  const findSectionHint = (beforeText) => {
+    const normalizedBefore = cleanText(beforeText);
+    if (!normalizedBefore) {
+      return "";
+    }
+
+    if (/\bcompressed\b/i.test(normalizedBefore)) {
+      return "Compressed";
+    }
+
+    return "";
+  };
 
   const stripLeadingNoisePrefixes = (value) => {
     let result = cleanText(value);
@@ -154,21 +216,42 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
   const links = [];
   const anchors = Array.from(firstPostRoot.querySelectorAll("a[href]"));
 
-  const getLineContainer = (anchor) =>
-    anchor.closest("p, li, td, blockquote") || anchor.parentElement;
+  const hasLineBreakDescendant = (node) =>
+    Boolean(node?.querySelector && node.querySelector("br"));
 
-  const getLineText = (anchor) => {
+  const getLineContainer = (anchor) => {
+    const blockContainer = anchor.closest("p, li, td, blockquote");
+    if (blockContainer) {
+      return blockContainer;
+    }
+
+    let node = anchor.parentElement;
+    while (node && node !== firstPostRoot) {
+      if (hasLineBreakDescendant(node)) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+
+    return firstPostRoot;
+  };
+
+  const getLinkLineContext = (anchor) => {
     const lineContainer = getLineContainer(anchor);
     if (!lineContainer) {
-      return cleanText(anchor.innerText || anchor.textContent || "");
+      return {
+        lineText: cleanText(anchor.innerText || anchor.textContent || ""),
+        platformLabel: "",
+      };
     }
 
     try {
       const beforeRange = document.createRange();
       beforeRange.selectNodeContents(lineContainer);
       beforeRange.setEndBefore(anchor);
+      const beforeRawText = beforeRange.toString();
       const beforeText =
-        cleanText(beforeRange.toString().split(/\n+/).pop() || "") || "";
+        cleanText(beforeRawText.split(/\n+/).pop() || "") || "";
 
       const afterRange = document.createRange();
       afterRange.selectNodeContents(lineContainer);
@@ -176,15 +259,35 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
       const afterText =
         cleanText(afterRange.toString().split(/\n+/)[0] || "") || "";
 
-      return cleanText(
+      let resolvedLineText = cleanText(
         beforeText +
           " " +
           cleanText(anchor.innerText || anchor.textContent || "") +
           " " +
           afterText,
       );
+      const platformLabel = findNearestPlatformLabel(beforeRawText);
+      if (
+        platformLabel &&
+        !new RegExp(
+          "\\b" + platformLabel.replace(/[.*+?^{}()|[\]\\$]/g, "\\$&") + "\\b",
+          "i",
+        ).test(resolvedLineText)
+      ) {
+        resolvedLineText = cleanText(platformLabel + ": " + resolvedLineText);
+      }
+
+      return {
+        lineText: resolvedLineText,
+        platformLabel,
+        sectionHint: findSectionHint(beforeRawText),
+      };
     } catch {
-      return cleanText(lineContainer.innerText || lineContainer.textContent || "");
+      return {
+        lineText: cleanText(lineContainer.innerText || lineContainer.textContent || ""),
+        platformLabel: "",
+        sectionHint: "",
+      };
     }
   };
 
@@ -204,17 +307,17 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     if (!isDownloadCandidate) {
       continue;
     }
+    const lineContext = getLinkLineContext(anchor);
+    const lineText = lineContext.lineText;
     links.push({
       url: resolvedUrl.href,
       label:
         cleanText(anchor.innerText || anchor.textContent) || resolvedUrl.hostname,
       host: resolvedUrl.hostname,
-      lineText: getLineText(anchor),
-      contextText: cleanText(
-        getLineContainer(anchor)?.innerText ||
-        getLineContainer(anchor)?.textContent ||
-          "",
-      ),
+      lineText,
+      contextText: lineText,
+      platformHint: lineContext.platformLabel,
+      sectionHint: lineContext.sectionHint,
       isLightboxImage:
         anchor.classList.contains("js-lbImage") ||
         anchor.hasAttribute("data-sub-html") ||

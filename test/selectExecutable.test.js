@@ -29,3 +29,15 @@ test("selectPreferredExecutable prefers shallower title-matching executables", (
 
   assert.equal(selected, "Apartment69-0.11-pc/Apartment69.exe");
 });
+
+test("selectPreferredExecutable prefers the newer version path when scores are equal", () => {
+  const selected = selectPreferredExecutable(
+    [
+      "Apartment69-0.10-pc/Apartment69.exe",
+      "Apartment69-0.11-pc/Apartment69.exe",
+    ],
+    { title: "Apartment #69", creator: "Luxee" },
+  );
+
+  assert.equal(selected, "Apartment69-0.11-pc/Apartment69.exe");
+});

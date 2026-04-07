@@ -1,6 +1,6 @@
 {
   "name": "f95-game-zone-app",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
@@ -52,6 +52,7 @@
       "src/core/settings/**/*",
       "src/core/banner/**/*",
       "package.json",
+      "node_modules/7zip-bin/**/*",
       "node_modules/sqlite3/**/*",
       "node_modules/node-7z/**/*",
       "node_modules/unrar/**/*"
@@ -87,6 +88,7 @@
     "@babel/standalone": "^7.25.6",
     "@npmcli/fs": "^3.1.0",
     "@supabase/supabase-js": "^2.58.0",
+    "7zip-bin": "^5.2.0",
     "adm-zip": "^0.5.10",
     "axios": "^1.7.2",
     "electron-updater": "^6.6.2",
@@ -107,13 +109,13 @@
     "@electron/rebuild": "^3.7.2",
     "@types/node": "^18.19.42",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
     "debug": "^4.3.4",
     "electron": "^37.0.0",
     "electron-builder": "^26.0.12",
     "eslint": "^8.57.0",
     "postcss": "^8.5.6",
     "postcss-cli": "^10.1.0",
-    "concurrently": "^9.2.1",
     "prettier": "3.6.2",
     "serve": "^14.2.6",
     "tailwindcss": "^3.4.17",
