@@ -123,6 +123,7 @@ const LibraryDetailsPanel = ({
   onPlayGame,
   onUpdateGame,
   onOpenFolder,
+  onToggleFavorite,
   onRemoveGame,
   onPreviewSelect,
   onOpenCloudAuth,
@@ -148,6 +149,7 @@ const LibraryDetailsPanel = ({
   const displayTitle = game?.displayTitle || game?.title || "No game selected";
   const displayCreator = game?.displayCreator || game?.creator || "";
   const hasInstalledVersions = versionList.length > 0;
+  const isFavorite = Boolean(game?.isFavorite);
 
   const [panelWidthPx, setPanelWidthPx] = useState(
     readStoredLibraryDetailsPanelWidthPx,
@@ -491,6 +493,36 @@ const LibraryDetailsPanel = ({
                   )}
 
                   <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-border/40 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavorite?.(game)}
+                      className={`inline-flex h-8 w-8 items-center justify-center border transition-colors ${
+                        isFavorite
+                          ? "border-amber-400/70 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25"
+                          : "border-border bg-secondary text-text hover:bg-selected"
+                      }`}
+                      aria-label={
+                        isFavorite
+                          ? "Remove from Favorites"
+                          : "Add to Favorites"
+                      }
+                      title={
+                        isFavorite
+                          ? "Remove from Favorites"
+                          : "Add to Favorites"
+                      }
+                    >
+                      <span
+                        className="material-symbols-outlined text-[20px] leading-none"
+                        style={
+                          isFavorite
+                            ? { fontVariationSettings: "'FILL' 1" }
+                            : undefined
+                        }
+                      >
+                        star
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={onOpenPage}

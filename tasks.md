@@ -21,6 +21,176 @@ Last updated: 2026-04-08
 | Stage 5. Quality hardening       | partial     |      61% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                          |
 | MVP total                        | in_progress |      83% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
+### 2026-04-08 — Stage 1 library UX: Favorites section with non-duplicate library list
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes a library usability gap by adding persistent game favorites without weakening data safety or architecture boundaries
+
+What was done:
+
+- Added persistent game favorites at the data layer (`games.is_favorite`) via migration.
+- Added typed IPC endpoint `set-game-favorite` with input validation in main process.
+- Added `Add to Favorites` / `Remove from Favorites` to game card context menu.
+- Added favorite toggle button directly on game cards.
+- Added favorite toggle button in library details sidebar actions.
+- Updated library rendering so `Favorites` appears first, then a separator, then the main library.
+- Ensured games in favorites are excluded from the main library section to avoid duplicates.
+- Kept all user-facing strings in English as requested.
+
+How it was implemented:
+
+- `src/main/db/migrations/008_game_favorites.js`
+  - added `games.is_favorite` column (`INTEGER NOT NULL DEFAULT 0`) and index.
+- `src/main/db/migrations/index.js`
+  - registered migration `version: 8`.
+- `src/database.js`
+  - included `is_favorite` in game metadata queries.
+  - normalized query output to boolean `isFavorite`.
+  - added `setGameFavorite(recordId, isFavorite)`.
+- `src/main.js`
+  - imported `setGameFavorite`.
+  - added IPC handler `set-game-favorite` with validation and safe error response.
+  - forwarded favorite context-menu actions to renderer.
+- `src/renderer.js`
+  - exposed `setGameFavorite(...)` on `window.electronAPI`.
+- `src/App.jsx`
+  - added `setGameFavoriteState(...)` / `toggleGameFavorite(...)`.
+  - wired context-menu actions to favorite toggling.
+  - split library view into `favoriteLibraryGames` + `nonFavoriteLibraryGames`.
+  - rendered favorites section first with divider and removed duplicates from main section.
+  - connected favorite toggle callback to cards and details panel.
+- `src/core/GameBanner.js`
+  - added star button on card.
+  - added favorite actions in context menu.
+- `src/core/library/LibraryDetailsPanel.jsx`
+  - added favorite action button in details toolbar.
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+
+What is still missing here:
+
+- Manual Electron smoke is still needed for full UX verification:
+  - toggle favorites from card button, context menu, and details panel;
+  - verify favorites section visibility and divider behavior with 0/1/N favorites;
+  - verify no duplicate cards between favorites and main library after app restart.
+
+Progress impact:
+
+- Stage 1 remains `in_progress` but this slice closes the favorites UX requirement in library flow.
+- MVP total estimate: effectively improved by ~1% for user-facing library completeness.
+
+### 2026-04-08 — Stage 1 library UI follow-up: remove legacy grid header and move controls into section headers
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: aligns library and updates layouts with product-style section headers (`Favorites`/`All Games`/`Updates`) and removes duplicated top toolbar
+
+What was done:
+
+- Removed the old top grid header panel from library/updates workspace.
+- Moved `Sort`, `Show titles`, and results counter into the `All Games` section header row.
+- Added the same header-row controls to `Updates` section.
+- Kept `Favorites` as a separate top section and left-to-right card flow.
+- Removed the extra standalone divider line between `Favorites` and `All Games`.
+
+How it was implemented:
+
+- `src/App.jsx`
+  - extracted a reusable `renderSectionControls(resultsCount)` block.
+  - removed legacy `atlas-glass-panel` header above the grid.
+  - updated library branch to render:
+    - `Favorites (N)` header + cards
+    - `All Games (N)` header with embedded controls + cards
+  - updated updates branch to render:
+    - `Updates (N)` header with embedded controls
+    - existing virtualized grid below it.
+
+Checks run:
+
+- `npx prettier --check src/App.jsx src/core/GameBanner.js src/core/library/LibraryDetailsPanel.jsx` (parse/syntax sanity for changed UI files)
+
+What is still missing here:
+
+- Manual UI smoke in Electron is still needed for final spacing validation on narrow widths and with/without left title list enabled.
+
+### 2026-04-08 — Stage 1 screenshot UX + embedded F95 lightbox navigation fix
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: improves product-level screenshot viewing in library and fixes a real embedded-browser regression where site lightbox behavior was hijacked by forced navigation
+
+What was done:
+
+- Upgraded the library screenshot modal to a more usable viewer:
+  - zoom controls (`+`, `-`, `Fit`) with percentage indicator;
+  - keyboard shortcuts (`←/→`, `+/-/0`, `Esc`);
+  - `Open Original` action;
+  - click-to-toggle zoom for quick inspection.
+- Fixed embedded F95 image-viewer behavior:
+  - removed aggressive forced click-navigation in webview script;
+  - excluded overlay/lightbox-managed links from target rewriting.
+
+How it was implemented:
+
+- `src/App.jsx`
+  - added preview zoom state with clamping (`1x` to `4x`);
+  - added modal control handlers (`close`, prev/next, zoom in/out/reset);
+  - updated preview modal UI with explicit controls and shortcut hints.
+- `src/core/search/F95BrowserWorkspace.jsx`
+  - updated `KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT`:
+    - added `isOverlayManagedLink(...)`;
+    - skipped rewriting links that XenForo/lightbox manages (`.LbImage`, `data-lb-id`, `data-xf-click`, etc.);
+    - removed the global capture-phase click hijack that forced `location.href`.
+
+Checks run:
+
+- `npx prettier --check src/App.jsx src/core/search/F95BrowserWorkspace.jsx`
+- `npm run lint`
+
+What is still missing here:
+
+- Manual smoke on a real F95 thread page inside the embedded browser is still required to validate all image-link variants (attachments, inline full images, and gallery-style posts).
+
+### 2026-04-08 — Stage 1 screenshot viewer refinement: usable controls and real Fit/Fill behavior
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: fixes practical UX issues in the first screenshot-viewer pass and restores expected image inspection behavior
+
+What was done:
+
+- Reworked the screenshot modal layout to a cleaner, less intrusive overlay.
+- Added explicit viewer modes:
+  - `Fit` mode (image contained in viewport)
+  - `Fill` mode (image covers viewport frame)
+- Fixed zoom behavior so scaling changes actual rendered dimensions instead of only visual transform.
+- Added clear mode/zoom controls in a compact bottom toolbar and kept keyboard shortcuts.
+
+How it was implemented:
+
+- `src/App.jsx`
+  - added preview mode state (`fit` / `fill`);
+  - reset mode and zoom consistently on close/image change;
+  - computed image sizing styles from mode + zoom (`previewImageStyle`) so zoom is functional in both modes;
+  - rebuilt modal chrome:
+    - floating counter and close button;
+    - side navigation arrows;
+    - compact bottom control strip (`-`, `+`, `Fit`, `Fill`, `100%`, `Open`).
+
+Checks run:
+
+- `npx prettier --check src/App.jsx src/core/search/F95BrowserWorkspace.jsx`
+- `npm run lint`
+
+What is still missing here:
+
+- Final manual visual polish pass in Electron on both small and ultra-wide window sizes (spacing and control hit-target comfort).
+
 ### 2026-04-08 — Stage 1 metadata correctness: stop false `Unknown` engine for F95 installs
 
 - Status: done
@@ -3853,3 +4023,268 @@ Impact on overall progress:
 
 - removes split branding between UI logo and native window iconography
 - gives a single authoritative logo source for future theming/branding updates
+
+## 2026-04-08 — Prevent deleted games from being re-imported from cloud catalog
+
+What was done:
+
+- fixed the cloud catalog reconciliation path so a game removed from local library can be excluded from cloud merge/materialization by identity key
+- connected `remove-library-game` flow to cloud catalog cleanup using the removed game's cloud identity key
+- added regression tests for cloud catalog identity exclusion and merge snapshot behavior
+
+How it was implemented:
+
+- updated `src/main/cloudSaveSync.js`:
+  - added cloud catalog identity-key normalization/filter helpers
+  - added `buildCloudLibraryCatalogSnapshot(localEntries, remoteEntries, options)` to centralize merge/materialization inputs
+  - updated `getCloudLibraryCatalog(options)` and `syncLibraryCatalog(options)` to support `excludedIdentityKeys`
+  - exported snapshot/filter helpers for isolated unit testing
+- updated `src/main.js`:
+  - added cloud catalog sync option normalization in main process
+  - updated `syncCloudLibraryCatalogNow(reason, options)` and scheduler to pass `excludedIdentityKeys`
+  - enhanced `ipcMain.handle("remove-library-game")`:
+    - loads game before deletion, derives cloud identity key
+    - after successful local delete, runs cloud catalog sync with that identity excluded
+    - adds user warning if authenticated cloud cleanup fails
+- added `test/cloudSaveSyncLibraryCatalog.test.js` for:
+  - identity-key normalization
+  - entry filtering by excluded identities
+  - snapshot merge behavior that keeps deleted identity out of `remoteOnly`
+
+What remains:
+
+- optional follow-up: persist deletion tombstones for offline delete scenarios (when user deletes while signed out and signs in later)
+- optional e2e/manual smoke: confirm delete -> app restart -> no cloud re-materialization for the deleted game
+
+Current stage progress:
+
+- cloud catalog deletion consistency for authenticated sessions: 100%
+- regression coverage for the new merge-exclusion behavior: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- removes a high-friction data-consistency regression where deleted library entries reappeared from cloud catalog
+- keeps reliability priority intact by fixing merge semantics instead of masking UI symptoms
+
+## 2026-04-08 — Cloud catalog read made non-mutating to stop background game resurrection
+
+What was done:
+
+- investigated live app terminal logs and confirmed a mutating read path:
+  - `get-cloud-library-catalog` was importing `remoteOnlyEntries` during plain catalog read
+  - observed runtime evidence: `[cloud.library] catalog read materialized { added: ... }` immediately followed by `Inserted new game ...`
+- removed cloud-library mutation from read endpoint
+- restricted remote materialization to explicit manual sync action only
+
+How it was implemented:
+
+- updated `src/main.js`:
+  - `syncCloudLibraryCatalogNow(reason, options)` now supports `materializeRemoteOnly`
+  - scheduled/automatic sync paths keep `materializeRemoteOnly = false` (no background remote->local imports)
+  - `ipcMain.handle("get-cloud-library-catalog")` now returns catalog data only (no `materializeCloudLibraryCatalogEntries(...)`)
+  - `ipcMain.handle("sync-cloud-library-catalog")` now calls sync with `{ materializeRemoteOnly: true }`
+
+What remains:
+
+- optional follow-up: add persisted delete tombstones to block reintroduction from legacy alias identities across devices even after explicit manual sync
+
+Current stage progress:
+
+- cloud catalog read safety (no hidden side effects): 100%
+- background deletion stability against passive cloud reads: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- removes the direct runtime cause of "deleted games come back after some time" when cloud catalog is read
+- aligns cloud read path with safer architecture rule: read should not silently mutate local library
+
+## 2026-04-08 — Hard delete now removes matching entries from cloud catalog
+
+What was done:
+
+- implemented explicit cloud-library deletion flow on local game removal
+- removed reliance on a single `identityKey` and added alias matching for cloud catalog entries:
+  - identity key
+  - atlas id
+  - f95 id
+  - normalized site URL
+  - normalized `title + creator` pair
+
+How it was implemented:
+
+- updated `src/main/cloudSaveSync.js`:
+  - added cloud catalog entry matching helpers (`isCloudLibraryEntryMatch`)
+  - added `removeLibraryCatalogEntry({ game, excludedIdentityKeys })` service method
+  - method now fetches remote catalog, removes matching entries, rebuilds merged catalog, and uploads updated manifest
+- updated `src/main.js`:
+  - added `scheduleCloudLibraryCatalogEntryRemoval(...)`
+  - switched `remove-library-game` post-success path from generic sync to explicit cloud catalog entry removal
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test -- test/cloudSaveSyncLibraryCatalog.test.js`
+
+What remains:
+
+- optional future hardening: persist tombstones for offline removals (delete while signed-out, apply after sign-in)
+
+Current stage progress:
+
+- cloud catalog deletion semantics for authenticated users: 100%
+- alias-resilient cloud removal matching: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- closes the core bug where deleted games were not actually removed from cloud library state
+- keeps cloud and local library behavior aligned with user expectations for explicit delete actions
+
+## 2026-04-08 — Professional full-delete flow for cloud library entries
+
+What was done:
+
+- replaced the previous best-effort cloud delete with a persistent queued delete flow
+- made cloud-library deletion safe by removing the broad destructive `title + creator` fallback
+- ensured local delete can survive signed-out/offline scenarios without losing the cloud delete intent
+- processed pending cloud deletes before startup/sign-in/manual cloud sync catalog operations
+
+How it was implemented:
+
+- added migration `009_cloud_library_delete_queue`:
+  - new SQLite table `cloud_library_delete_queue`
+  - stores pending cloud delete requests independently from `games`, so requests survive local row deletion
+- added `src/main/db/cloudLibraryDeleteQueueStore.js`:
+  - builds normalized delete requests from game identity
+  - persists pending requests per cloud project
+  - supports list/delete/error update for retries
+- updated `src/main/cloudLibraryCatalog.js`:
+  - introduced shared identity-candidate builder so sync and delete use the same catalog normalization rules
+- updated `src/main/cloudSaveSync.js`:
+  - removed dangerous fuzzy destructive matching
+  - added exact/safe delete target normalization
+  - cloud delete now removes entries only by:
+    - exact identity aliases
+    - matching `atlasId`
+    - matching `f95Id`
+    - matching normalized `siteUrl`
+  - batched remote delete processing so multiple pending requests are applied in one catalog read/write cycle
+- updated `src/main.js`:
+  - local remove now queues cloud delete intent before destructive local removal
+  - queue is rolled back if local remove fails
+  - after successful delete:
+    - process queue immediately when authenticated
+    - otherwise keep request for later startup/sign-in processing
+  - startup/sign-in paths now flush pending cloud deletes before cloud catalog sync
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+
+What remains:
+
+- manual smoke in the running Electron app:
+  - delete while signed in
+  - delete while signed out, then sign in again
+  - confirm no unrelated cloud library entries disappear
+
+Current stage progress:
+
+- safe cloud-library delete semantics: 100%
+- offline/sign-in retry path for cloud delete: 100%
+- regression coverage for queue + migration + delete matching: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- turns game deletion into a real account-level delete path instead of a fragile local-only action
+- reduces risk of deleting unrelated cloud entries while still preventing deleted games from resurfacing later
+
+## 2026-04-08 — Delete dialog copy rewritten in plain user language
+
+What was done:
+
+- rewrote delete modal option titles, descriptions, footer summary text, and success/error alerts in plain product language
+- removed awkward wording like "detected saves", "cloud-library identity", and other internal/over-technical phrasing from the user-facing delete flow
+- aligned the same copy updates in both main library and game-details window delete flows
+
+How it was implemented:
+
+- updated `src/core/library/DeleteGameModal.jsx`:
+  - made option labels clearer:
+    - library-only
+    - delete game, keep progress
+    - delete game and start over
+  - renamed side panels to more human labels
+  - simplified footer impact summary and button/loading text
+- updated `src/App.jsx` and `src/core/banner/GameDetailsWindow.jsx`:
+  - improved snapshot/remove failure messages
+  - added a clear success message for library-only removal
+  - rewrote keep-progress and full-delete confirmations
+- updated `src/main.js`:
+  - rewrote account-library warning/error messages so they describe the user outcome instead of internal sync mechanics
+
+Checks run:
+
+- `npm run lint`
+- `npm run typecheck`
+
+What remains:
+
+- optional manual wording pass after using the flow in Electron to see whether any phrasing still feels too long or too soft
+
+Current stage progress:
+
+- delete-flow copy clarity: 100%
+- delete-flow technical-language cleanup: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- makes destructive actions easier to understand before the user clicks
+- reduces risk of confusion around what stays on disk, what gets deleted, and what still syncs with the account library
+
+## 2026-04-08 — Startup cloud sync now honors identities deleted earlier in the same cycle
+
+What was done:
+
+- fixed the remaining startup/sign-in delete regression where a game could be removed from the cloud queue and still show up again in the immediately following catalog sync
+- carried successfully processed delete identities forward into that same sync pass as explicit exclusions
+
+How it was implemented:
+
+- updated `src/main/db/cloudLibraryDeleteQueueStore.js`:
+  - added `collectCloudLibraryDeleteCandidateKeys(...)` to flatten and deduplicate exact identity aliases from queued delete requests
+- updated `src/main.js`:
+  - `processPendingCloudLibraryDeletesNow(...)` now returns `excludedIdentityKeys` for requests that were successfully processed
+  - `syncCloudLibraryCatalogNow(...)` now unions:
+    - caller-provided exclusions
+    - exclusions from the just-processed pending delete batch
+  - this shields the same sync cycle from stale/eventually-consistent catalog reads right after delete upload
+
+Checks run:
+
+- `npm run test -- test/cloudLibraryDeleteQueueStore.test.js test/cloudSaveSyncLibraryCatalog.test.js`
+- `npm run lint`
+- `npm run typecheck`
+
+What remains:
+
+- rerun the live Electron delete/restart smoke for the `SmallCoffee female` case
+- confirm startup log shows `excluded > 0` when queued deletes were processed pre-sync
+
+Current stage progress:
+
+- same-cycle delete exclusion in startup/sign-in sync: 100%
+- stale-read protection after successful cloud delete upload: 100%
+- overall roadmap progress relative to current fork scope: 97%
+
+Impact on overall progress:
+
+- closes the exact log-proven hole where `processed pending deletes` was followed by a stale `remoteOnly` resurrection
+- makes delete behavior deterministic instead of depending on storage propagation timing

@@ -153,6 +153,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     console.log("Invoking updateGame with game data:", game);
     return ipcRenderer.invoke("update-game", game);
   },
+  setGameFavorite: (payload) => ipcRenderer.invoke("set-game-favorite", payload),
   updateVersion: (version, record_id) => {
     console.log("Invoking updateVersion with version data:", version);
     return ipcRenderer.invoke("update-version", version, record_id);

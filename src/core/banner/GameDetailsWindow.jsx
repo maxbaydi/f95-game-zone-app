@@ -394,7 +394,7 @@ const GameDetailWindow = () => {
         error: snapshotResult?.success
           ? ""
           : snapshotResult?.error ||
-            "F95 Game Zone App could not inspect save locations.",
+            "Couldn't check where this game keeps its saves.",
         saveProfiles: snapshotResult?.success
           ? snapshotResult?.snapshot?.profiles || []
           : [],
@@ -406,7 +406,7 @@ const GameDetailWindow = () => {
         isLoading: false,
         error:
           error.message ||
-          "F95 Game Zone App could not inspect save locations.",
+          "Couldn't check where this game keeps its saves.",
         saveProfiles: [],
       }));
     }
@@ -434,7 +434,7 @@ const GameDetailWindow = () => {
           ...previous,
           isDeleting: false,
           error:
-            result?.error || "F95 Game Zone App could not remove this game.",
+            result?.error || "Couldn't remove this game.",
         }));
         return;
       }
@@ -442,13 +442,19 @@ const GameDetailWindow = () => {
       if (result.warnings?.length) {
         alert(result.warnings.join("\n"));
       } else if (
+        deleteModalState.mode === DELETE_GAME_MODES.LIBRARY_ONLY
+      ) {
+        alert(
+          "The game was removed from your library. Nothing on this PC was deleted.",
+        );
+      } else if (
         deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
       ) {
-        alert("Installed files were removed and detected saves were kept.");
+        alert("The game files were removed. Your progress was kept.");
       } else if (
         deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_AND_SAVES
       ) {
-        alert("Installed files and detected saves were removed.");
+        alert("The game files and saves were removed.");
       }
 
       window.electronAPI.closeWindow();
@@ -458,7 +464,7 @@ const GameDetailWindow = () => {
         ...previous,
         isDeleting: false,
         error:
-          error.message || "F95 Game Zone App could not remove this game.",
+          error.message || "Couldn't remove this game.",
       }));
     }
   };

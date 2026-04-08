@@ -48,9 +48,10 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     db,
     "SELECT version, name FROM schema_migrations ORDER BY version ASC",
   );
+  const gameColumns = await allAsync(db, "PRAGMA table_info(games)");
   const tables = await allAsync(
     db,
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('games', 'versions', 'schema_migrations', 'scan_candidates', 'save_profiles', 'save_sync_state') ORDER BY name ASC",
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('cloud_library_delete_queue', 'games', 'versions', 'schema_migrations', 'scan_candidates', 'save_profiles', 'save_sync_state') ORDER BY name ASC",
   );
 
   assert.deepEqual(migrations, [
@@ -61,8 +62,15 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 5, name: "save_sync" },
     { version: 6, name: "scan_candidate_match_metadata" },
     { version: 7, name: "f95_zone_mapping_site_url" },
+    { version: 8, name: "game_favorites" },
+    { version: 9, name: "cloud_library_delete_queue" },
   ]);
+  const favoriteColumn = gameColumns.find((column) => column.name === "is_favorite");
+  assert.ok(favoriteColumn);
+  assert.equal(Number(favoriteColumn.notnull), 1);
+  assert.equal(Number(favoriteColumn.dflt_value), 0);
   assert.deepEqual(tables, [
+    { name: "cloud_library_delete_queue" },
     { name: "games" },
     { name: "save_profiles" },
     { name: "save_sync_state" },
@@ -87,6 +95,8 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 5, name: "save_sync" },
     { version: 6, name: "scan_candidate_match_metadata" },
     { version: 7, name: "f95_zone_mapping_site_url" },
+    { version: 8, name: "game_favorites" },
+    { version: 9, name: "cloud_library_delete_queue" },
   ]);
 
   await closeAsync(reopened);

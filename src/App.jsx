@@ -102,7 +102,6 @@ const getF95CaptchaContinuationUrl =
   });
 
 const IMPORT_PROGRESS_TERMINAL_TOAST_MS = 2000;
-const PREVIEW_MODAL_IMAGE_MAX_HEIGHT_CSS = "min(78vh, 900px)";
 const GRID_SCROLLBAR_GUTTER_PX = 8;
 
 const isTerminalImportProgressToast = (text) => {
@@ -315,8 +314,13 @@ const App = () => {
   const getColumnCount = useCallback(
     (width) => {
       const containerWidth =
-        width ?? gameGridRef.current?.clientWidth ?? Math.max(0, window.innerWidth - 260);
-      const adjustedWidth = Math.max(0, containerWidth - GRID_SCROLLBAR_GUTTER_PX);
+        width ??
+        gameGridRef.current?.clientWidth ??
+        Math.max(0, window.innerWidth - 260);
+      const adjustedWidth = Math.max(
+        0,
+        containerWidth - GRID_SCROLLBAR_GUTTER_PX,
+      );
       return Math.max(
         1,
         Math.floor(adjustedWidth / (bannerSize.bannerWidth + 8)),
@@ -480,7 +484,7 @@ const App = () => {
         error: snapshotResult?.success
           ? ""
           : snapshotResult?.error ||
-            "F95 Game Zone App could not inspect save locations.",
+            "Couldn't check where this game keeps its saves.",
         saveProfiles: snapshotResult?.success
           ? snapshotResult?.snapshot?.profiles || []
           : [],
@@ -492,7 +496,7 @@ const App = () => {
         isLoading: false,
         error:
           error.message ||
-          "F95 Game Zone App could not inspect save locations.",
+          "Couldn't check where this game keeps its saves.",
         saveProfiles: [],
       }));
     }
@@ -520,7 +524,7 @@ const App = () => {
           ...previous,
           isDeleting: false,
           error:
-            result?.error || "F95 Game Zone App could not remove this game.",
+            result?.error || "Couldn't remove this game.",
         }));
         return;
       }
@@ -530,22 +534,26 @@ const App = () => {
       if (result.warnings?.length) {
         window.alert(result.warnings.join("\n"));
       } else if (
-        deleteGameModal.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
+        deleteGameModal.mode === DELETE_GAME_MODES.LIBRARY_ONLY
       ) {
         window.alert(
-          "Installed files were removed and detected saves were kept.",
+          "The game was removed from your library. Nothing on this PC was deleted.",
         );
+      } else if (
+        deleteGameModal.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
+      ) {
+        window.alert("The game files were removed. Your progress was kept.");
       } else if (
         deleteGameModal.mode === DELETE_GAME_MODES.DELETE_FILES_AND_SAVES
       ) {
-        window.alert("Installed files and detected saves were removed.");
+        window.alert("The game files and saves were removed.");
       }
     } catch (error) {
       console.error("Failed to delete game:", error);
       setDeleteGameModal((previous) => ({
         ...previous,
         isDeleting: false,
-        error: error.message || "F95 Game Zone App could not remove this game.",
+        error: error.message || "Couldn't remove this game.",
       }));
     }
   };
@@ -917,6 +925,40 @@ const App = () => {
       setIsDiscoveryLoading(false);
     }
   };
+
+  const applyUpdatedGameToState = useCallback(
+    (updatedGame) => {
+      if (!updatedGame?.record_id) {
+        return;
+      }
+
+      setGames((prev) => {
+        const hasExisting = prev.some(
+          (game) => game.record_id === updatedGame.record_id,
+        );
+        const newGames = hasExisting
+          ? prev.map((game) =>
+              game.record_id === updatedGame.record_id ? updatedGame : game,
+            )
+          : [...prev, updatedGame];
+
+        setTotalVersions(
+          newGames.reduce((sum, game) => sum + (game.versionCount || 0), 0),
+        );
+
+        return newGames;
+      });
+      setSelectedGame((current) =>
+        current?.record_id === updatedGame.record_id ? updatedGame : current,
+      );
+      setSelectedGameDetails((current) =>
+        current?.record_id === updatedGame.record_id ? updatedGame : current,
+      );
+      refreshLibraryGrid();
+    },
+    [refreshLibraryGrid],
+  );
+
   // Debounced refresh for game updates
   const refreshGame = useCallback(
     debounce((recordId) => {
@@ -930,30 +972,8 @@ const App = () => {
               title: updatedGame.title,
               banner_url: updatedGame.banner_url,
             });
-            setGames((prev) => {
-              const newGames = prev.map((g) =>
-                g.record_id === updatedGame.record_id ? updatedGame : g,
-              );
-              setTotalVersions(
-                newGames.reduce(
-                  (sum, game) => sum + (game.versionCount || 0),
-                  0,
-                ),
-              );
-              return newGames;
-            });
-            setSelectedGame((current) =>
-              current?.record_id === updatedGame.record_id
-                ? updatedGame
-                : current,
-            );
-            setSelectedGameDetails((current) =>
-              current?.record_id === updatedGame.record_id
-                ? updatedGame
-                : current,
-            );
+            applyUpdatedGameToState(updatedGame);
             console.log(`Forcing grid update for recordId: ${recordId}`);
-            refreshLibraryGrid();
           } else {
             console.warn(`No game data returned for recordId: ${recordId}`);
           }
@@ -965,7 +985,52 @@ const App = () => {
           ),
         );
     }, 100),
-    [],
+    [applyUpdatedGameToState],
+  );
+
+  const setGameFavoriteState = useCallback(
+    async (gameInput, isFavorite) => {
+      const recordId = Number(gameInput?.record_id);
+      if (!Number.isInteger(recordId) || recordId <= 0) {
+        return;
+      }
+
+      try {
+        const result = await window.electronAPI.setGameFavorite({
+          recordId,
+          isFavorite: Boolean(isFavorite),
+        });
+
+        if (!result?.success) {
+          console.error(
+            "[library.favorite] Failed to set favorite:",
+            result?.error || "unknown error",
+          );
+          return;
+        }
+
+        if (result?.game) {
+          applyUpdatedGameToState(result.game);
+          return;
+        }
+
+        refreshGame(recordId);
+      } catch (error) {
+        console.error("[library.favorite] Failed to set favorite:", error);
+      }
+    },
+    [applyUpdatedGameToState, refreshGame],
+  );
+
+  const toggleGameFavorite = useCallback(
+    (gameInput) => {
+      if (!gameInput?.record_id) {
+        return;
+      }
+
+      void setGameFavoriteState(gameInput, !Boolean(gameInput.isFavorite));
+    },
+    [setGameFavoriteState],
   );
 
   useEffect(() => {
@@ -1240,10 +1305,7 @@ const App = () => {
           const gamesArray = Array.isArray(allGames) ? allGames : [];
           setGames(gamesArray);
           setTotalVersions(
-            gamesArray.reduce(
-              (sum, game) => sum + (game.versionCount || 0),
-              0,
-            ),
+            gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
           );
         })
         .catch((error) => {
@@ -1303,6 +1365,15 @@ const App = () => {
           .catch((error) =>
             console.error("Failed to prepare game update:", error),
           );
+        return;
+      }
+
+      if (
+        data.action === "addToFavorites" ||
+        data.action === "removeFromFavorites"
+      ) {
+        const isFavorite = data.action === "addToFavorites";
+        void setGameFavoriteState({ record_id: data.recordId }, isFavorite);
         return;
       }
 
@@ -1599,7 +1670,7 @@ const App = () => {
     await loadScanHubData();
   };
 
-  const visibleLibraryGames = useMemo(
+  const sortedFilteredLibraryGames = useMemo(
     () =>
       sortLibraryGames(
         filterLocalGames(
@@ -1610,6 +1681,32 @@ const App = () => {
         librarySortMode,
       ),
     [games, libraryQuery, activeSection, librarySortMode],
+  );
+  const favoriteLibraryGames = useMemo(
+    () =>
+      activeSection === SECTION_LIBRARY
+        ? sortedFilteredLibraryGames.filter((game) => Boolean(game.isFavorite))
+        : [],
+    [activeSection, sortedFilteredLibraryGames],
+  );
+  const nonFavoriteLibraryGames = useMemo(
+    () =>
+      activeSection === SECTION_LIBRARY
+        ? sortedFilteredLibraryGames.filter((game) => !Boolean(game.isFavorite))
+        : sortedFilteredLibraryGames,
+    [activeSection, sortedFilteredLibraryGames],
+  );
+  const visibleLibraryGames = useMemo(
+    () =>
+      activeSection === SECTION_LIBRARY
+        ? [...favoriteLibraryGames, ...nonFavoriteLibraryGames]
+        : sortedFilteredLibraryGames,
+    [
+      activeSection,
+      favoriteLibraryGames,
+      nonFavoriteLibraryGames,
+      sortedFilteredLibraryGames,
+    ],
   );
   const librarySortDescription = getLibrarySortDescription(librarySortMode);
 
@@ -1766,6 +1863,32 @@ const App = () => {
     }
   }, [selectedGamePreviews, previewModalIndex]);
 
+  const closePreviewModal = useCallback(() => {
+    setPreviewModalIndex(null);
+  }, []);
+
+  const showPreviousPreview = useCallback(() => {
+    setPreviewModalIndex((currentIndex) => {
+      const count = selectedGamePreviews.length;
+      if (count === 0) {
+        return null;
+      }
+      const resolvedCurrent = currentIndex ?? 0;
+      return (resolvedCurrent - 1 + count) % count;
+    });
+  }, [selectedGamePreviews.length]);
+
+  const showNextPreview = useCallback(() => {
+    setPreviewModalIndex((currentIndex) => {
+      const count = selectedGamePreviews.length;
+      if (count === 0) {
+        return null;
+      }
+      const resolvedCurrent = currentIndex ?? 0;
+      return (resolvedCurrent + 1) % count;
+    });
+  }, [selectedGamePreviews.length]);
+
   useEffect(() => {
     if (previewModalIndex === null) {
       return;
@@ -1776,21 +1899,49 @@ const App = () => {
     }
     const onKey = (e) => {
       if (e.key === "Escape") {
-        setPreviewModalIndex(null);
+        closePreviewModal();
         return;
       }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setPreviewModalIndex((i) => (i === null ? 0 : (i - 1 + count) % count));
+        showPreviousPreview();
+        return;
       }
       if (e.key === "ArrowRight") {
         e.preventDefault();
-        setPreviewModalIndex((i) => (i === null ? 0 : (i + 1) % count));
+        showNextPreview();
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [previewModalIndex, selectedGamePreviews.length]);
+  }, [
+    previewModalIndex,
+    selectedGamePreviews.length,
+    closePreviewModal,
+    showPreviousPreview,
+    showNextPreview,
+  ]);
+
+  useEffect(() => {
+    if (previewModalIndex === null) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [previewModalIndex]);
+
+  const handlePreviewStageClick = useCallback(
+    (event) => {
+      if (event.target === event.currentTarget) {
+        closePreviewModal();
+      }
+    },
+    [closePreviewModal],
+  );
 
   useEffect(() => {
     if (
@@ -1881,10 +2032,63 @@ const App = () => {
           game={game}
           onSelect={() => setSelectedGame(game)}
           onUpdateGame={handleGameUpdate}
+          onToggleFavorite={toggleGameFavorite}
         />
       </div>
     );
   };
+
+  const renderGameCardList = (gamesList, sectionKey) => (
+    <div className="flex flex-wrap justify-start gap-y-4">
+      {gamesList.map((game) => (
+        <div
+          key={`${sectionKey}-${game.record_id}`}
+          className="flex justify-start px-1"
+        >
+          <window.GameBanner
+            game={game}
+            onSelect={() => setSelectedGame(game)}
+            onUpdateGame={handleGameUpdate}
+            onToggleFavorite={toggleGameFavorite}
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderSectionControls = (resultsCount) => (
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md">
+        <span className="uppercase tracking-[0.14em] text-text/60">Sort</span>
+        <select
+          value={librarySortMode}
+          onChange={(event) => setLibrarySortMode(event.target.value)}
+          title={librarySortDescription}
+          className="min-w-[196px] bg-transparent text-xs text-text outline-none"
+        >
+          {LIBRARY_SORT_OPTIONS.map((option) => (
+            <option
+              key={option.value}
+              value={option.value}
+              className="bg-primary text-text"
+            >
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        onClick={toggleGameList}
+        className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
+      >
+        {showGameList ? "Hide titles" : "Show titles"}
+      </button>
+      <div className="border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-text/90 backdrop-blur-sm">
+        {`${resultsCount} results`}
+      </div>
+    </div>
+  );
 
   const sectionMeta =
     activeSection === SECTION_UPDATES
@@ -1960,10 +2164,7 @@ const App = () => {
           </div>
           <div className="pointer-events-none absolute right-[200px] top-1/2 z-0 -translate-y-1/2 select-none">
             <span className="whitespace-nowrap text-xs text-text/90">
-              v{version}{" "}
-              <span className="text-accent/90">
-                α
-              </span>
+              v{version} <span className="text-accent/90">α</span>
             </span>
           </div>
           <div className="absolute right-2 top-0 z-20 flex h-full items-center [-webkit-app-region:no-drag] gap-0.5">
@@ -2061,54 +2262,6 @@ const App = () => {
 
           <div className="flex flex-1 overflow-hidden">
             <div className="isolate flex flex-1 flex-col overflow-hidden">
-              {activeSection !== SECTION_SEARCH && (
-                <div className="atlas-glass-panel relative z-20 flex min-h-[5rem] shrink-0 flex-col justify-center gap-2 border-b border-border px-4 py-2.5">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0 text-[10px] uppercase leading-none tracking-[0.2em] text-glam/90">
-                      {sectionMeta.eyebrow}
-                    </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
-                      <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md">
-                        <span className="uppercase tracking-[0.14em] text-text/60">
-                          Sort
-                        </span>
-                        <select
-                          value={librarySortMode}
-                          onChange={(event) =>
-                            setLibrarySortMode(event.target.value)
-                          }
-                          title={librarySortDescription}
-                          className="min-w-[196px] bg-transparent text-xs text-text outline-none"
-                        >
-                          {LIBRARY_SORT_OPTIONS.map((option) => (
-                            <option
-                              key={option.value}
-                              value={option.value}
-                              className="bg-primary text-text"
-                            >
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={toggleGameList}
-                        className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
-                      >
-                        {showGameList ? "Hide titles" : "Show titles"}
-                      </button>
-                      <div className="border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-text/90 backdrop-blur-sm">
-                        {`${visibleLibraryGames.length} results`}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="line-clamp-2 text-[11px] leading-snug text-text/60">
-                    {librarySortDescription}
-                  </div>
-                </div>
-              )}
-
               <div
                 id="gameGrid"
                 className="relative z-0 flex-1 overflow-y-auto overflow-x-hidden bg-transparent px-0.5 pt-6 pb-3"
@@ -2118,36 +2271,76 @@ const App = () => {
                   <window.F95BrowserWorkspace />
                 ) : visibleLibraryGames.length === 0 ? (
                   renderEmptyState()
+                ) : activeSection === SECTION_LIBRARY ? (
+                  <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-1 pb-3">
+                    {favoriteLibraryGames.length > 0 && (
+                      <section className="space-y-3 px-2">
+                        <div className="flex items-center gap-3 px-1">
+                          <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+                            {`Favorites (${favoriteLibraryGames.length})`}
+                          </div>
+                          <div className="h-px flex-1 bg-border/80" />
+                        </div>
+                        {renderGameCardList(favoriteLibraryGames, "favorites")}
+                      </section>
+                    )}
+
+                    <section className="space-y-3 px-2">
+                      <div className="flex flex-wrap items-center gap-2 px-1">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+                          {`All Games (${nonFavoriteLibraryGames.length})`}
+                        </div>
+                        <div className="h-px min-w-[20px] flex-1 bg-border/80" />
+                        {renderSectionControls(nonFavoriteLibraryGames.length)}
+                      </div>
+                      {nonFavoriteLibraryGames.length > 0 &&
+                        renderGameCardList(nonFavoriteLibraryGames, "library")}
+                    </section>
+                  </div>
                 ) : (
-                  <AutoSizer>
-                    {({ height, width }) => {
-                      const adjustedWidth = Math.max(
-                        0,
-                        width - GRID_SCROLLBAR_GUTTER_PX,
-                      );
-                      return (
-                        <Grid
-                          ref={gridRef}
-                          columnCount={columnCount}
-                          columnWidth={() => {
-                            if (columnCount > 1) {
-                              return adjustedWidth / columnCount - 8;
-                            } else {
-                              return adjustedWidth / columnCount - 14;
-                            }
-                          }}
-                          rowCount={Math.ceil(
-                            visibleLibraryGames.length / columnCount,
-                          )}
-                          rowHeight={bannerSize.bannerHeight + 16}
-                          height={height}
-                          width={adjustedWidth}
-                          cellRenderer={cellRenderer}
-                          style={{ overflowX: "hidden" }}
-                        />
-                      );
-                    }}
-                  </AutoSizer>
+                  <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col gap-3 px-1 pb-3">
+                    <section className="space-y-3 px-2">
+                      <div className="flex flex-wrap items-center gap-2 px-1">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+                          {`Updates (${visibleLibraryGames.length})`}
+                        </div>
+                        <div className="h-px min-w-[20px] flex-1 bg-border/80" />
+                        {renderSectionControls(visibleLibraryGames.length)}
+                      </div>
+                    </section>
+
+                    <div className="min-h-0 flex-1">
+                      <AutoSizer>
+                        {({ height, width }) => {
+                          const adjustedWidth = Math.max(
+                            0,
+                            width - GRID_SCROLLBAR_GUTTER_PX,
+                          );
+                          return (
+                            <Grid
+                              ref={gridRef}
+                              columnCount={columnCount}
+                              columnWidth={() => {
+                                if (columnCount > 1) {
+                                  return adjustedWidth / columnCount - 8;
+                                } else {
+                                  return adjustedWidth / columnCount - 14;
+                                }
+                              }}
+                              rowCount={Math.ceil(
+                                visibleLibraryGames.length / columnCount,
+                              )}
+                              rowHeight={bannerSize.bannerHeight + 16}
+                              height={height}
+                              width={adjustedWidth}
+                              cellRenderer={cellRenderer}
+                              style={{ overflowX: "hidden" }}
+                            />
+                          );
+                        }}
+                      </AutoSizer>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -2163,6 +2356,7 @@ const App = () => {
                   onPlayGame={launchInstalledVersion}
                   onUpdateGame={handleGameUpdate}
                   onOpenFolder={openGameFolder}
+                  onToggleFavorite={toggleGameFavorite}
                   onRemoveGame={openDeleteGameModal}
                   onPreviewSelect={setPreviewModalIndex}
                   onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
@@ -2200,64 +2394,88 @@ const App = () => {
 
       {previewModalIndex !== null && selectedGamePreviews.length > 0 && (
         <div
-          className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md sm:p-6"
-          onClick={() => setPreviewModalIndex(null)}
-          role="presentation"
+          className="fixed inset-0 z-[1600]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Screenshot viewer"
         >
-          <div
-            className="flex max-h-full w-full max-w-[min(96vw,1200px)] flex-col items-center gap-3"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Screenshot viewer"
-          >
-            <div className="flex w-full min-h-0 flex-1 items-center justify-center gap-2 sm:gap-4">
-              <button
-                type="button"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-primary/85 text-lg text-text shadow-glass backdrop-blur-xl transition hover:bg-primary sm:h-11 sm:w-11"
-                aria-label="Previous screenshot"
-                onClick={() =>
-                  setPreviewModalIndex((i) => {
-                    const n = selectedGamePreviews.length;
-                    if (n === 0) {
-                      return null;
-                    }
-                    const cur = i ?? 0;
-                    return (cur - 1 + n) % n;
-                  })
-                }
-              >
-                ‹
-              </button>
-              <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
-                <img
-                  src={selectedGamePreviews[previewModalIndex]}
-                  alt={`Screenshot ${previewModalIndex + 1} of ${selectedGamePreviews.length}`}
-                  className="max-w-full rounded-2xl border border-border object-contain shadow-glass ring-1 ring-border motion-safe:animate-atlas-fade-up"
-                  style={{ maxHeight: PREVIEW_MODAL_IMAGE_MAX_HEIGHT_CSS }}
-                />
+          <button
+            type="button"
+            className="absolute inset-0 block h-full w-full cursor-default border-0 bg-black/90 p-0 backdrop-blur-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
+            onClick={closePreviewModal}
+            aria-label="Close screenshot viewer"
+          />
+          <div className="pointer-events-none absolute inset-0 flex min-h-0 flex-col">
+            <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch justify-center px-3 pb-20 pt-14 sm:px-5 sm:pb-24 sm:pt-16">
+              <div className="pointer-events-auto absolute left-3 top-3 z-20 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-xs tabular-nums text-white/90 shadow-lg backdrop-blur-md sm:left-4 sm:top-4">
+                {previewModalIndex + 1} / {selectedGamePreviews.length}
               </div>
               <button
                 type="button"
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-primary/85 text-lg text-text shadow-glass backdrop-blur-xl transition hover:bg-primary sm:h-11 sm:w-11"
+                onClick={closePreviewModal}
+                className="pointer-events-auto absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:right-4 sm:top-4"
+                aria-label="Close"
+                title="Close"
+              >
+                <span className="material-symbols-outlined text-[22px] leading-none">
+                  close
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="pointer-events-auto absolute left-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:left-3 sm:h-12 sm:w-12"
+                aria-label="Previous screenshot"
+                title="Previous"
+                onClick={showPreviousPreview}
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                className="pointer-events-auto absolute right-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:right-3 sm:h-12 sm:w-12"
                 aria-label="Next screenshot"
-                onClick={() =>
-                  setPreviewModalIndex((i) => {
-                    const n = selectedGamePreviews.length;
-                    if (n === 0) {
-                      return null;
-                    }
-                    const cur = i ?? 0;
-                    return (cur + 1) % n;
-                  })
-                }
+                title="Next"
+                onClick={showNextPreview}
               >
                 ›
               </button>
+
+              <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
+                <div
+                  className="pointer-events-auto flex max-h-[min(82vh,920px)] max-w-[min(94vw,1500px)] min-h-0 min-w-0 items-center justify-center overflow-auto motion-safe:animate-atlas-fade-up"
+                  onClick={handlePreviewStageClick}
+                >
+                  <img
+                    src={selectedGamePreviews[previewModalIndex]}
+                    alt={`Screenshot ${previewModalIndex + 1} of ${selectedGamePreviews.length}`}
+                    className="max-h-full max-w-full object-contain rounded-lg shadow-2xl ring-1 ring-white/10"
+                    draggable={false}
+                  />
+                </div>
+              </div>
+
+              <div className="pointer-events-auto absolute bottom-5 left-1/2 z-20 -translate-x-1/2 sm:bottom-6">
+                <button
+                  type="button"
+                  onClick={() =>
+                    window.electronAPI.openExternalUrl(
+                      selectedGamePreviews[previewModalIndex],
+                    )
+                  }
+                  className="rounded-full border border-white/15 bg-black/60 px-4 py-2 text-xs text-white/95 shadow-lg backdrop-blur-md transition hover:border-white/25 hover:bg-black/70"
+                  aria-label="Open original image"
+                  title="Open original"
+                >
+                  Open
+                </button>
+              </div>
             </div>
-            <div className="text-xs tabular-nums text-text/75">
-              {previewModalIndex + 1} / {selectedGamePreviews.length}
-            </div>
+            <p className="pointer-events-none px-4 pb-3 text-center text-[11px] text-white/45">
+              <span className="tabular-nums">← / →</span> switch •{" "}
+              <span className="tabular-nums">Esc</span> close • click outside
+              image
+            </p>
           </div>
         </div>
       )}

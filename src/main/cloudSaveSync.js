@@ -14,8 +14,10 @@ const {
 } = require("./saveVault");
 const {
   buildCloudLibraryCatalogEntry,
+  buildCloudLibraryEntryIdentityCandidates,
   getRemoteOnlyCloudLibraryEntries,
   mergeCloudLibraryCatalogEntries,
+  normalizeCatalogUrl,
   parseCloudLibraryCatalogManifest,
 } = require("./cloudLibraryCatalog");
 const {
@@ -76,6 +78,136 @@ function getCloudLibraryRemotePaths(authUserId) {
     latestManifestPath: `${remoteBase}/catalog.json`,
     historyManifestPath: `${remoteBase}/history/${historyStamp}.json`,
   };
+}
+
+function normalizeCloudLibraryIdentityKeys(values) {
+  const normalizedKeys = [];
+  const seenKeys = new Set();
+
+  for (const rawValue of Array.isArray(values) ? values : []) {
+    const identityKey = String(rawValue || "").trim();
+    if (!identityKey || seenKeys.has(identityKey)) {
+      continue;
+    }
+
+    seenKeys.add(identityKey);
+    normalizedKeys.push(identityKey);
+  }
+
+  return normalizedKeys;
+}
+
+function filterCloudLibraryEntriesByIdentity(entries, excludedIdentityKeys) {
+  const excludedSet = new Set(
+    normalizeCloudLibraryIdentityKeys(excludedIdentityKeys),
+  );
+  if (excludedSet.size === 0) {
+    return Array.isArray(entries) ? [...entries] : [];
+  }
+
+  return (Array.isArray(entries) ? entries : []).filter((entry) => {
+    const identityKey = String(entry?.identityKey || "").trim();
+    return Boolean(identityKey) && !excludedSet.has(identityKey);
+  });
+}
+
+function buildCloudLibraryCatalogSnapshot(
+  localEntries,
+  remoteEntries,
+  options = {},
+) {
+  const excludedIdentityKeys = normalizeCloudLibraryIdentityKeys(
+    options?.excludedIdentityKeys,
+  );
+  const normalizedLocalEntries = filterCloudLibraryEntriesByIdentity(
+    localEntries,
+    excludedIdentityKeys,
+  );
+  const normalizedRemoteEntries = filterCloudLibraryEntriesByIdentity(
+    remoteEntries,
+    excludedIdentityKeys,
+  );
+  const mergedEntries = mergeCloudLibraryCatalogEntries(
+    normalizedLocalEntries,
+    normalizedRemoteEntries,
+  );
+
+  return {
+    excludedIdentityKeys,
+    localEntries: normalizedLocalEntries,
+    remoteEntries: normalizedRemoteEntries,
+    mergedEntries,
+    remoteOnlyEntries: getRemoteOnlyCloudLibraryEntries(
+      mergedEntries,
+      normalizedLocalEntries,
+    ),
+  };
+}
+
+function normalizeCloudLibraryDeleteTarget(input) {
+  const candidateIdentityKeys = normalizeCloudLibraryIdentityKeys(
+    input?.candidateIdentityKeys ||
+      buildCloudLibraryEntryIdentityCandidates({
+        atlasId: input?.atlasId,
+        f95Id: input?.f95Id,
+        siteUrl: input?.siteUrl,
+        title: input?.title,
+        creator: input?.creator,
+      }),
+  );
+
+  return {
+    requestKey: String(input?.requestKey || "").trim(),
+    preferredIdentityKey:
+      String(input?.preferredIdentityKey || "").trim() ||
+      candidateIdentityKeys[0] ||
+      "",
+    candidateIdentityKeys,
+    atlasId: String(input?.atlasId || "").trim(),
+    f95Id: String(input?.f95Id || "").trim(),
+    siteUrl: normalizeCatalogUrl(input?.siteUrl),
+    title: String(input?.title || "").trim(),
+    creator: String(input?.creator || "").trim(),
+  };
+}
+
+function normalizeCloudLibraryDeleteTargets(inputs) {
+  return (Array.isArray(inputs) ? inputs : [])
+    .map((input) => normalizeCloudLibraryDeleteTarget(input))
+    .filter(
+      (target) =>
+        target.preferredIdentityKey ||
+        target.atlasId ||
+        target.f95Id ||
+        target.siteUrl,
+    );
+}
+
+function shouldRemoveCloudLibraryEntry(entry, target) {
+  const candidateIdentityKey = String(entry?.identityKey || "").trim();
+  if (
+    candidateIdentityKey &&
+    target.candidateIdentityKeys.includes(candidateIdentityKey)
+  ) {
+    return true;
+  }
+
+  if (target.atlasId && String(entry?.atlasId || "").trim() === target.atlasId) {
+    return true;
+  }
+
+  if (target.f95Id && String(entry?.f95Id || "").trim() === target.f95Id) {
+    return true;
+  }
+
+  if (
+    target.siteUrl &&
+    normalizeCatalogUrl(entry?.siteUrl) === target.siteUrl
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isStorageNotFoundError(error) {
@@ -920,7 +1052,7 @@ function createCloudSaveService({
     };
   };
 
-  const getCloudLibraryCatalog = async () => {
+  const getCloudLibraryCatalog = async (options = {}) => {
     const bundle = await withConfiguredClient();
     const authState = await getAuthState();
     if (!authState.user?.id) {
@@ -932,24 +1064,20 @@ function createCloudSaveService({
       bundle,
       authUserId: authState.user.id,
     });
-    const remoteEntries = remoteResult.manifest.entries || [];
-    const mergedEntries = mergeCloudLibraryCatalogEntries(localEntries, remoteEntries);
-    const remoteOnlyEntries = getRemoteOnlyCloudLibraryEntries(
-      mergedEntries,
+    const catalogSnapshot = buildCloudLibraryCatalogSnapshot(
       localEntries,
+      remoteResult.manifest.entries || [],
+      options,
     );
 
     return {
-      localEntries,
-      remoteEntries,
-      mergedEntries,
-      remoteOnlyEntries,
+      ...catalogSnapshot,
       remoteExists: remoteResult.exists,
       lastUpdatedAt: remoteResult.manifest.updatedAt || "",
     };
   };
 
-  const syncLibraryCatalog = async () => {
+  const syncLibraryCatalog = async (options = {}) => {
     const bundle = await withConfiguredClient();
     const authState = await getAuthState();
     if (!authState.user?.id) {
@@ -961,28 +1089,127 @@ function createCloudSaveService({
       bundle,
       authUserId: authState.user.id,
     });
-    const remoteEntries = remoteResult.manifest.entries || [];
-    const mergedEntries = mergeCloudLibraryCatalogEntries(localEntries, remoteEntries);
-    const currentSerialized = JSON.stringify(remoteEntries);
-    const nextSerialized = JSON.stringify(mergedEntries);
+    const currentRemoteEntries = remoteResult.manifest.entries || [];
+    const catalogSnapshot = buildCloudLibraryCatalogSnapshot(
+      localEntries,
+      currentRemoteEntries,
+      options,
+    );
+    const currentSerialized = JSON.stringify(currentRemoteEntries);
+    const nextSerialized = JSON.stringify(catalogSnapshot.mergedEntries);
     let manifest = remoteResult.manifest;
 
     if (!remoteResult.exists || currentSerialized !== nextSerialized) {
       const uploadResult = await uploadCloudLibraryCatalog({
         bundle,
         authUserId: authState.user.id,
-        entries: mergedEntries,
+        entries: catalogSnapshot.mergedEntries,
       });
       manifest = uploadResult.manifest;
     }
 
     return {
-      localEntries,
-      remoteEntries,
-      mergedEntries,
-      remoteOnlyEntries: getRemoteOnlyCloudLibraryEntries(mergedEntries, localEntries),
+      ...catalogSnapshot,
       lastUpdatedAt: manifest.updatedAt || "",
     };
+  };
+
+  const removeLibraryCatalogEntries = async ({ targets = [] } = {}) => {
+    const bundle = await withConfiguredClient();
+    const authState = await getAuthState();
+    if (!authState.user?.id) {
+      throw new Error("Cloud library removal requires a signed-in Supabase user.");
+    }
+
+    const normalizedTargets = normalizeCloudLibraryDeleteTargets(targets);
+    if (normalizedTargets.length === 0) {
+      return {
+        processedTargets: [],
+        removedCount: 0,
+        removedIdentityKeys: [],
+        localEntries: await listLocalLibraryEntries(),
+        remoteEntries: [],
+        mergedEntries: [],
+        remoteOnlyEntries: [],
+        lastUpdatedAt: "",
+      };
+    }
+
+    const localEntries = await listLocalLibraryEntries();
+    const remoteResult = await fetchRemoteLibraryCatalog({
+      bundle,
+      authUserId: authState.user.id,
+    });
+    const remoteEntries = Array.isArray(remoteResult.manifest.entries)
+      ? remoteResult.manifest.entries
+      : [];
+    const shouldRemoveEntry = (entry) =>
+      normalizedTargets.some((target) => shouldRemoveCloudLibraryEntry(entry, target));
+    const removedEntries = remoteEntries.filter(shouldRemoveEntry);
+    const filteredRemoteEntries = remoteEntries.filter(
+      (entry) => !shouldRemoveEntry(entry),
+    );
+    const filteredLocalEntries = localEntries.filter(
+      (entry) => !shouldRemoveEntry(entry),
+    );
+    const catalogSnapshot = buildCloudLibraryCatalogSnapshot(
+      filteredLocalEntries,
+      filteredRemoteEntries,
+    );
+    const nextEntries = catalogSnapshot.mergedEntries;
+    const currentSerialized = JSON.stringify(remoteEntries);
+    const nextSerialized = JSON.stringify(nextEntries);
+    let manifest = remoteResult.manifest;
+
+    if (!remoteResult.exists || currentSerialized !== nextSerialized) {
+      const uploadResult = await uploadCloudLibraryCatalog({
+        bundle,
+        authUserId: authState.user.id,
+        entries: nextEntries,
+      });
+      manifest = uploadResult.manifest;
+    }
+
+    return {
+      processedTargets: normalizedTargets,
+      removedCount: removedEntries.length,
+      removedIdentityKeys: normalizeCloudLibraryIdentityKeys(
+        removedEntries.map((entry) => entry?.identityKey),
+      ),
+      localEntries: catalogSnapshot.localEntries,
+      remoteEntries,
+      mergedEntries: nextEntries,
+      remoteOnlyEntries: getRemoteOnlyCloudLibraryEntries(
+        nextEntries,
+        catalogSnapshot.localEntries,
+      ),
+      lastUpdatedAt: manifest.updatedAt || "",
+    };
+  };
+
+  const removeLibraryCatalogEntry = async (options = {}) => {
+    const game = options?.game || null;
+    const target = game
+      ? buildCloudLibraryCatalogEntry(game) || {
+          preferredIdentityKey: "",
+          candidateIdentityKeys: buildCloudLibraryEntryIdentityCandidates({
+            atlasId: game?.atlas_id || "",
+            f95Id: game?.f95_id || "",
+            siteUrl: game?.siteUrl || "",
+            title: game?.displayTitle || game?.title || "",
+            creator: game?.displayCreator || game?.creator || "",
+          }),
+          atlasId: String(game?.atlas_id || "").trim(),
+          f95Id: String(game?.f95_id || "").trim(),
+          siteUrl: String(game?.siteUrl || "").trim(),
+          title: String(game?.displayTitle || game?.title || "").trim(),
+          creator: String(game?.displayCreator || game?.creator || "").trim(),
+        }
+      : options?.target || null;
+
+    return removeLibraryCatalogEntries({
+      targets: target ? [target] : [],
+    });
   };
 
   const onAuthStateChange = (listener) => {
@@ -1002,10 +1229,18 @@ function createCloudSaveService({
     uploadGameSaves,
     restoreGameSaves,
     getCloudLibraryCatalog,
+    removeLibraryCatalogEntries,
+    removeLibraryCatalogEntry,
     syncLibraryCatalog,
   };
 }
 
 module.exports = {
+  buildCloudLibraryCatalogSnapshot,
   createCloudSaveService,
+  filterCloudLibraryEntriesByIdentity,
+  normalizeCloudLibraryIdentityKeys,
+  normalizeCloudLibraryDeleteTarget,
+  normalizeCloudLibraryDeleteTargets,
+  shouldRemoveCloudLibraryEntry,
 };

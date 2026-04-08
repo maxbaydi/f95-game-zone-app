@@ -73,10 +73,10 @@ const DeleteGameModal = ({
   const profiles = Array.isArray(saveProfiles) ? saveProfiles : [];
   const primaryActionLabel =
     mode === DeleteGameModes.LIBRARY_ONLY
-      ? "Remove From Library"
+      ? "Remove from Library"
       : mode === DeleteGameModes.DELETE_FILES_AND_SAVES
-        ? "Delete Everything"
-        : "Delete Files";
+        ? "Delete Game and Saves"
+        : "Delete Game Files";
   const primaryActionClass =
     mode === DeleteGameModes.DELETE_FILES_AND_SAVES
       ? "bg-red-600 text-white hover:bg-red-500"
@@ -93,32 +93,32 @@ const DeleteGameModal = ({
             {displayTitle}
           </div>
           <div className="mt-2 text-sm text-text/65">
-            Choose how much the app should remove from this PC.
+            Choose what you want removed from this PC.
           </div>
         </div>
 
         <div className="grid max-h-[58vh] gap-6 overflow-y-auto px-6 py-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
           <div className="space-y-4">
             <DeleteModeCard
-              title="Remove from library only"
-              description="Hide this game from F95 Game Zone App but keep the installed files and all saves exactly where they are."
-              detail="No files are deleted"
+              title="Just remove it from my library"
+              description="The game disappears from your library list, but the game files and your progress stay on this PC."
+              detail="Nothing on this PC is deleted"
               selected={mode === DeleteGameModes.LIBRARY_ONLY}
               onClick={() => onSelectMode(DeleteGameModes.LIBRARY_ONLY)}
             />
             <DeleteModeCard
-              title="Delete installed files, keep my saves"
-              description="Remove the installed game folders and keep a local backup of detected saves so the game can be restored later."
-              detail="Recommended for safe cleanup"
+              title="Delete the game, keep my progress"
+              description="The game files are removed from this PC, but your progress is kept so you can come back later."
+              detail="Best if you want to free up space"
               selected={mode === DeleteGameModes.DELETE_FILES_KEEP_SAVES}
               onClick={() =>
                 onSelectMode(DeleteGameModes.DELETE_FILES_KEEP_SAVES)
               }
             />
             <DeleteModeCard
-              title="Delete everything"
-              description="Remove the game from F95 Game Zone App, delete installed files, wipe detected saves, and clear local backup copies."
-              detail="Use only when you want a full local wipe"
+              title="Delete the game and start over"
+              description="The game is removed from your library, the game files are deleted, and the saves we found on this PC are erased too."
+              detail="Use this only if you want everything gone"
               tone="danger"
               selected={mode === DeleteGameModes.DELETE_FILES_AND_SAVES}
               onClick={() =>
@@ -130,7 +130,7 @@ const DeleteGameModal = ({
           <div className="space-y-4">
             <div className="rounded-2xl border border-border bg-white/5 p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-text/55">
-                What the app found
+                What will be affected
               </div>
               <div className="mt-3 grid gap-3 text-sm text-text/80">
                 <div className="rounded-xl border border-border/70 bg-black/20 px-3 py-3">
@@ -139,8 +139,8 @@ const DeleteGameModal = ({
                     {installFolders.length === 1 ? "folder" : "folders"}
                   </div>
                   <div className="mt-1 text-xs text-text/58">
-                    The app will delete these only if you choose a file removal
-                    option.
+                    These are only removed if you choose an option that deletes
+                    game files.
                   </div>
                 </div>
                 <div className="rounded-xl border border-border/70 bg-black/20 px-3 py-3">
@@ -149,8 +149,8 @@ const DeleteGameModal = ({
                     {profiles.length === 1 ? "location" : "locations"}
                   </div>
                   <div className="mt-1 text-xs text-text/58">
-                    Full cleanup removes detected saves. The safe option keeps
-                    them.
+                    If you keep your progress, these stay safe. Full cleanup
+                    removes them.
                   </div>
                 </div>
               </div>
@@ -159,7 +159,7 @@ const DeleteGameModal = ({
             {installFolders.length > 0 && (
               <div className="rounded-2xl border border-border bg-white/5 p-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-text/55">
-                  Installed Folders
+                  Game Folders
                 </div>
                 <div className="mt-3 max-h-[160px] space-y-2 overflow-y-auto">
                   {installFolders.map((folderPath) => (
@@ -177,7 +177,7 @@ const DeleteGameModal = ({
             {profiles.length > 0 && (
               <div className="rounded-2xl border border-border bg-white/5 p-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-text/55">
-                  Detected Save Folders
+                  Save Folders We Found
                 </div>
                 <div className="mt-3 max-h-[160px] space-y-2 overflow-y-auto">
                   {profiles.map((profile) => (
@@ -203,10 +203,10 @@ const DeleteGameModal = ({
         <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
           <div className="text-xs text-text/55">
             {mode === DeleteGameModes.LIBRARY_ONLY
-              ? "Installed files stay on disk."
+              ? "Your game files and progress will stay on this PC."
               : mode === DeleteGameModes.DELETE_FILES_AND_SAVES
-                ? "Detected saves and local backup copies will be removed."
-                : "Detected saves are preserved before installed files are removed."}
+                ? "Your game files, saves, and local backup copies will be removed."
+                : "Your game files will be removed, but your progress will be kept."}
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -224,9 +224,9 @@ const DeleteGameModal = ({
               className={`rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${primaryActionClass}`}
             >
               {isDeleting
-                ? "Removing..."
+                ? "Working..."
                 : isLoading
-                  ? "Loading..."
+                  ? "Checking..."
                   : primaryActionLabel}
             </button>
           </div>

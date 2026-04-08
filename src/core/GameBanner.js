@@ -120,7 +120,13 @@ const pickVersionForLaunch = (versions) => {
   return best;
 };
 
-function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
+function AtlasF95BannerCard({
+  game,
+  onSelect,
+  onUpdateGame,
+  onContextMenu,
+  onToggleFavorite,
+}) {
   const displayTitle = game.displayTitle || game.title || "Unknown";
   const newestInstalledVersion =
     game.newestInstalledVersion ||
@@ -135,6 +141,10 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
     : canInstall
       ? "Install"
       : "Play";
+  const isFavorite = Boolean(game.isFavorite);
+  const favoriteActionLabel = isFavorite
+    ? "Remove from Favorites"
+    : "Add to Favorites";
 
   const handlePrimaryAction = (e) => {
     e.stopPropagation();
@@ -151,6 +161,11 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
     if (canInstall) {
       onUpdateGame?.(game);
     }
+  };
+
+  const handleFavoriteAction = (e) => {
+    e.stopPropagation();
+    onToggleFavorite?.(game);
   };
 
   const thumbChildren = [];
@@ -206,6 +221,30 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
       title: primaryActionLabel,
     },
     primaryActionLabel,
+  );
+
+  const favoriteControl = React.createElement(
+    "button",
+    {
+      key: "favorite",
+      type: "button",
+      className: `inline-flex h-6 w-6 shrink-0 items-center justify-center border pointer-events-auto transition-colors ${
+        isFavorite
+          ? "border-amber-400/80 bg-amber-500/20 text-amber-100 hover:bg-amber-500/30"
+          : "border-border/60 bg-surfaceMuted/70 text-white/80 hover:bg-selected"
+      }`,
+      onClick: handleFavoriteAction,
+      "aria-label": favoriteActionLabel,
+      title: favoriteActionLabel,
+    },
+    React.createElement(
+      "span",
+      {
+        className: "material-symbols-outlined text-[16px] leading-none",
+        style: isFavorite ? { fontVariationSettings: "'FILL' 1" } : undefined,
+      },
+      "star",
+    ),
   );
 
   const bodyChildren = [
@@ -268,9 +307,9 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
       "div",
       {
         key: "row",
-        className: "mt-auto flex min-h-0 items-center justify-end",
+        className: "mt-auto flex min-h-0 items-center justify-between gap-2",
       },
-      primaryActionControl,
+      [favoriteControl, primaryActionControl],
     ),
   ].filter(Boolean);
 
@@ -312,7 +351,7 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
 
 window.AtlasF95BannerCard = AtlasF95BannerCard;
 
-const GameBanner = ({ game, onSelect, onUpdateGame }) => {
+const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
   const [template, setTemplate] = useState(null);
 
   const handleContextMenu = (e) => {
@@ -426,6 +465,18 @@ const GameBanner = ({ game, onSelect, onUpdateGame }) => {
     }
 
     menuTemplate.push({
+      label: game.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+      data: {
+        action: game.isFavorite ? "removeFromFavorites" : "addToFavorites",
+        recordId: game.record_id,
+      },
+    });
+
+    if (menuTemplate.length > 0) {
+      menuTemplate.push({ type: "separator" });
+    }
+
+    menuTemplate.push({
       label: "View Details",
       data: { action: "properties", recordId: game.record_id },
     });
@@ -485,6 +536,7 @@ const GameBanner = ({ game, onSelect, onUpdateGame }) => {
     game,
     onSelect,
     onUpdateGame,
+    onToggleFavorite,
     onContextMenu: handleContextMenu,
   });
 };

@@ -51,6 +51,14 @@ const {
 const { removeLibraryGame } = require("./main/gameRemoval");
 const { upsertSaveSyncState } = require("./main/db/saveSyncStateStore");
 const {
+  buildCloudLibraryDeleteRequest,
+  collectCloudLibraryDeleteCandidateKeys,
+  deletePendingCloudLibraryDeleteRequest,
+  listPendingCloudLibraryDeleteRequests,
+  queueCloudLibraryDeleteRequest,
+  setPendingCloudLibraryDeleteRequestError,
+} = require("./main/db/cloudLibraryDeleteQueueStore");
+const {
   listScanSources,
   createScanSource,
   patchScanSource,
@@ -79,6 +87,7 @@ const {
   DEFAULT_PREVIEW_LIMIT,
   resolvePreviewDownloadCount,
 } = require("./main/previewLimit");
+const { resolveSupabaseSettings } = require("./main/supabase/client");
 const {
   startEnabledSourcesScan,
   getRecentScanJobs,
@@ -92,6 +101,7 @@ const {
   initializeDatabase,
   addGame,
   updateGame,
+  setGameFavorite,
   addVersion,
   updateVersion,
   addAtlasMapping,
@@ -163,8 +173,8 @@ const f95InstallContexts = new Map();
 const f95DownloadsStore = createDownloadsStore();
 let f95DownloadSequence = 0;
 
-const MAIN_WINDOW_DEFAULT_WIDTH = 1280;
-const MAIN_WINDOW_DEFAULT_HEIGHT = 800;
+const MAIN_WINDOW_DEFAULT_WIDTH = 1600;
+const MAIN_WINDOW_DEFAULT_HEIGHT = 900;
 const MAIN_WINDOW_MIN_WIDTH = 1024;
 const MAIN_WINDOW_MIN_HEIGHT = 680;
 const MAIN_WINDOW_EDGE_PADDING = 48;
@@ -1158,27 +1168,193 @@ function scheduleCloudInstalledSavesReconcile(reason) {
   });
 }
 
-async function syncCloudLibraryCatalogNow(reason) {
+function normalizeCloudLibraryIdentityKeys(values) {
+  const normalizedKeys = [];
+  const seenKeys = new Set();
+
+  for (const rawValue of Array.isArray(values) ? values : []) {
+    const identityKey = String(rawValue || "").trim();
+    if (!identityKey || seenKeys.has(identityKey)) {
+      continue;
+    }
+
+    seenKeys.add(identityKey);
+    normalizedKeys.push(identityKey);
+  }
+
+  return normalizedKeys;
+}
+
+function normalizeCloudLibrarySyncOptions(options) {
+  return {
+    excludedIdentityKeys: normalizeCloudLibraryIdentityKeys(
+      options?.excludedIdentityKeys,
+    ),
+  };
+}
+
+function getConfiguredCloudProjectKey() {
+  const settings = resolveSupabaseSettings(appConfig);
+  return String(settings.projectRef || settings.url || "")
+    .trim()
+    .toLowerCase();
+}
+
+function buildGameCloudLibraryDeleteRequest(game) {
+  return buildCloudLibraryDeleteRequest({
+    cloudProjectKey: getConfiguredCloudProjectKey(),
+    recordId: game?.record_id || null,
+    atlasId: game?.atlas_id || "",
+    f95Id: game?.f95_id || "",
+    siteUrl: game?.siteUrl || "",
+    title: game?.displayTitle || game?.title || "",
+    creator: game?.displayCreator || game?.creator || "",
+  });
+}
+
+async function processPendingCloudLibraryDeletesNow(reason) {
+  if (!databaseConnection) {
+    throw new Error("Database connection is not ready.");
+  }
+
+  const cloudProjectKey = getConfiguredCloudProjectKey();
+  if (!cloudProjectKey) {
+    return {
+      processed: 0,
+      removed: 0,
+      failed: 0,
+      excludedIdentityKeys: [],
+      pending: 0,
+      reason,
+    };
+  }
+
+  const authState = await getReadyCloudSaveService().getAuthState();
+  if (!authState?.authenticated) {
+    return {
+      processed: 0,
+      removed: 0,
+      failed: 0,
+      excludedIdentityKeys: [],
+      pending: 0,
+      reason,
+    };
+  }
+
+  const pendingRequests = await listPendingCloudLibraryDeleteRequests(
+    databaseConnection,
+    cloudProjectKey,
+  );
+  if (pendingRequests.length === 0) {
+    return {
+      processed: 0,
+      removed: 0,
+      failed: 0,
+      excludedIdentityKeys: [],
+      pending: 0,
+      reason,
+    };
+  }
+
+  const processedExcludedIdentityKeys =
+    collectCloudLibraryDeleteCandidateKeys(pendingRequests);
+
+  try {
+    const result = await getReadyCloudSaveService().removeLibraryCatalogEntries({
+      targets: pendingRequests,
+    });
+
+    for (const request of pendingRequests) {
+      await deletePendingCloudLibraryDeleteRequest(
+        databaseConnection,
+        request.requestKey,
+      );
+    }
+
+    console.info("[cloud.library] processed pending deletes", {
+      reason,
+      requests: pendingRequests.length,
+      removed: result?.removedCount ?? 0,
+    });
+
+    return {
+      processed: pendingRequests.length,
+      removed: result?.removedCount ?? 0,
+      failed: 0,
+      excludedIdentityKeys: processedExcludedIdentityKeys,
+      pending: 0,
+      reason,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    for (const request of pendingRequests) {
+      await setPendingCloudLibraryDeleteRequestError(
+        databaseConnection,
+        request.requestKey,
+        errorMessage,
+      ).catch(() => {});
+    }
+
+    console.error("[cloud.library] Pending delete processing failed:", {
+      reason,
+      pending: pendingRequests.length,
+      error: errorMessage,
+    });
+
+    return {
+      processed: 0,
+      removed: 0,
+      failed: pendingRequests.length,
+      excludedIdentityKeys: [],
+      pending: pendingRequests.length,
+      reason,
+      error: errorMessage,
+    };
+  }
+}
+
+async function syncCloudLibraryCatalogNow(reason, options = {}) {
   const authState = await getReadyCloudSaveService().getAuthState();
   if (!authState?.authenticated) {
     throw new Error("Cloud library sync requires a signed-in account.");
   }
 
-  const result = await getReadyCloudSaveService().syncLibraryCatalog();
-  const materialized = await materializeCloudLibraryCatalogEntries(
-    result?.remoteOnlyEntries || [],
-    `cloud-catalog-${reason}`,
+  const pendingDeleteResult = await processPendingCloudLibraryDeletesNow(
+    `${reason}:pre-sync`,
   );
+
+  const normalizedOptions = normalizeCloudLibrarySyncOptions({
+    ...options,
+    excludedIdentityKeys: normalizeCloudLibraryIdentityKeys([
+      ...(options?.excludedIdentityKeys || []),
+      ...(pendingDeleteResult?.excludedIdentityKeys || []),
+    ]),
+  });
+  const shouldMaterializeRemoteOnly = Boolean(options?.materializeRemoteOnly);
+  const result = await getReadyCloudSaveService().syncLibraryCatalog(
+    normalizedOptions,
+  );
+  const materialized = shouldMaterializeRemoteOnly
+    ? await materializeCloudLibraryCatalogEntries(
+        result?.remoteOnlyEntries || [],
+        `cloud-catalog-${reason}`,
+      )
+    : { added: 0, updated: 0, failed: 0 };
 
   console.info("[cloud.library] catalog sync", {
     reason,
     local: result?.localEntries?.length ?? 0,
     remote: result?.remoteEntries?.length ?? 0,
     remoteOnly: result?.remoteOnlyEntries?.length ?? 0,
+    excluded: normalizedOptions.excludedIdentityKeys.length,
+    materializedEnabled: shouldMaterializeRemoteOnly,
     materialized,
   });
 
-  broadcastGamesLibrarySynced({ materialized, reason });
+  if (shouldMaterializeRemoteOnly) {
+    broadcastGamesLibrarySynced({ materialized, reason });
+  }
 
   return {
     ...result,
@@ -1186,9 +1362,10 @@ async function syncCloudLibraryCatalogNow(reason) {
   };
 }
 
-function scheduleCloudLibraryCatalogSync(reason) {
+function scheduleCloudLibraryCatalogSync(reason, options = {}) {
+  const normalizedOptions = normalizeCloudLibrarySyncOptions(options);
   return queueCloudSaveTask(`sync cloud library catalog (${reason})`, async () =>
-    syncCloudLibraryCatalogNow(reason),
+    syncCloudLibraryCatalogNow(reason, normalizedOptions),
   );
 }
 
@@ -2312,6 +2489,45 @@ ipcMain.handle("delete-game-completely", async (_, recordId) => {
 
 ipcMain.handle("remove-library-game", async (_, payload) => {
   try {
+    const targetRecordId = Number(payload?.recordId);
+    const cloudProjectKey = getConfiguredCloudProjectKey();
+    const gameBeforeRemoval =
+      Number.isInteger(targetRecordId) && targetRecordId > 0
+        ? await getGame(targetRecordId, appPaths).catch((error) => {
+            console.warn(
+              "[library.remove] Could not load game before deletion:",
+              error,
+            );
+            return null;
+          })
+        : null;
+    const pendingCloudDeleteRequest =
+      cloudProjectKey && gameBeforeRemoval
+        ? buildGameCloudLibraryDeleteRequest(gameBeforeRemoval)
+        : null;
+    const hasUnresolvableCloudDelete =
+      Boolean(cloudProjectKey && gameBeforeRemoval && !pendingCloudDeleteRequest);
+
+    if (pendingCloudDeleteRequest) {
+      try {
+        await queueCloudLibraryDeleteRequest(
+          databaseConnection,
+          pendingCloudDeleteRequest,
+        );
+      } catch (error) {
+        console.error(
+          "[cloud.library] Failed to persist pending cloud delete before local removal:",
+          error,
+        );
+        return {
+          success: false,
+          code: "CLOUD_DELETE_QUEUE_FAILED",
+          error:
+            "Couldn't prepare the account-wide removal, so nothing was deleted.",
+        };
+      }
+    }
+
     const result = await removeLibraryGame(payload || {}, {
       appPaths,
       libraryRoot: getConfiguredLibraryFolder(),
@@ -2322,8 +2538,81 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
       deleteGameCompletely,
     });
 
+    if (!result?.success && pendingCloudDeleteRequest) {
+      await deletePendingCloudLibraryDeleteRequest(
+        databaseConnection,
+        pendingCloudDeleteRequest.requestKey,
+      ).catch((error) => {
+        console.warn(
+          "[cloud.library] Failed to roll back pending delete after local removal failure:",
+          error,
+        );
+      });
+    }
+
     if (result?.success) {
       broadcastGameDeleted(result.recordId);
+
+      if (pendingCloudDeleteRequest) {
+        const cloudAuthState = await getReadyCloudSaveService()
+          .getAuthState()
+          .catch((error) => {
+            console.warn(
+              "[cloud.library] Failed to check auth state after local removal:",
+              error,
+            );
+            return null;
+          });
+
+        if (cloudAuthState?.authenticated) {
+          const cloudRemovalResult = await scheduleCloudLibraryCatalogSync(
+            "post-library-remove",
+            {
+              excludedIdentityKeys:
+                pendingCloudDeleteRequest.candidateIdentityKeys || [],
+            },
+          );
+
+          if (!cloudRemovalResult || cloudRemovalResult.failed > 0) {
+            result.warnings = [
+              ...(Array.isArray(result.warnings) ? result.warnings : []),
+              "The game was removed from this PC, but it's still in your account library for now.",
+            ];
+          }
+        } else {
+          result.warnings = [
+            ...(Array.isArray(result.warnings) ? result.warnings : []),
+            "The game was removed from this PC. It will be removed from your account library after you sign in.",
+          ];
+        }
+
+        if (
+          cloudAuthState?.authenticated &&
+          pendingCloudDeleteRequest.requestKey
+        ) {
+          const remainingPendingDeletes = await listPendingCloudLibraryDeleteRequests(
+            databaseConnection,
+            cloudProjectKey,
+          ).catch(() => []);
+
+          if (
+            remainingPendingDeletes.some(
+              (request) =>
+                request.requestKey === pendingCloudDeleteRequest.requestKey,
+            )
+          ) {
+            result.warnings = [
+              ...(Array.isArray(result.warnings) ? result.warnings : []),
+              "The game was removed from this PC. We'll keep trying to remove it from your account library.",
+            ];
+          }
+        }
+      } else if (hasUnresolvableCloudDelete) {
+        result.warnings = [
+          ...(Array.isArray(result.warnings) ? result.warnings : []),
+          "The game was removed from this PC, but we couldn't match it safely with the copy in your account library.",
+        ];
+      }
     }
 
     return result;
@@ -2344,6 +2633,41 @@ ipcMain.handle("get-game", async (event, recordId) => {
 
 ipcMain.handle("get-games", async (event, { offset, limit }) => {
   return await getGames(appPaths, offset, limit);
+});
+
+ipcMain.handle("set-game-favorite", async (_event, payload) => {
+  const recordId = Number(payload?.recordId);
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    return {
+      success: false,
+      error: "Invalid game identifier.",
+    };
+  }
+
+  const isFavorite = Boolean(payload?.isFavorite);
+
+  try {
+    await setGameFavorite(recordId, isFavorite);
+    const game = await getGame(recordId, appPaths);
+
+    if (!game) {
+      return {
+        success: false,
+        error: "Game was not found after update.",
+      };
+    }
+
+    return {
+      success: true,
+      game,
+    };
+  } catch (error) {
+    console.error("[library.favorite] Failed to update game favorite:", error);
+    return {
+      success: false,
+      error: "F95 Game Zone App could not update Favorites for this game.",
+    };
+  }
 });
 
 ipcMain.handle("remove-game", async (event, record_id) => {
@@ -2687,26 +3011,9 @@ ipcMain.handle("run-bulk-cloud-save-action", async (_, mode) => {
 ipcMain.handle("get-cloud-library-catalog", async () => {
   try {
     const result = await getReadyCloudSaveService().getCloudLibraryCatalog();
-    const materialized = await materializeCloudLibraryCatalogEntries(
-      result?.remoteOnlyEntries || [],
-      "cloud-catalog-panel-read",
-    );
-    if (
-      materialized.added > 0 ||
-      materialized.updated > 0 ||
-      materialized.failed > 0
-    ) {
-      console.info("[cloud.library] catalog read materialized", {
-        materialized,
-      });
-      broadcastGamesLibrarySynced({ materialized, reason: "panel-read" });
-    }
     return {
       success: true,
-      result: {
-        ...result,
-        materialized,
-      },
+      result,
     };
   } catch (error) {
     console.error("[cloud.library] Failed to load cloud catalog:", error);
@@ -2720,7 +3027,9 @@ ipcMain.handle("get-cloud-library-catalog", async () => {
 
 ipcMain.handle("sync-cloud-library-catalog", async () => {
   try {
-    const result = await syncCloudLibraryCatalogNow("manual-panel-sync");
+    const result = await syncCloudLibraryCatalogNow("manual-panel-sync", {
+      materializeRemoteOnly: true,
+    });
     return {
       success: true,
       result,
@@ -5036,6 +5345,8 @@ async function handleContextAction(targetWebContents, data) {
       break;
     case "removeGame":
     case "updateGame":
+    case "addToFavorites":
+    case "removeFromFavorites":
     case "rescanLibrary":
     case "resetCacheAndRescanLibrary":
       forwardContextMenuCommand(targetWebContents, data);

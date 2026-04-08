@@ -30,10 +30,25 @@ const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
     }
   };
 
+  const isOverlayManagedLink = (anchor) => {
+    if (!anchor || typeof anchor.matches !== "function") {
+      return false;
+    }
+
+    return anchor.matches(
+      '.LbImage, .js-lbImage, [data-lb-id], [data-xf-click], [data-featherlight], .bbImageWrapper a',
+    );
+  };
+
   const rewriteAnchors = () => {
     document.querySelectorAll("a[href]").forEach((anchor) => {
       const href = anchor.getAttribute("href") || anchor.href;
-      if (!href || href.startsWith("#") || !isSameF95Host(href)) {
+      if (
+        !href ||
+        href.startsWith("#") ||
+        !isSameF95Host(href) ||
+        isOverlayManagedLink(anchor)
+      ) {
         return;
       }
 
@@ -52,30 +67,6 @@ const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
     childList: true,
     subtree: true,
   });
-
-  document.addEventListener(
-    "click",
-    (event) => {
-      const anchor = event.target.closest("a[href]");
-      if (!anchor) {
-        return;
-      }
-
-      const href = anchor.getAttribute("href") || anchor.href;
-      if (!href || href.startsWith("#") || !isSameF95Host(href)) {
-        return;
-      }
-
-      const resolvedUrl = new URL(href, location.href).href;
-      if (resolvedUrl === location.href) {
-        return;
-      }
-
-      event.preventDefault();
-      location.href = resolvedUrl;
-    },
-    true,
-  );
 })();`;
 
 const formatBytes = (bytes) => {
@@ -551,7 +542,9 @@ const F95BrowserWorkspace = () => {
       });
 
       if (!result?.success || !result.result) {
-        setInstallError(result?.error || "Failed to add this thread to the library.");
+        setInstallError(
+          result?.error || "Failed to add this thread to the library.",
+        );
         return;
       }
 

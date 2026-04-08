@@ -11,20 +11,32 @@ function normalizeCatalogUrl(value) {
   return trimmed.replace(/\/+$/, "").toLowerCase();
 }
 
-function buildCloudLibraryEntryIdentity(input) {
+function buildCloudLibraryEntryIdentityCandidates(input) {
+  const candidates = [];
+  const seenValues = new Set();
+  const pushCandidate = (value) => {
+    const normalizedValue = String(value || "").trim();
+    if (!normalizedValue || seenValues.has(normalizedValue)) {
+      return;
+    }
+
+    seenValues.add(normalizedValue);
+    candidates.push(normalizedValue);
+  };
+
   const atlasId = String(input?.atlasId || "").trim();
   if (atlasId) {
-    return `atlas:${atlasId}`;
+    pushCandidate(`atlas:${atlasId}`);
   }
 
   const f95Id = String(input?.f95Id || "").trim();
   if (f95Id) {
-    return `f95:${f95Id}`;
+    pushCandidate(`f95:${f95Id}`);
   }
 
   const siteUrl = normalizeCatalogUrl(input?.siteUrl);
   if (siteUrl) {
-    return `site:${siteUrl}`;
+    pushCandidate(`site:${siteUrl}`);
   }
 
   const titleKey = buildCompactScanKey(input?.title || input?.displayTitle || "");
@@ -32,11 +44,15 @@ function buildCloudLibraryEntryIdentity(input) {
     input?.creator || input?.displayCreator || "",
   );
 
-  if (!titleKey) {
-    return "";
+  if (titleKey) {
+    pushCandidate(`title:${titleKey}|creator:${creatorKey || "unknown"}`);
   }
 
-  return `title:${titleKey}|creator:${creatorKey || "unknown"}`;
+  return candidates;
+}
+
+function buildCloudLibraryEntryIdentity(input) {
+  return buildCloudLibraryEntryIdentityCandidates(input)[0] || "";
 }
 
 function buildCloudLibraryCatalogEntry(game) {
@@ -210,8 +226,10 @@ function getRemoteOnlyCloudLibraryEntries(remoteEntries, localEntries) {
 module.exports = {
   buildCloudLibraryCatalogEntry,
   buildCloudLibraryEntryIdentity,
+  buildCloudLibraryEntryIdentityCandidates,
   getRemoteOnlyCloudLibraryEntries,
   mergeCloudLibraryCatalogEntries,
+  normalizeCatalogUrl,
   parseCloudLibraryCatalogManifest,
   sortCloudLibraryCatalogEntries,
 };

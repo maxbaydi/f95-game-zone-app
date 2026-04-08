@@ -39,6 +39,7 @@ const GAME_METADATA_SELECT = `
   games.title as title,
   games.creator as creator,
   games.engine as engine,
+  games.is_favorite as isFavorite,
   games.description,
   games.total_playtime,
   games.last_played_r,
@@ -167,6 +168,45 @@ const updateGame = (game) => {
   });
 };
 
+const setGameFavorite = (recordId, isFavorite) => {
+  const normalizedRecordId = Number(recordId);
+  if (!Number.isInteger(normalizedRecordId) || normalizedRecordId <= 0) {
+    return Promise.reject(new Error("setGameFavorite requires a valid recordId"));
+  }
+
+  const favoriteFlag = isFavorite ? 1 : 0;
+
+  return new Promise((resolve, reject) => {
+    db.run(
+      `
+        UPDATE games
+        SET is_favorite = ?
+        WHERE record_id = ?
+      `,
+      [favoriteFlag, normalizedRecordId],
+      function onFavoriteUpdated(err) {
+        if (err) {
+          console.error("Error updating game favorite flag:", err);
+          reject(err);
+          return;
+        }
+
+        if (this.changes === 0) {
+          reject(
+            new Error(`Game with record_id ${normalizedRecordId} does not exist`),
+          );
+          return;
+        }
+
+        resolve({
+          recordId: normalizedRecordId,
+          isFavorite: Boolean(favoriteFlag),
+        });
+      },
+    );
+  });
+};
+
 const addVersion = (game, recordId) => {
   const { version, folder, executables, folderSize = 0 } = game;
   const executable =
@@ -277,6 +317,7 @@ const getGame = (recordId, appPaths) => {
           const game = {
             ...row,
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
+            isFavorite: Boolean(row.isFavorite),
             banner_url: resolveBannerUrl(
               appPaths,
               row.banner_path,
@@ -380,6 +421,7 @@ const getGames = (appPaths, offset = 0, limit = null) => {
             ...row,
             // Unescape engine to fix 'Ren''Py' issue
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
+            isFavorite: Boolean(row.isFavorite),
             banner_url: resolveBannerUrl(
               appPaths,
               row.banner_path,
@@ -1527,6 +1569,7 @@ module.exports = {
   getBanners,
   getBanner,
   updateGame,
+  setGameFavorite,
   updateVersion,
   deleteVersionsForRecordPath,
   getSteamIDbyRecord,
