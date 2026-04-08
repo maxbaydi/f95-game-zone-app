@@ -109,7 +109,7 @@ const F95UpdateModal = ({
               type="button"
               onClick={onConfirm}
               disabled={isLoading || isInstalling || !selectedLink}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-black transition hover:bg-selected disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isInstalling ? "Starting..." : confirmLabel}
             </button>

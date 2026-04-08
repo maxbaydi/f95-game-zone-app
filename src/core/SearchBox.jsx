@@ -31,7 +31,7 @@ const SearchBox = ({
           className={`[-webkit-app-region:no-drag] flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-r-2xl transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
             isSearchActive
               ? "text-accent"
-              : "text-text/80 hover:bg-white/10 hover:text-highlight"
+              : "text-text/80 hover:bg-white/10 hover:text-accent"
           }`}
         >
           <i className="fas fa-sliders"></i>

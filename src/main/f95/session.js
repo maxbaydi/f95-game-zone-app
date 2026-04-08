@@ -1,9 +1,18 @@
+const path = require("path");
 const { session } = require("electron");
 
 const F95_AUTH_PARTITION = "persist:f95-auth";
 const F95_LOGIN_URL = "https://f95zone.to/login/";
 const F95_SEARCH_URL = "https://f95zone.to/sam/latest_alpha/";
 const F95_BASE_URL = "https://f95zone.to/";
+const F95_WINDOW_ICON_PATH = path.join(
+  __dirname,
+  "..",
+  "..",
+  "assets",
+  "images",
+  "appicon.ico",
+);
 
 function getF95Session() {
   return session.fromPartition(F95_AUTH_PARTITION);
@@ -118,6 +127,7 @@ function createF95BrowserWindow({
     height: 820,
     minWidth: 960,
     minHeight: 700,
+    icon: F95_WINDOW_ICON_PATH,
     title,
     autoHideMenuBar: true,
     show: false,

@@ -32,6 +32,7 @@ const {
   DownloadValidationError,
   inspectDownloadedPackage,
   MirrorActionRequiredError,
+  normalizeEngineLabel,
   normalizeHostname,
   parseF95ThreadTitle,
   prepareF95DownloadUrl,
@@ -169,6 +170,12 @@ const MAIN_WINDOW_MIN_HEIGHT = 680;
 const MAIN_WINDOW_EDGE_PADDING = 48;
 const MAIN_WINDOW_SAFE_MIN_WIDTH = 900;
 const MAIN_WINDOW_SAFE_MIN_HEIGHT = 620;
+const APP_WINDOW_ICON_PATH = path.join(
+  __dirname,
+  "assets",
+  "images",
+  "appicon.ico",
+);
 
 // ────────────────────────────────────────────────
 // WINDOW CREATION FUNCTIONS
@@ -221,6 +228,7 @@ function createWindow() {
     height: mainWindowBounds.height,
     minWidth: mainWindowBounds.minWidth,
     minHeight: mainWindowBounds.minHeight,
+    icon: APP_WINDOW_ICON_PATH,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -255,6 +263,7 @@ function createSettingsWindow() {
     height: 600,
     minWidth: 850,
     minHeight: 600,
+    icon: APP_WINDOW_ICON_PATH,
     roundedCorners: true,
     frame: false,
     transparent: true,
@@ -293,6 +302,7 @@ function createImporterWindow() {
     height: 720,
     minWidth: 1280,
     minHeight: 720,
+    icon: APP_WINDOW_ICON_PATH,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -336,6 +346,7 @@ function createGameDetailsWindow(recordId) {
     height: 900,
     minWidth: 1400,
     minHeight: 900,
+    icon: APP_WINDOW_ICON_PATH,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -382,6 +393,25 @@ function createGameDetailsWindow(recordId) {
 
 function normalizeF95DownloadUrl(url) {
   return String(url || "").trim();
+}
+
+function isUnknownEngineLabel(value) {
+  const normalized = String(value || "").trim();
+  return !normalized || /^unknown$/i.test(normalized);
+}
+
+function resolveEngineLabel(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      continue;
+    }
+    if (!isUnknownEngineLabel(normalized)) {
+      return normalizeEngineLabel(normalized) || normalized;
+    }
+  }
+
+  return "Unknown";
 }
 
 function sanitizePathSegment(value, fallback = "Unknown") {
@@ -695,7 +725,7 @@ async function buildF95ThreadLibraryMetadata(input) {
     version: String(
       input?.version || parsedTitle.version || atlasData.version || "",
     ).trim(),
-    engine: String(input?.engine || atlasData.engine || "Unknown").trim(),
+    engine: resolveEngineLabel(input?.engine, parsedTitle.engine, atlasData.engine),
     atlasId: atlasMetadata.atlasId || null,
     f95Id: atlasMetadata.f95Id || extractF95IdFromUrl(input?.threadUrl || ""),
   };
@@ -726,7 +756,7 @@ async function upsertLibraryGameFromMetadata(
         existingGame?.displayCreator ||
         "Unknown",
     ).trim(),
-    engine: String(metadata?.engine || existingGame?.engine || "Unknown").trim(),
+    engine: resolveEngineLabel(metadata?.engine, existingGame?.engine),
   };
   let recordId = existingGame?.record_id || null;
 
@@ -1319,6 +1349,7 @@ function queueF95InstallContext(metadata) {
       title: metadata?.title || "F95 download",
       creator: metadata?.creator || "",
       version: metadata?.version || "",
+      engine: resolveEngineLabel(metadata?.engine),
       threadUrl: metadata?.threadUrl || "",
       downloadLabel: metadata?.downloadLabel || "",
       sourceHost,
@@ -1689,11 +1720,15 @@ async function persistF95InstalledGame(payload) {
   const atlasMetadata =
     payload.atlasMetadata ||
     (await prepareDownloadedGameMetadata(payload.metadata));
+  const installedFolderSize =
+    payload.installDirectory && fs.existsSync(payload.installDirectory)
+      ? getFolderSize(payload.installDirectory)
+      : 0;
   const gameRecord = {
     title: payload.title,
     creator: payload.metadata?.creator || "Unknown",
     version: payload.metadata?.version || "Downloaded",
-    engine: payload.detectedEngine,
+    engine: resolveEngineLabel(payload.detectedEngine, payload.metadata?.engine),
     description: payload.metadata?.threadUrl
       ? `Installed from ${payload.metadata.threadUrl}`
       : "Installed from F95",
@@ -1720,6 +1755,7 @@ async function persistF95InstalledGame(payload) {
       {
         ...gameRecord,
         folder: payload.installDirectory,
+        folderSize: installedFolderSize,
         execPath: payload.selectedValue
           ? path.join(payload.installDirectory, payload.selectedValue)
           : "",
@@ -1803,6 +1839,24 @@ async function persistF95InstalledGame(payload) {
   const importedRecordId = Array.isArray(importResults)
     ? importResults[0]?.recordId
     : null;
+  if (
+    importedRecordId &&
+    installedFolderSize > 0 &&
+    String(gameRecord.version || "").trim()
+  ) {
+    await updateFolderSize(
+      importedRecordId,
+      String(gameRecord.version).trim(),
+      installedFolderSize,
+    ).catch((error) => {
+      console.warn("[f95.install] Failed to store installed folder size:", {
+        recordId: importedRecordId,
+        version: gameRecord.version,
+        size: installedFolderSize,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
   if (databaseConnection && importedRecordId) {
     await refreshSaveProfiles(
       appPaths,
@@ -2824,6 +2878,10 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
     String(payload?.creator || "").trim() || parsedThreadTitle.creator || "";
   const resolvedVersion =
     String(payload?.version || "").trim() || parsedThreadTitle.version || "";
+  const resolvedEngine = resolveEngineLabel(
+    payload?.engine,
+    parsedThreadTitle.engine,
+  );
 
   const context = queueF95InstallContext({
     downloadUrl: preparedDownload.resolvedUrl,
@@ -2832,6 +2890,7 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
     title: resolvedTitle,
     creator: resolvedCreator,
     version: resolvedVersion,
+    engine: resolvedEngine,
     downloadLabel: payload?.downloadLabel || "",
   });
 
@@ -4485,6 +4544,98 @@ function getFolderSize(dir) {
   return size;
 }
 
+function getVersionsMissingStoredFolderSize(limit = 200) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `
+        SELECT record_id, version, game_path
+        FROM versions
+        WHERE (folder_size IS NULL OR folder_size <= 0)
+          AND game_path IS NOT NULL
+          AND TRIM(game_path) <> ''
+        ORDER BY date_added DESC
+        LIMIT ?
+      `,
+      [limit],
+      (error, rows) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(Array.isArray(rows) ? rows : []);
+      },
+    );
+  });
+}
+
+async function backfillMissingVersionFolderSizes(limit = 200) {
+  const rows = await getVersionsMissingStoredFolderSize(limit);
+  if (!rows.length) {
+    return {
+      scanned: 0,
+      updated: 0,
+    };
+  }
+
+  const updatedRecordIds = new Set();
+  let updated = 0;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const recordId = Number(row?.record_id);
+    const version = String(row?.version || "").trim();
+    const gamePath = String(row?.game_path || "").trim();
+
+    if (!recordId || !version || !gamePath || !fs.existsSync(gamePath)) {
+      continue;
+    }
+
+    let size = 0;
+    try {
+      size = getFolderSize(gamePath);
+    } catch (error) {
+      console.warn("[library.size] Failed to read game folder size:", {
+        recordId,
+        version,
+        gamePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    if (!Number.isFinite(size) || size <= 0) {
+      continue;
+    }
+
+    try {
+      await updateFolderSize(recordId, version, size);
+      updated += 1;
+      updatedRecordIds.add(recordId);
+    } catch (error) {
+      console.warn("[library.size] Failed to persist game folder size:", {
+        recordId,
+        version,
+        size,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if ((index + 1) % 5 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  for (const recordId of updatedRecordIds) {
+    mainWindow?.webContents.send("game-updated", recordId);
+  }
+
+  return {
+    scanned: rows.length,
+    updated,
+  };
+}
+
 function findExecutables(dir, extensions) {
   const execs = [];
   const stack = [dir];
@@ -5073,6 +5224,17 @@ app.whenReady().then(async () => {
     });
   });
   createWindow();
+  setTimeout(() => {
+    backfillMissingVersionFolderSizes().then((result) => {
+      if (result.updated > 0) {
+        console.log(
+          `[library.size] Backfilled folder size for ${result.updated} version records (scanned ${result.scanned}).`,
+        );
+      }
+    }).catch((error) => {
+      console.warn("[library.size] Folder-size backfill failed:", error);
+    });
+  }, 1200);
   const initialCloudAuthState = await broadcastCloudAuthState().catch((error) => {
     console.error("[cloud.auth] Failed to initialize auth state:", error);
     return null;

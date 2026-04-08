@@ -103,6 +103,7 @@ const getF95CaptchaContinuationUrl =
 
 const IMPORT_PROGRESS_TERMINAL_TOAST_MS = 2000;
 const PREVIEW_MODAL_IMAGE_MAX_HEIGHT_CSS = "min(78vh, 900px)";
+const GRID_SCROLLBAR_GUTTER_PX = 8;
 
 const isTerminalImportProgressToast = (text) => {
   const t = String(text || "").trim();
@@ -297,6 +298,7 @@ const App = () => {
   const [isCloudAuthOpen, setIsCloudAuthOpen] = useState(false);
   const gridRef = useRef(null);
   const gameGridRef = useRef(null);
+  const resizeGridFrameRef = useRef(null);
   const selectedGameRef = useRef(null);
   const f95UpdateModalRef = useRef(createDefaultF95UpdateModalState());
   const f95CaptchaRetryKeyRef = useRef("");
@@ -308,8 +310,40 @@ const App = () => {
     }
 
     gridRef.current.recomputeGridSize?.();
-    gridRef.current.forceUpdate?.();
   }, []);
+
+  const getColumnCount = useCallback(
+    (width) => {
+      const containerWidth =
+        width ?? gameGridRef.current?.clientWidth ?? Math.max(0, window.innerWidth - 260);
+      const adjustedWidth = Math.max(0, containerWidth - GRID_SCROLLBAR_GUTTER_PX);
+      return Math.max(
+        1,
+        Math.floor(adjustedWidth / (bannerSize.bannerWidth + 8)),
+      );
+    },
+    [bannerSize.bannerWidth],
+  );
+
+  const runGridResizeSync = useCallback(() => {
+    const containerWidth =
+      gameGridRef.current?.clientWidth ?? Math.max(0, window.innerWidth - 260);
+    const nextColumnCount = getColumnCount(containerWidth);
+    setColumnCount((current) =>
+      current === nextColumnCount ? current : nextColumnCount,
+    );
+    refreshLibraryGrid();
+  }, [getColumnCount, refreshLibraryGrid]);
+
+  const scheduleGridResizeSync = useCallback(() => {
+    if (resizeGridFrameRef.current !== null) {
+      return;
+    }
+    resizeGridFrameRef.current = window.requestAnimationFrame(() => {
+      resizeGridFrameRef.current = null;
+      runGridResizeSync();
+    });
+  }, [runGridResizeSync]);
 
   // Debounce function for game refresh
   const debounce = (func, delay) => {
@@ -334,6 +368,16 @@ const App = () => {
   useEffect(() => {
     deleteGameModalRef.current = deleteGameModal;
   }, [deleteGameModal]);
+
+  useEffect(() => {
+    return () => {
+      if (resizeGridFrameRef.current === null) {
+        return;
+      }
+      window.cancelAnimationFrame(resizeGridFrameRef.current);
+      resizeGridFrameRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -924,18 +968,10 @@ const App = () => {
     [],
   );
 
-  // Handle resize with debounce for smoother updates
-  const debounceResize = debounce(() => {
-    const containerWidth =
-      gameGridRef.current?.clientWidth || window.innerWidth - 260;
-    const scrollbarWidth = getScrollbarWidth();
-    const adjustedWidth = Math.max(0, containerWidth - scrollbarWidth);
-    const newColumnCount = getColumnCount(adjustedWidth);
-    setColumnCount(newColumnCount);
-    refreshLibraryGrid();
-  }, 16); // ~60fps for smoother resize
-
   useEffect(() => {
+    let gameGridResizeObserver = null;
+    const runResizeSync = () => scheduleGridResizeSync();
+
     window.electronAPI
       .getDefaultGameFolder()
       .then((value) => setDefaultGameFolder(String(value || "").trim()))
@@ -1329,14 +1365,21 @@ const App = () => {
       }
     });
 
-    // Set up resize listener
-    window.addEventListener("resize", debounceResize);
-    debounceResize(); // Initial resize calculation
+    // Set up layout sync: window resize + container resize during details-panel drag
+    window.addEventListener("resize", runResizeSync);
+    if (typeof window.ResizeObserver === "function" && gameGridRef.current) {
+      gameGridResizeObserver = new window.ResizeObserver(() => {
+        runResizeSync();
+      });
+      gameGridResizeObserver.observe(gameGridRef.current);
+    }
+    runResizeSync();
 
     // Cleanup
     return () => {
       window.electronAPI.removeUpdateStatusListener?.();
-      window.removeEventListener("resize", debounceResize);
+      window.removeEventListener("resize", runResizeSync);
+      gameGridResizeObserver?.disconnect();
       window.electronAPI.onWindowStateChanged(() => {});
       window.electronAPI.onDbUpdateProgress(() => {});
       window.electronAPI.onImportProgress(() => {});
@@ -1347,7 +1390,7 @@ const App = () => {
       window.electronAPI.removeAllListeners("f95-browser-navigation");
       unsubscribeGamesLibrarySynced?.();
     };
-  }, [refreshLibraryGrid]);
+  }, [scheduleGridResizeSync]);
 
   useEffect(() => {
     let mounted = true;
@@ -1808,11 +1851,7 @@ const App = () => {
               : "";
 
   useEffect(() => {
-    const resizeTimeout = setTimeout(() => {
-      debounceResize();
-    }, 0);
-
-    return () => clearTimeout(resizeTimeout);
+    scheduleGridResizeSync();
   }, [
     activeSection,
     showGameList,
@@ -1820,25 +1859,8 @@ const App = () => {
     isSelectedGameLoading,
     visibleLibraryGames.length,
     siteSearchResults.length,
+    scheduleGridResizeSync,
   ]);
-
-  const getColumnCount = (width) => {
-    const containerWidth =
-      width || gameGridRef.current?.clientWidth || window.innerWidth - 260;
-    const scrollbarWidth = getScrollbarWidth();
-    const adjustedWidth = containerWidth - scrollbarWidth;
-    return Math.max(
-      1,
-      Math.floor(adjustedWidth / (bannerSize.bannerWidth + 8)),
-    );
-  };
-
-  const getScrollbarWidth = () => {
-    if (gameGridRef.current) {
-      return gameGridRef.current.offsetWidth - gameGridRef.current.clientWidth;
-    }
-    return 8;
-  };
 
   const cellRenderer = ({ columnIndex, rowIndex, style }) => {
     const index = rowIndex * columnCount + columnIndex;
@@ -1901,21 +1923,20 @@ const App = () => {
 
   return (
     <div className="atlas-app flex h-screen min-h-0 flex-col font-sans text-[13px] antialiased">
-      <div className="flex h-[70px] shrink-0 select-none items-center [-webkit-app-region:drag] fixed top-0 z-50 w-full border-b border-border bg-primary/70 shadow-glass-sm backdrop-blur-xl">
-        <div className="z-50 flex h-[70px] w-[60px] shrink-0 items-center justify-center bg-gradient-to-br from-accentBar via-accent to-[#1e6b7e] shadow-glow-accent">
-          <svg
-            className="w-[50px] h-[50px] text-atlasLogo"
-            viewBox="0 0 24 24"
-            style={{ shapeRendering: "geometricPrecision" }}
-            fill="currentColor"
-            dangerouslySetInnerHTML={{ __html: window.atlasLogo.path }}
+      <div className="flex h-[70px] shrink-0 select-none items-center [-webkit-app-region:drag] fixed top-0 z-50 w-full border-b border-border bg-primary shadow-glass-sm">
+        <div className="z-50 flex h-[70px] w-[60px] shrink-0 items-center justify-center border-r border-border bg-gradient-to-b from-tertiary to-primary">
+          <img
+            src="./assets/images/logo.png"
+            alt="F95 Game Zone App"
+            className="h-[48px] w-[48px] object-contain"
+            draggable={false}
           />
         </div>
-        <div className="relative flex-1 [-webkit-app-region:drag] h-[70px] bg-gradient-to-r from-primary/98 via-primary/92 to-primary/98">
-          <div className="absolute left-[48px] right-[200px] top-0 h-[2px] bg-gradient-to-r from-transparent via-accentBar/85 to-transparent"></div>
+        <div className="relative flex-1 [-webkit-app-region:drag] h-[70px] bg-primary">
+          <div className="absolute left-[48px] right-[200px] top-0 h-px bg-gradient-to-r from-transparent via-accent/35 to-transparent"></div>
           <div className="flex h-[70px] w-full items-center">
             <div className="ml-5 flex shrink-0 items-center">
-              <div className="cursor-pointer bg-gradient-to-r from-accent via-highlight to-glam/90 bg-clip-text font-semibold text-transparent [-webkit-app-region:no-drag]">
+              <div className="cursor-pointer font-semibold text-text [-webkit-app-region:no-drag]">
                 {activeSection === SECTION_UPDATES
                   ? "Updates"
                   : activeSection === SECTION_SEARCH
@@ -1940,7 +1961,7 @@ const App = () => {
           <div className="pointer-events-none absolute right-[200px] top-1/2 z-0 -translate-y-1/2 select-none">
             <span className="whitespace-nowrap text-xs text-text/90">
               v{version}{" "}
-              <span className="text-glam drop-shadow-[0_0_8px_rgba(201,166,90,0.45)]">
+              <span className="text-accent/90">
                 α
               </span>
             </span>
@@ -2006,7 +2027,7 @@ const App = () => {
         <div className="ml-[60px] flex flex-1 overflow-hidden">
           {activeSection !== SECTION_SEARCH && showGameList && (
             <div className="atlas-glass-subtle w-[220px] shrink-0 overflow-y-auto border-r border-border">
-              <div className="sticky top-0 z-10 border-b border-border bg-black/20 px-3 py-2 text-[11px] uppercase tracking-[0.2em] text-text/55 backdrop-blur-md">
+              <div className="sticky top-0 z-10 flex min-h-[5rem] items-center border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
                 {activeSection === SECTION_UPDATES
                   ? "Update Titles"
                   : "Library Titles"}
@@ -2041,7 +2062,7 @@ const App = () => {
           <div className="flex flex-1 overflow-hidden">
             <div className="isolate flex flex-1 flex-col overflow-hidden">
               {activeSection !== SECTION_SEARCH && (
-                <div className="atlas-glass-panel relative z-20 shrink-0 border-b border-border px-4 py-2">
+                <div className="atlas-glass-panel relative z-20 flex min-h-[5rem] shrink-0 flex-col justify-center gap-2 border-b border-border px-4 py-2.5">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 text-[10px] uppercase leading-none tracking-[0.2em] text-glam/90">
                       {sectionMeta.eyebrow}
@@ -2082,7 +2103,7 @@ const App = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-2 text-[11px] text-text/60">
+                  <div className="line-clamp-2 text-[11px] leading-snug text-text/60">
                     {librarySortDescription}
                   </div>
                 </div>
@@ -2102,7 +2123,7 @@ const App = () => {
                     {({ height, width }) => {
                       const adjustedWidth = Math.max(
                         0,
-                        width - getScrollbarWidth(),
+                        width - GRID_SCROLLBAR_GUTTER_PX,
                       );
                       return (
                         <Grid
@@ -2362,7 +2383,7 @@ const App = () => {
           <button
             type="button"
             onClick={addGame}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
           >
             <i className="fas fa-plus mr-2 text-accent"></i>
             Add Game
@@ -2370,7 +2391,7 @@ const App = () => {
           <button
             type="button"
             onClick={() => setShowDiscovery((prev) => !prev)}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
           >
             <i className="fas fa-binoculars mr-2 text-accent"></i>
             Scan Hub
@@ -2378,7 +2399,7 @@ const App = () => {
           <button
             type="button"
             onClick={openRescanLibraryMenu}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
           >
             <i className="fas fa-sync-alt mr-2 text-accent"></i>
             Rescan Library
@@ -2417,7 +2438,7 @@ const App = () => {
               appUpdateState.status === "downloaded"
                 ? "bg-emerald-800/90 text-white hover:bg-emerald-700"
                 : appUpdateState.status === "available"
-                  ? "border border-accent/40 bg-accent/90 text-text hover:bg-accent"
+                  ? "border border-accent/40 bg-accent/90 text-onAccent hover:bg-accent"
                   : "border border-border bg-white/5 text-text hover:bg-white/10"
             } ${
               appUpdateState.status === "checking" ||
@@ -2431,12 +2452,12 @@ const App = () => {
           <button
             type="button"
             onClick={() => setDownloadsPanelOpen((previous) => !previous)}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-highlight"
+            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
           >
             <i className="fas fa-download mr-2 text-accent"></i>
             Downloads
             {f95Downloads.activeCount > 0 && (
-              <span className="ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-black">
+              <span className="ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-onAccent">
                 {f95Downloads.activeCount}
               </span>
             )}

@@ -6,10 +6,15 @@
   -webkit-app-region: no-drag;
 }
 
+body {
+  font-family: Manrope, "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue",
+    Arial, sans-serif;
+}
+
 .atlas-app {
   position: relative;
   isolation: isolate;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 0 0 1px #3d4450;
 }
 
 .atlas-app::before {
@@ -19,30 +24,22 @@
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 100% 80% at 0% -10%, rgba(44, 142, 169, 0.22), transparent 55%),
-    radial-gradient(ellipse 80% 60% at 100% 20%, rgba(201, 166, 90, 0.09), transparent 50%),
-    radial-gradient(ellipse 70% 50% at 50% 100%, rgba(44, 142, 169, 0.12), transparent 55%),
-    #050506;
+    radial-gradient(ellipse 100% 70% at 0% 0%, rgba(102, 192, 244, 0.07), transparent 52%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, rgba(42, 71, 94, 0.45), transparent 48%),
+    radial-gradient(ellipse 80% 55% at 50% 100%, rgba(22, 32, 45, 0.9), transparent 58%),
+    #171a21;
 }
 
 .atlas-glass-panel {
-  background: linear-gradient(
-    145deg,
-    rgba(255, 255, 255, 0.07) 0%,
-    rgba(255, 255, 255, 0.02) 50%,
-    rgba(0, 0, 0, 0.12) 100%
-  );
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, #1b2838 0%, #16202d 100%);
+  border: 1px solid #3d4450;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .atlas-glass-subtle {
-  background: rgba(18, 20, 24, 0.65);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(27, 40, 56, 0.96);
+  border: 1px solid #3d4450;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .atlas-skeleton {
@@ -64,9 +61,9 @@
 
 :root {
   --atlas-scrollbar-size: 7px;
-  --atlas-scrollbar-thumb: rgba(255, 255, 255, 0.22);
-  --atlas-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
-  --atlas-scrollbar-thumb-hidden: rgba(255, 255, 255, 0);
+  --atlas-scrollbar-thumb: #3d4450;
+  --atlas-scrollbar-thumb-hover: #66c0f4;
+  --atlas-scrollbar-thumb-hidden: rgba(61, 68, 80, 0);
 }
 
 * {

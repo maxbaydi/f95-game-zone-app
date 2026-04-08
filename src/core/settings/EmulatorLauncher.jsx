@@ -108,7 +108,7 @@ const EmulatorLauncher = () => {
               <button
                 type="button"
                 onClick={handleSelectProgram}
-                className="p-2 bg-accent text-text rounded hover:bg-highlight"
+                className="rounded bg-accent p-2 text-onAccent hover:brightness-110"
               >
                 Browse
               </button>
@@ -128,7 +128,7 @@ const EmulatorLauncher = () => {
           </div>
           <button
             type="submit"
-            className="p-2 bg-accent text-text rounded hover:bg-highlight"
+            className="rounded bg-accent p-2 text-onAccent hover:brightness-110"
           >
             Add Emulator/Launcher
           </button>

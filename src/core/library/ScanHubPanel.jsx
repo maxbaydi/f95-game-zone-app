@@ -128,9 +128,9 @@ const ScanHubPanel = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-black/55 backdrop-blur-sm">
-      <div className="absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary/85 shadow-glass backdrop-blur-xl">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-black/20 px-3 py-2 backdrop-blur-md">
+    <div className="fixed inset-0 z-[1200] bg-onAccent/75">
+      <div className="absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary shadow-glass">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-secondary px-3 py-2">
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.2em] opacity-55">
               Library Scan
@@ -162,7 +162,7 @@ const ScanHubPanel = ({
               <button
                 type="button"
                 onClick={onRescan}
-                className="bg-accent px-2 py-1 text-xs text-text hover:bg-selected"
+                className="bg-accent px-2 py-1 text-xs text-onAccent hover:brightness-110"
               >
                 Rescan Library
               </button>
@@ -241,7 +241,7 @@ const ScanHubPanel = ({
                           )
                         }
                         disabled={busyAction === "library-folder"}
-                        className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-60"
+                        className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-60"
                       >
                         {busyAction === "library-folder"
                           ? "Saving…"

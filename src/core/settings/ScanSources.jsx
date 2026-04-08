@@ -114,7 +114,7 @@ const ScanSources = () => {
           </p>
         </div>
         <button
-          className="bg-accent text-text px-4 py-2 rounded hover:bg-hover"
+          className="rounded bg-accent px-4 py-2 text-onAccent hover:brightness-110"
           onClick={handleAddSource}
         >
           Add Source

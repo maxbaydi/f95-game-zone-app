@@ -305,7 +305,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
                     window.electronAPI.uploadCloudSaves(game.record_id),
                   )
                 }
-                className="inline-flex h-8 w-8 items-center justify-center border border-accent/50 bg-accent text-text hover:bg-selected disabled:opacity-60"
+                className="inline-flex h-8 w-8 items-center justify-center border border-accent/50 bg-accent text-onAccent hover:brightness-110 disabled:opacity-60"
                 disabled={
                   busyAction !== "" ||
                   !authState.authenticated ||

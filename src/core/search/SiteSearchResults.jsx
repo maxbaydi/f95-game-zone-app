@@ -230,7 +230,7 @@ const SiteSearchResults = ({
                 <div className="mt-4 flex items-center gap-3">
                   <button
                     onClick={() => onOpenPage(result.siteUrl)}
-                    className="rounded bg-accent px-4 py-2 text-sm text-text hover:bg-selected"
+                    className="rounded bg-accent px-4 py-2 text-sm text-onAccent hover:brightness-110"
                     disabled={!result.siteUrl}
                   >
                     Open F95 Page

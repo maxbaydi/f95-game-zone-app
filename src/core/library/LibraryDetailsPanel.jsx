@@ -1,4 +1,43 @@
-const { useMemo } = window.React;
+const {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} = window.React;
+
+const LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY =
+  "atlas-library-details-panel-width";
+const LIBRARY_DETAILS_PANEL_WIDTH_DEFAULT_PX = 420;
+const LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX = 280;
+const LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX = 900;
+const LIBRARY_DETAILS_PANEL_WIDTH_PERSIST_DELAY_MS = 160;
+
+const getLibraryDetailsPanelMaxWidthPx = () =>
+  Math.min(
+    LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX,
+    Math.max(
+      LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX,
+      typeof window !== "undefined" ? window.innerWidth - 160 : LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX,
+    ),
+  );
+
+const readStoredLibraryDetailsPanelWidthPx = () => {
+  try {
+    const raw = localStorage.getItem(LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY);
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n)) {
+      const max = getLibraryDetailsPanelMaxWidthPx();
+      return Math.min(
+        max,
+        Math.max(LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX, n),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  return LIBRARY_DETAILS_PANEL_WIDTH_DEFAULT_PX;
+};
 
 const formatDetailDate = (value) => {
   if (!value) {
@@ -110,27 +149,181 @@ const LibraryDetailsPanel = ({
   const displayCreator = game?.displayCreator || game?.creator || "";
   const hasInstalledVersions = versionList.length > 0;
 
+  const [panelWidthPx, setPanelWidthPx] = useState(
+    readStoredLibraryDetailsPanelWidthPx,
+  );
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeDragRef = useRef(null);
+
+  useEffect(() => {
+    const clamp = () => {
+      setPanelWidthPx((previous) => {
+        const max = getLibraryDetailsPanelMaxWidthPx();
+        return Math.min(
+          max,
+          Math.max(LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX, previous),
+        );
+      });
+    };
+    window.addEventListener("resize", clamp);
+    clamp();
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
+
+  useEffect(() => {
+    const persistTimeout = window.setTimeout(() => {
+      try {
+        localStorage.setItem(
+          LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY,
+          String(panelWidthPx),
+        );
+      } catch {
+        /* ignore */
+      }
+    }, LIBRARY_DETAILS_PANEL_WIDTH_PERSIST_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(persistTimeout);
+    };
+  }, [panelWidthPx]);
+
+  useEffect(() => {
+    if (!isResizing) {
+      return undefined;
+    }
+
+    const applyClientX = (clientX) => {
+      const start = resizeDragRef.current;
+      if (!start) {
+        return;
+      }
+      const dx = clientX - start.startX;
+      const max = getLibraryDetailsPanelMaxWidthPx();
+      const next = Math.min(
+        max,
+        Math.max(
+          LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX,
+          start.startWidth - dx,
+        ),
+      );
+      setPanelWidthPx(next);
+    };
+
+    const onMouseMove = (e) => applyClientX(e.clientX);
+    const onMouseUp = () => {
+      setIsResizing(false);
+      resizeDragRef.current = null;
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length === 0) {
+        return;
+      }
+      applyClientX(e.touches[0].clientX);
+    };
+    const onTouchEnd = () => {
+      setIsResizing(false);
+      resizeDragRef.current = null;
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("touchend", onTouchEnd);
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizing]);
+
+  const handleResizePointerDown = useCallback(
+    (e) => {
+      if (e.button !== undefined && e.button !== 0) {
+        return;
+      }
+      e.preventDefault();
+      resizeDragRef.current = {
+        startX: e.clientX,
+        startWidth: panelWidthPx,
+      };
+      setIsResizing(true);
+    },
+    [panelWidthPx],
+  );
+
+  const handleResizeKeyDown = useCallback((e) => {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setPanelWidthPx((previous) =>
+        Math.min(
+          getLibraryDetailsPanelMaxWidthPx(),
+          previous + 8,
+        ),
+      );
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setPanelWidthPx((previous) =>
+        Math.max(LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX, previous - 8),
+      );
+    }
+  }, []);
+
   return (
-    <aside className="atlas-glass-panel w-[420px] shrink-0 border-l border-border shadow-glass">
-      <div className="flex h-full flex-col">
-        <div className="relative z-10 flex items-start justify-between gap-3 border-b border-border bg-black/15 px-4 py-2.5 backdrop-blur-sm">
+    <aside
+      className="atlas-glass-panel relative h-full min-h-0 shrink-0 border-l border-border shadow-glass"
+      style={{ width: panelWidthPx }}
+    >
+      <button
+        type="button"
+        className="absolute left-0 top-0 z-30 h-full w-3 -translate-x-1/2 cursor-ew-resize border-0 bg-transparent p-0 hover:bg-accent/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent"
+        aria-label="Resize details panel"
+        title="Drag to resize"
+        aria-orientation="vertical"
+        role="separator"
+        tabIndex={0}
+        style={{ touchAction: "none" }}
+        onMouseDown={handleResizePointerDown}
+        onTouchStart={(e) => {
+          if (e.touches.length === 0) {
+            return;
+          }
+          e.preventDefault();
+          const touch = e.touches[0];
+          resizeDragRef.current = {
+            startX: touch.clientX,
+            startWidth: panelWidthPx,
+          };
+          setIsResizing(true);
+        }}
+        onKeyDown={handleResizeKeyDown}
+      />
+      <div className="flex h-full min-w-0 flex-col">
+        <div className="relative z-10 flex min-h-[5rem] items-center justify-between gap-3 border-b border-border bg-black/15 px-4 py-2.5 backdrop-blur-sm">
           <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.22em] opacity-50">
-              Game Overview
-            </div>
             <div className="truncate text-lg font-semibold leading-tight text-text">
               {isLoading ? "Loading..." : displayTitle}
             </div>
-            <div className="truncate text-sm opacity-70">
+            <div className="truncate text-sm leading-snug opacity-70">
               {isLoading ? "Fetching metadata..." : displayCreator}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10"
+            className="shrink-0 border border-border bg-white/5 p-1.5 text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            aria-label="Close"
+            title="Close"
           >
-            Close
+            <span className="material-symbols-outlined block text-[20px] leading-none">
+              close
+            </span>
           </button>
         </div>
 
@@ -226,7 +419,7 @@ const LibraryDetailsPanel = ({
                         <button
                           type="button"
                           onClick={() => onUpdateGame?.(game)}
-                          className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-40"
+                          className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-40"
                           disabled={!game.siteUrl}
                         >
                           {hasInstalledVersions
@@ -269,7 +462,7 @@ const LibraryDetailsPanel = ({
                               <button
                                 type="button"
                                 onClick={() => onPlayGame?.(version, game)}
-                                className="bg-accent px-2 py-0.5 text-xs text-text hover:bg-selected disabled:opacity-60"
+                                className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-60"
                                 disabled={!version.exec_path}
                               >
                                 Play

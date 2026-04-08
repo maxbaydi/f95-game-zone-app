@@ -35,7 +35,7 @@ const Sidebar = ({
     "div",
     {
       className:
-        "w-[60px] flex min-w-[60px] flex-col items-center border-r border-border bg-primary/80 py-px backdrop-blur-xl fixed z-50 h-full shadow-glass-sm",
+        "w-[60px] flex min-w-[60px] flex-col items-center border-r border-border bg-primary py-px fixed z-50 h-full shadow-glass-sm",
     },
     items.map((item) => {
       const isActive = activeSection === item.id && !item.isExternal;
@@ -47,7 +47,7 @@ const Sidebar = ({
           type: "button",
           title: item.label,
           className:
-            "group relative flex h-[68px] w-full cursor-pointer items-center justify-center bg-transparent transition-colors [-webkit-app-region:no-drag] hover:bg-white/5",
+            "group relative flex h-[68px] w-full cursor-pointer items-center justify-center bg-transparent transition-colors [-webkit-app-region:no-drag] hover:bg-tertiary/35",
           onClick: () => onSelectSection?.(item.id),
         },
         React.createElement("div", {
@@ -60,7 +60,7 @@ const Sidebar = ({
             "div",
             {
               className:
-                "absolute right-2 top-3 min-w-[18px] rounded-full border border-glam/40 bg-glam/90 px-1.5 py-0.5 text-[10px] font-semibold text-black shadow-glow-glam",
+                "absolute right-2 top-3 min-w-[18px] border border-glam/50 bg-glam px-1.5 py-0.5 text-[10px] font-semibold text-onAccent shadow-glow-glam",
             },
             item.badge > 99 ? "99+" : String(item.badge),
           ),
@@ -68,7 +68,7 @@ const Sidebar = ({
           "div",
           {
             className:
-              "pointer-events-none absolute left-[68px] whitespace-nowrap rounded-lg border border-border bg-primary/95 px-3 py-1.5 text-xs text-text opacity-0 shadow-glass backdrop-blur-md transition-opacity group-hover:opacity-100",
+              "pointer-events-none absolute left-[68px] whitespace-nowrap border border-border bg-secondary px-3 py-1.5 text-xs text-text opacity-0 shadow-glass transition-opacity group-hover:opacity-100",
           },
           item.label,
         ),

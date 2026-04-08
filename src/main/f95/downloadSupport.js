@@ -57,6 +57,30 @@ const F95_TITLE_NOISE_PREFIXES = [
   "collection",
 ];
 
+const F95_ENGINE_LABELS = {
+  "ren'py": "Ren'Py",
+  renpy: "Ren'Py",
+  unity: "Unity",
+  html: "HTML",
+  flash: "Flash",
+  rpgm: "RPGM",
+  "rpgm mv": "RPGM",
+  "rpgm mz": "RPGM",
+  "rpg maker": "RPGM",
+  "rpg maker mv": "RPGM",
+  "rpg maker mz": "RPGM",
+  "wolf rpg": "Wolf RPG",
+  "unreal engine": "Unreal Engine",
+  unreal: "Unreal Engine",
+  godot: "Godot",
+  java: "Java",
+  webgl: "WebGL",
+  adrift: "ADRIFT",
+  qsp: "QSP",
+  rags: "RAGS",
+  tads: "Tads",
+};
+
 const GOFILE_CLIENT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Atlas/1.0 Chrome/125.0.0.0 Safari/537.36";
 const GOFILE_CLIENT_LANGUAGE = "en-US";
@@ -117,11 +141,21 @@ function isVersionLikeToken(token) {
   );
 }
 
-function stripLeadingNoisePrefixes(value) {
+function normalizeEngineLabel(value) {
+  const normalizedToken = normalizeText(value)
+    .toLowerCase()
+    .replace(/^pre[-_\s]+/i, "")
+    .replace(/[_-]+/g, " ");
+
+  return F95_ENGINE_LABELS[normalizedToken] || "";
+}
+
+function peelLeadingNoisePrefixes(value) {
   let result = normalizeText(value);
   const sortedPrefixes = [...F95_TITLE_NOISE_PREFIXES].sort(
     (left, right) => right.length - left.length,
   );
+  const removedPrefixes = [];
 
   let changed = true;
   while (changed && result) {
@@ -135,6 +169,7 @@ function stripLeadingNoisePrefixes(value) {
         continue;
       }
 
+      removedPrefixes.push(prefix.toLowerCase());
       result = normalizeText(
         result.replace(prefixPattern, " ").replace(/^[|:;,.!/?<>\-–—~]+/, " "),
       );
@@ -142,7 +177,14 @@ function stripLeadingNoisePrefixes(value) {
     }
   }
 
-  return result;
+  return {
+    cleaned: result,
+    removedPrefixes,
+  };
+}
+
+function stripLeadingNoisePrefixes(value) {
+  return peelLeadingNoisePrefixes(value).cleaned;
 }
 
 function sanitizeF95ThreadTitle(rawTitle) {
@@ -169,13 +211,29 @@ function parseF95ThreadTitle(rawTitle) {
           !isVersionLikeToken(token) &&
           !F95_TITLE_NOISE_PREFIXES.includes(token.toLowerCase()),
       ) || "";
-  const title = sanitizeF95ThreadTitle(normalizedRawTitle);
+  const titleWithoutBrackets = normalizeText(
+    normalizedRawTitle
+      .replace(/\|\s*f95zone.*$/i, " ")
+      .replace(/\[[^\]]+\]/g, " ")
+      .replace(/\s+[|]\s+/g, " ")
+      .replace(/\s+[-–—]\s+/g, " "),
+  );
+  const { cleaned: strippedTitle, removedPrefixes } =
+    peelLeadingNoisePrefixes(titleWithoutBrackets);
+  const title = strippedTitle || titleWithoutBrackets;
+  const engineFromPrefixes = removedPrefixes
+    .map((prefix) => normalizeEngineLabel(prefix))
+    .find(Boolean);
+  const engineFromBrackets = bracketTokens
+    .map((token) => normalizeEngineLabel(token))
+    .find(Boolean);
 
   return {
     rawTitle: normalizedRawTitle,
     title: title || normalizedRawTitle,
     creator,
     version,
+    engine: engineFromPrefixes || engineFromBrackets || "",
   };
 }
 
@@ -1327,6 +1385,7 @@ module.exports = {
   inspectDownloadedPackage,
   looksLikeHtmlDocument,
   normalizeHostname,
+  normalizeEngineLabel,
   parseF95ThreadTitle,
   parseCountdownLandingConfig,
   prepareF95DownloadUrl,

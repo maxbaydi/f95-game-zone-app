@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-04-05
+Last updated: 2026-04-08
 
 ## How To Read This File
 
@@ -20,6 +20,86 @@ Last updated: 2026-04-05
 | Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                             |
 | Stage 5. Quality hardening       | partial     |      61% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                          |
 | MVP total                        | in_progress |      83% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### 2026-04-08 — Stage 1 metadata correctness: stop false `Unknown` engine for F95 installs
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes a real metadata integrity gap where installed F95 threads could lose known engine info from the page header and end up as `Unknown` in the library
+
+What was done:
+
+- Added explicit F95 thread engine parsing from header prefixes (`VN`, `Unity`, `Ren'Py`, etc.) and class-based labels like `pre-unity`.
+- Extended thread inspection payload to include `engine` together with title/version/creator.
+- Propagated `engine` from renderer install action into main-process install context.
+- Added safe engine fallback during install persistence: if executable-based auto-detection resolves to `Unknown`, the flow now uses thread metadata engine instead of writing `Unknown`.
+- Kept engine normalization consistent so lowercase detector labels (`unity`) are promoted to canonical display labels (`Unity`) when persisted from this flow.
+
+How it was implemented:
+
+- `src/main/f95/downloadSupport.js`
+  - `parseF95ThreadTitle(...)` now returns `engine`.
+  - Added engine alias normalization and prefix-removal tracking to infer engine from F95 title prefixes/brackets.
+- `src/main/f95/threadInspector.js`
+  - Added header-label engine extraction from `h1.p-title-value` (`pre-*`/label text).
+  - Included `engine` in success/error payload metadata returned from hidden-thread inspection.
+- `src/core/search/F95BrowserWorkspace.jsx`
+  - Install RPC payload now passes `engine` from inspected thread metadata.
+- `src/main.js`
+  - Added `resolveEngineLabel(...)` utility and unknown-engine guard.
+  - `buildF95ThreadLibraryMetadata(...)` now falls back to parsed thread engine.
+  - F95 install queue context now stores engine metadata.
+  - Persist step now prefers detected engine, but falls back to thread engine when detector returns unknown.
+- `test/f95DownloadSupport.test.js`
+  - Added engine assertions for existing parser tests.
+  - Added Unity-prefix parsing regression test for thread titles like:
+    - `VN Unity Not a Failure to Launch [v0.5.7] [NotAFailureToLaunch]`
+
+Checks run:
+
+- `node --test test/f95DownloadSupport.test.js`
+- `npm run lint -- src/main.js src/main/f95/downloadSupport.js test/f95DownloadSupport.test.js`
+
+What is still missing here:
+
+- Manual in-app smoke for a real Unity thread install path in Electron UI is still pending (verify card badge shows `Unity` immediately after install, not `Unknown`).
+
+### 2026-04-08 — Stage 1 library install telemetry: persist installed game folder size after F95 installs
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: closes a user-visible data-quality gap where installed F95 entries showed `Size: Unknown` in library details despite having fully materialized files on disk
+
+What was done:
+
+- Fixed post-install size persistence for F95 install flow in main process.
+- Size is now written to `versions.folder_size` both for:
+  - update installs into an existing library record;
+  - first-time installs that create a new local library record.
+- Added startup backfill for already-installed entries that still had missing `folder_size` from older builds.
+
+How it was implemented:
+
+- `src/main.js`
+  - in `persistF95InstalledGame(...)`:
+    - added a one-shot folder size calculation from `payload.installDirectory` using existing `getFolderSize(...)`;
+    - passed `folderSize` into the existing `addVersion(...)` call for existing-record update installs;
+    - after `importGamesInternal(...)` for new installs, added `updateFolderSize(recordId, version, size)` to persist the computed size into the inserted version row.
+  - added background `backfillMissingVersionFolderSizes(...)` startup task:
+    - scans version rows with `folder_size` missing/zero;
+    - recalculates from existing `game_path`;
+    - writes back to DB and emits `game-updated` for refreshed cards/details.
+
+Checks run:
+
+- `npm run lint -- src/main.js`
+- `node --test test/f95DownloadSupport.test.js`
+
+What is still missing here:
+
+- No dedicated unit test yet for:
+  - `persistF95InstalledGame(...)` folder-size writeback;
+  - startup backfill path for historical `folder_size` gaps.
 
 ### 2026-04-05 — Stage 4 sync UX + Stage 1 library flow: additive cloud library catalog, bulk cloud save actions, and installable library stubs
 
@@ -3512,3 +3592,264 @@ Impact on overall progress:
 
 - removes a real data-to-UI mismatch where structurally different mirror groups collapsed into noisy duplicates
 - keeps architecture disciplined: semantic grouping fixed in main parser layer, renderer remains a pure projection of typed variant data
+
+## 2026-04-08 — Live sidebar resize sync for library grid
+
+What was done:
+
+- fixed library layout behavior during game-details sidebar resize:
+  - left library content now updates continuously while dragging (not only on drag end)
+  - expanding sidebar back now reflows the left content immediately as well
+- added explicit renderer-side sync between details panel width updates and library grid layout recalculation
+
+How it was implemented:
+
+- updated `src/App.jsx`:
+  - introduced frame-throttled layout sync (`requestAnimationFrame`) for grid column recalculation
+  - replaced old resize debounce path that only reacted reliably on settled resize
+  - added `ResizeObserver` on the grid container to react to real container width changes (including flex changes from sidebar drag)
+  - kept window resize listener as a fallback path
+  - fixed column calculation flow to avoid double-subtracting scrollbar width during sync
+  - wired `onWidthChange` callback into `LibraryDetailsPanel` to request immediate grid sync from App while dragging
+- updated `src/core/library/LibraryDetailsPanel.jsx`:
+  - added `onWidthChange` prop
+  - emits width-change sync signal whenever panel width changes
+
+What remains:
+
+- manual visual smoke in packaged Electron window on low-end hardware to confirm frame pacing under heavy library payloads
+
+Current stage progress:
+
+- details sidebar resize interaction correctness: 98%
+- library-left-content live reflow consistency during drag: 97%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- closes a concrete UX defect in library navigation workflow without touching IPC/data boundaries
+- keeps renderer responsibilities isolated: layout sync in App, panel drag state in details component
+
+## 2026-04-08 — Review-driven hardening of sidebar resize implementation
+
+What was done:
+
+- applied review fixes to the new sidebar-resize logic to remove unnecessary runtime overhead and interaction edge cases
+- resolved all findings from UI/UX + frontend performance review pass
+
+How it was implemented:
+
+- updated `src/App.jsx`:
+  - removed duplicate resize sync path (`onWidthChange` callback channel) and left single source of truth via `ResizeObserver` + window resize fallback
+  - removed explicit `Grid.forceUpdate()` from resize sync path; kept `recomputeGridSize()` only
+  - removed layout read in render path by replacing dynamic scrollbar DOM measurement with a stable gutter constant (`GRID_SCROLLBAR_GUTTER_PX`)
+- updated `src/core/library/LibraryDetailsPanel.jsx`:
+  - changed panel width persistence to debounced localStorage writes (`LIBRARY_DETAILS_PANEL_WIDTH_PERSIST_DELAY_MS`) instead of synchronous write on every pixel change
+  - added `touchAction: "none"` on resize handle to avoid gesture/scroll conflicts on touch input
+  - removed now-unneeded `onWidthChange` prop integration
+
+What remains:
+
+- manual packaged-app visual pass to confirm smooth drag on real Electron window with very large libraries
+
+Current stage progress:
+
+- sidebar resize interaction robustness: 99%
+- resize-path runtime overhead reduction: 98%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- converts initial functional fix into production-safer behavior (less jank risk, fewer redundant rerenders)
+- keeps renderer architecture cleaner by removing duplicated resize signal channels
+
+## 2026-04-08 — Banner card title/action row alignment
+
+What was done:
+
+- adjusted library game card layout so game title and primary action button are rendered on the same horizontal row
+- preserved edge alignment style (title on left, action on right) as requested
+
+How it was implemented:
+
+- updated `src/core/GameBanner.js` (`AtlasF95BannerCard`):
+  - extracted primary action button into `primaryActionControl` and reused it in a dedicated title row
+  - replaced old two-row split (`title` row + separate action row) with a single `title-row` flex container
+  - kept optional bottom metadata (`Not installed` / update version text) in a separate `meta-row` below
+
+What remains:
+
+- manual visual pass in running Electron app for a few long-title entries to confirm truncation looks acceptable with the right-aligned action button
+
+Current stage progress:
+
+- banner title/action visual alignment correctness: 99%
+- library card readability after compact layout change: 98%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- removes a visible UI inconsistency in the core library workflow
+- improves scanability of cards without changing data flow or IPC boundaries
+
+## 2026-04-08 — Primary action badge styling aligned with version badge
+
+What was done:
+
+- updated game-card primary action control (`Play` / `Install`) to match the compact badge-like shape used by version/status labels
+- removed square icon-button presentation that looked visually detached from surrounding badges
+
+How it was implemented:
+
+- updated `src/core/GameBanner.js`:
+  - changed primary action button classes from square icon style (`h-8 w-8`) to compact badge geometry (`border`, `px-1.5`, `py-0.5`, `text-[10px]`)
+  - changed active/disabled color states to badge-oriented variants while preserving affordance and disabled behavior
+  - switched primary action content from icon glyphs to short text label (`Play` / `Install`) for visual consistency with adjacent textual badges
+
+What remains:
+
+- manual visual pass for very narrow cards and long localized action labels, if localization is introduced later
+
+Current stage progress:
+
+- banner action/button visual consistency: 99%
+- library card micro-typography coherence: 98%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- improves visual consistency of high-frequency library interactions without changing card logic
+- reduces UI noise and makes card footer hierarchy clearer
+
+## 2026-04-08 — Banner layout rollback to split title/action rows
+
+What was done:
+
+- reverted card footer layout to split rows:
+  - game title is on its own row
+  - primary action button is on the lower row
+
+How it was implemented:
+
+- updated `src/core/GameBanner.js` (`AtlasF95BannerCard`):
+  - removed single-line `title-row` arrangement (`title + button`)
+  - restored two-row structure: `title` block + bottom `row` block with action button and optional left metadata
+  - kept current button styling and click logic unchanged
+
+What remains:
+
+- optional quick visual pass to confirm spacing looks balanced on very long titles
+
+Current stage progress:
+
+- card layout correctness vs current UI request: 100%
+- banner interaction behavior stability: 100%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- aligns UI output with explicit user preference without affecting data flow or interactions
+
+## 2026-04-08 — Removed duplicate update-version text near card action button
+
+What was done:
+
+- removed the extra version text block that was rendered opposite the bottom action button in library/update cards
+- kept the requested card hierarchy:
+  - engine + status/current version row
+  - title row
+  - action button row
+- kept update signaling only via the top-right update badge on the card
+
+How it was implemented:
+
+- updated `src/core/GameBanner.js` (`AtlasF95BannerCard`):
+  - removed `getVersionLabelForCard` and related `bottomRowLeftText` path
+  - simplified the bottom row to always render only the primary action control (`justify-end`)
+  - left top-right update badge logic unchanged
+
+What remains:
+
+- manual visual pass in Library and Update Inbox for cards with very long titles to confirm spacing remains balanced
+
+Current stage progress:
+
+- card information hierarchy clarity: 99%
+- update-state signaling consistency (single source on card): 99%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- removes duplicated update/version messaging noise in high-frequency card UI
+- keeps behavior aligned with product-oriented minimal UI principle
+
+## 2026-04-08 — Typography refresh with Manrope across app windows
+
+What was done:
+
+- replaced default UI font stack with a more refined product-grade typeface (`Manrope`) across the app
+- applied the new font consistently to all renderer entry windows (main app, settings, game details, batch importer)
+
+How it was implemented:
+
+- updated `tailwind.config.js`:
+  - prepended `Manrope` to `fontFamily.sans`
+- updated `src/assets/css/main.css`:
+  - added explicit global `body` font-family fallback chain starting with `Manrope`
+- updated HTML entry points:
+  - `src/index.html`
+  - `src/settings.html`
+  - `src/gamedetails.html`
+  - `src/core/ui/windows/importer.html`
+  - added Google Fonts `Manrope` stylesheet + `preconnect` links
+- rebuilt Tailwind output:
+  - `npm run build:css` to refresh generated `font-sans` output in `src/assets/css/tailwind.output.css`
+
+What remains:
+
+- optional offline fallback consideration if you want zero dependency on Google Fonts in desktop runtime
+
+Current stage progress:
+
+- typography consistency across renderer windows: 100%
+- visual polish uplift for product UI readability: 99%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- improves first-impression visual quality without touching business logic or IPC contracts
+- keeps typography centralized (Tailwind + base CSS), simplifying future theming work
+
+## 2026-04-08 — Full app logo rollout from user-provided `logo.png`
+
+What was done:
+
+- integrated user-provided `logo.png` as the primary in-app logo in the main header
+- generated and replaced application `.ico` icon from the same source image for runtime/build consistency
+- propagated the new icon to all BrowserWindow instances (main/settings/importer/game details + F95 browser)
+
+How it was implemented:
+
+- asset updates:
+  - copied `C:\\test_projects\\f95zone_app\\logo.png` to `src/assets/images/logo.png`
+  - regenerated `src/assets/images/appicon.ico` (multi-size ICO payload) from `logo.png`
+- UI update:
+  - updated `src/App.jsx` header logo block from inline SVG to `<img src="./assets/images/logo.png" ... />`
+- runtime window icon updates:
+  - added shared `APP_WINDOW_ICON_PATH` and applied it to all main BrowserWindow constructors in `src/main.js`
+  - added `F95_WINDOW_ICON_PATH` and applied it to F95 browser window in `src/main/f95/session.js`
+
+What remains:
+
+- manual packaged build smoke (`electron-builder`) to visually confirm installer/taskbar icon rendering in a signed installer context
+
+Current stage progress:
+
+- branding consistency across renderer and native windows: 100%
+- single-source logo asset integration quality: 99%
+- overall roadmap progress relative to current fork scope: 96%
+
+Impact on overall progress:
+
+- removes split branding between UI logo and native window iconography
+- gives a single authoritative logo source for future theming/branding updates

@@ -80,7 +80,7 @@ const Library = () => {
           onChange={handleGameFolderChange}
         />
         <button
-          className="ml-5 bg-accent text-text px-4 py-1 rounded hover:bg-hover"
+          className="ml-5 rounded bg-accent px-4 py-1 text-onAccent hover:brightness-110"
           onClick={handleSetGameFolder}
         >
           Set Folder

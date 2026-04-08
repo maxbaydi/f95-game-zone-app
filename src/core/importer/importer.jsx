@@ -1234,7 +1234,7 @@ const Importer = () => {
                             onClick={() =>
                               window.electronAPI.openDirectory(game.folder)
                             }
-                            className="bg-accent hover:bg-selected text-text text-xs p-1 rounded whitespace-nowrap"
+                            className="rounded bg-accent p-1 text-xs text-onAccent whitespace-nowrap hover:brightness-110"
                             style={{ pointerEvents: "auto" }}
                           >
                             Open Folder
@@ -1266,7 +1266,7 @@ const Importer = () => {
               <div className="flex items-center space-x-2">
                 <button
                   onClick={handleUpdateClick}
-                  className="bg-accent hover:bg-accent-dark px-4 py-2 rounded text-text"
+                  className="rounded bg-accent px-4 py-2 text-onAccent hover:brightness-110"
                   style={{ pointerEvents: "auto", zIndex: 1000 }}
                 >
                   Update Matches

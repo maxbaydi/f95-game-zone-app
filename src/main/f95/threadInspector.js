@@ -37,8 +37,40 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     "wolf rpg",
   ];
   const ignoredBracketTokens = new Set(ignoredTitlePrefixes);
+  const engineLabelMap = {
+    "ren'py": "Ren'Py",
+    renpy: "Ren'Py",
+    unity: "Unity",
+    html: "HTML",
+    flash: "Flash",
+    rpgm: "RPGM",
+    "rpgm mv": "RPGM",
+    "rpgm mz": "RPGM",
+    "rpg maker": "RPGM",
+    "rpg maker mv": "RPGM",
+    "rpg maker mz": "RPGM",
+    "wolf rpg": "Wolf RPG",
+    "unreal engine": "Unreal Engine",
+    unreal: "Unreal Engine",
+    godot: "Godot",
+    java: "Java",
+    webgl: "WebGL",
+    adrift: "ADRIFT",
+    qsp: "QSP",
+    rags: "RAGS",
+    tads: "Tads",
+  };
   const platformMatchPattern =
     /\b(win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux|win(?:dows)?|pc|linux|mac(?:os)?|osx|android|ios)\b(?:\s*\([^)]*\))?\s*:/gi;
+
+  const normalizeEngineLabel = (value) => {
+    const token = cleanText(value)
+      .toLowerCase()
+      .replace(/^pre[-_\s]+/i, "")
+      .replace(/[_-]+/g, " ");
+
+    return engineLabelMap[token] || "";
+  };
 
   const normalizePlatformLabel = (rawValue) => {
     const token = cleanText(rawValue).toLowerCase();
@@ -100,11 +132,12 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     return "";
   };
 
-  const stripLeadingNoisePrefixes = (value) => {
+  const peelLeadingNoisePrefixes = (value) => {
     let result = cleanText(value);
     const sortedPrefixes = [...ignoredTitlePrefixes].sort(
       (left, right) => right.length - left.length,
     );
+    const removedPrefixes = [];
 
     let changed = true;
     while (changed && result) {
@@ -121,6 +154,7 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
           continue;
         }
 
+        removedPrefixes.push(prefix.toLowerCase());
         result = cleanText(
           result
             .replace(prefixPattern, " ")
@@ -130,7 +164,14 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
       }
     }
 
-    return result;
+    return {
+      cleaned: result,
+      removedPrefixes,
+    };
+  };
+
+  const stripLeadingNoisePrefixes = (value) => {
+    return peelLeadingNoisePrefixes(value).cleaned;
   };
 
   const extractRawTitle = (node) => {
@@ -149,7 +190,36 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     }
   };
 
-  const parseThreadTitle = (rawTitle) => {
+  const extractTitleEngineFromLabels = (node) => {
+    if (!node) {
+      return "";
+    }
+
+    const candidates = [];
+    node.querySelectorAll("[class]").forEach((element) => {
+      element.classList.forEach((className) => {
+        if (/^pre[-_]/i.test(className)) {
+          candidates.push(className.replace(/^pre[-_]/i, ""));
+        }
+      });
+    });
+    node
+      .querySelectorAll(".label, .labelLink, .label > span, .labelLink > span")
+      .forEach((element) => {
+        candidates.push(cleanText(element.innerText || element.textContent || ""));
+      });
+
+    for (const candidate of candidates) {
+      const normalized = normalizeEngineLabel(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return "";
+  };
+
+  const parseThreadTitle = (rawTitle, fallbackEngine = "") => {
     const normalizedRawTitle = cleanText(rawTitle);
     const bracketTokens = Array.from(
       normalizedRawTitle.matchAll(/\[([^\]]+)\]/g),
@@ -180,14 +250,22 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
         .replace(/\s+[|]\s+/g, " ")
         .replace(/\s+[-–—]\s+/g, " "),
     );
-    const title =
-      stripLeadingNoisePrefixes(titleWithoutBrackets) || titleWithoutBrackets;
+    const { cleaned: strippedTitle, removedPrefixes } =
+      peelLeadingNoisePrefixes(titleWithoutBrackets);
+    const title = strippedTitle || titleWithoutBrackets;
+    const engineFromPrefixes = removedPrefixes
+      .map((prefix) => normalizeEngineLabel(prefix))
+      .find(Boolean);
+    const engineFromBrackets = bracketTokens
+      .map((token) => normalizeEngineLabel(token))
+      .find(Boolean);
 
     return {
       rawTitle: normalizedRawTitle,
       title: title || normalizedRawTitle,
       creator,
       version,
+      engine: fallbackEngine || engineFromPrefixes || engineFromBrackets || "",
     };
   };
 
@@ -211,7 +289,8 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
   const rawTitle =
     extractRawTitle(titleNode) ||
     cleanText(titleNode?.innerText || titleNode?.textContent || document.title);
-  const parsedTitle = parseThreadTitle(rawTitle);
+  const titleEngine = extractTitleEngineFromLabels(titleNode);
+  const parsedTitle = parseThreadTitle(rawTitle, titleEngine);
 
   const links = [];
   const anchors = Array.from(firstPostRoot.querySelectorAll("a[href]"));
@@ -333,6 +412,7 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
       title: parsedTitle.title || rawTitle || "F95 thread",
       creator: parsedTitle.creator,
       version: parsedTitle.version,
+      engine: parsedTitle.engine || "",
       links: [],
     };
   }
@@ -344,6 +424,7 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     title: parsedTitle.title || rawTitle || "F95 thread",
     creator: parsedTitle.creator,
     version: parsedTitle.version,
+    engine: parsedTitle.engine || "",
     links,
   };
 })();`;

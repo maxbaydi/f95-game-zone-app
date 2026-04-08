@@ -587,6 +587,7 @@ const F95BrowserWorkspace = () => {
         title: payload.title,
         creator: payload.creator,
         version: payload.version,
+        engine: payload.engine,
         downloadLabel: link.label,
         downloadUrl: link.url,
       });
@@ -722,7 +723,7 @@ const F95BrowserWorkspace = () => {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <button
               onClick={openLoginWindow}
-              className="rounded-xl bg-accent px-5 py-3 text-sm font-medium text-black hover:bg-selected"
+              className="rounded-xl bg-accent px-5 py-3 text-sm font-medium text-onAccent hover:brightness-110"
             >
               Log In To F95
             </button>
@@ -797,7 +798,7 @@ const F95BrowserWorkspace = () => {
             threadInstallState.checking ||
             threadInstallState.installed
           }
-          className="rounded bg-accent px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-50 hover:bg-selected"
+          className="rounded bg-accent px-4 py-2 text-sm font-medium text-onAccent disabled:cursor-not-allowed disabled:opacity-50 hover:brightness-110"
         >
           {installButtonLabel}
         </button>
@@ -903,7 +904,7 @@ const F95BrowserWorkspace = () => {
             <button
               onClick={retryPendingCaptchaInstall}
               disabled={isStartingInstall}
-              className="rounded bg-accent px-3 py-2 text-xs font-medium text-black transition hover:bg-selected disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded bg-accent px-3 py-2 text-xs font-medium text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isStartingInstall ? "Retrying..." : "Retry Install"}
             </button>

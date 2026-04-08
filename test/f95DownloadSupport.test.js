@@ -43,6 +43,7 @@ test("parseF95ThreadTitle removes engine/category badges from the title", () => 
   assert.equal(metadata.title, "Stained Blood");
   assert.equal(metadata.version, "v0.2");
   assert.equal(metadata.creator, "Obsidian Desire Labs");
+  assert.equal(metadata.engine, "Ren'Py");
 });
 
 test("parseF95ThreadTitle preserves normal titles when there are no F95 badges", () => {
@@ -51,6 +52,7 @@ test("parseF95ThreadTitle preserves normal titles when there are no F95 badges",
   assert.equal(metadata.title, "Stained Blood");
   assert.equal(metadata.version, "v0.2");
   assert.equal(metadata.creator, "");
+  assert.equal(metadata.engine, "");
 });
 
 test("parseF95ThreadTitle removes trailing F95zone suffix from browser titles", () => {
@@ -61,6 +63,18 @@ test("parseF95ThreadTitle removes trailing F95zone suffix from browser titles", 
   assert.equal(metadata.title, "Stained Blood");
   assert.equal(metadata.version, "v0.2");
   assert.equal(metadata.creator, "Obsidian Desire Labs");
+  assert.equal(metadata.engine, "Ren'Py");
+});
+
+test("parseF95ThreadTitle extracts Unity engine prefixes used by F95 thread headers", () => {
+  const metadata = parseF95ThreadTitle(
+    "VN Unity Not a Failure to Launch [v0.5.7] [NotAFailureToLaunch]",
+  );
+
+  assert.equal(metadata.title, "Not a Failure to Launch");
+  assert.equal(metadata.version, "v0.5.7");
+  assert.equal(metadata.creator, "NotAFailureToLaunch");
+  assert.equal(metadata.engine, "Unity");
 });
 
 test("inspectDownloadedPackage rejects masked F95 HTML pages", async () => {

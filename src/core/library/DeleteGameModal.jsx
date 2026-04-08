@@ -80,7 +80,7 @@ const DeleteGameModal = ({
   const primaryActionClass =
     mode === DeleteGameModes.DELETE_FILES_AND_SAVES
       ? "bg-red-600 text-white hover:bg-red-500"
-      : "bg-accent text-black hover:bg-selected";
+      : "bg-accent text-onAccent hover:brightness-110";
 
   return (
     <div className="fixed inset-0 z-[1750] flex items-center justify-center bg-black/70 px-6 py-10 backdrop-blur-md">

@@ -18,7 +18,7 @@ const bannerStyles = `
   }
   .banner-root:hover {
     transform: rotateX(5deg) translateY(-6px) scale(1.02);
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 32px rgba(44, 142, 169, 0.15);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px #3d4450, 0 0 20px rgba(102, 192, 244, 0.12);
   }
   .banner-root::before {
     content: '';
@@ -120,13 +120,6 @@ const pickVersionForLaunch = (versions) => {
   return best;
 };
 
-const getVersionLabelForCard = (game, installedLabel) => {
-  if (game.isUpdateAvailable && game.latestVersion) {
-    return String(game.latestVersion);
-  }
-  return installedLabel;
-};
-
 function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
   const displayTitle = game.displayTitle || game.title || "Unknown";
   const newestInstalledVersion =
@@ -134,7 +127,6 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
     (Array.isArray(game.versions) && game.versions.length > 0
       ? getNewestVersion(game.versions)
       : game.latestVersion || "Unknown");
-  const versionLabel = getVersionLabelForCard(game, newestInstalledVersion);
   const launchable = pickVersionForLaunch(game.versions);
   const canPlay = Boolean(launchable?.exec_path);
   const canInstall = !canPlay && Boolean(game.siteUrl);
@@ -175,7 +167,7 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
     thumbChildren.push(
       React.createElement("div", {
         key: "ph",
-        className: "w-full h-full bg-[#1F2937]",
+        className: "w-full h-full bg-primary",
       }),
     );
   }
@@ -197,6 +189,24 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
       ),
     );
   }
+
+  const primaryActionControl = React.createElement(
+    "button",
+    {
+      key: "play",
+      type: "button",
+      className: `inline-flex shrink-0 items-center justify-center border px-1.5 py-0.5 text-[10px] font-semibold pointer-events-auto transition-colors ${
+        canPlay || canInstall
+          ? "border-accent/70 bg-accent/85 text-onAccent hover:bg-accent"
+          : "cursor-not-allowed border-border/60 bg-surfaceMuted text-white/55"
+      }`,
+      disabled: !canPlay && !canInstall,
+      onClick: handlePrimaryAction,
+      "aria-label": primaryActionLabel,
+      title: primaryActionLabel,
+    },
+    primaryActionLabel,
+  );
 
   const bodyChildren = [
     React.createElement(
@@ -234,8 +244,7 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
               }),
             React.createElement("div", {
               key: "ver",
-              className: `text-white text-[10px] text-right truncate max-w-[100px] ${game.status ? "-ml-px" : ""} px-1.5 py-0.5`,
-              style: { backgroundColor: "#3F4043" },
+              className: `bg-surfaceMuted text-white text-[10px] text-right truncate max-w-[100px] ${game.status ? "-ml-px" : ""} px-1.5 py-0.5`,
               title: newestInstalledVersion,
               children: newestInstalledVersion,
             }),
@@ -243,45 +252,27 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
         ),
       ],
     ),
-    React.createElement("h2", {
-      key: "title",
-      className:
-        "text-white text-sm font-semibold leading-tight truncate mb-2 shrink-0",
-      title: displayTitle,
-      children: displayTitle,
-    }),
+    React.createElement(
+      "div",
+      {
+        key: "title",
+        className: "mb-2 shrink-0",
+      },
+      React.createElement("h2", {
+        className: "truncate text-sm font-semibold leading-tight text-white",
+        title: displayTitle,
+        children: displayTitle,
+      }),
+    ),
     React.createElement(
       "div",
       {
         key: "row",
-        className: "mt-auto flex items-center justify-between gap-2 min-h-0",
+        className: "mt-auto flex min-h-0 items-center justify-end",
       },
-      [
-        React.createElement("div", {
-          key: "vl",
-          className:
-            "text-white/75 text-[11px] truncate min-w-0 flex-1 tabular-nums",
-          title: versionLabel,
-          children:
-            Array.isArray(game.versions) && game.versions.length === 0
-              ? "Not installed"
-              : versionLabel,
-        }),
-        React.createElement("button", {
-          key: "play",
-          type: "button",
-          className: `shrink-0 px-3 py-1.5 text-xs font-semibold text-white pointer-events-auto transition-opacity ${
-            canPlay || canInstall
-              ? "bg-accent hover:opacity-90"
-              : "bg-white/10 opacity-45 cursor-not-allowed"
-          }`,
-          disabled: !canPlay && !canInstall,
-          onClick: handlePrimaryAction,
-          children: primaryActionLabel,
-        }),
-      ],
+      primaryActionControl,
     ),
-  ];
+  ].filter(Boolean);
 
   return React.createElement(
     "div",
@@ -301,7 +292,7 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
         "div",
         {
           key: "thumb",
-          className: "relative w-full shrink-0 bg-[#1F2937] overflow-hidden",
+          className: "relative w-full shrink-0 bg-primary overflow-hidden",
           style: { height: ATLAS_BANNER_IMAGE_H },
         },
         thumbChildren,
@@ -311,7 +302,7 @@ function AtlasF95BannerCard({ game, onSelect, onUpdateGame, onContextMenu }) {
         {
           key: "body",
           className:
-            "flex flex-col flex-1 min-h-0 px-2.5 pt-2 pb-2.5 border-t border-border bg-gradient-to-b from-white/[0.08] to-black/25 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.07)]",
+            "flex flex-col flex-1 min-h-0 px-2.5 pt-2 pb-2.5 border-t border-border bg-primary shadow-glass",
         },
         bodyChildren,
       ),

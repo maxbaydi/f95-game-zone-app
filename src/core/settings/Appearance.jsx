@@ -54,7 +54,7 @@ const Appearance = () => {
             <option>Default</option>
           </select>
           <button
-            className="ml-5 bg-accent text-text px-4 py-1 rounded hover:bg-hover"
+            className="ml-5 rounded bg-accent px-4 py-1 text-onAccent hover:brightness-110"
             onClick={handleLoadTheme}
           >
             Load
@@ -80,7 +80,7 @@ const Appearance = () => {
             ))}
           </select>
           <button
-            className="ml-5 bg-accent text-text px-4 py-1 rounded hover:bg-hover"
+            className="ml-5 rounded bg-accent px-4 py-1 text-onAccent hover:brightness-110"
             onClick={handleLoadBanner}
           >
             Load
@@ -95,7 +95,7 @@ const Appearance = () => {
       <div className="flex items-center mb-2">
         <label className="flex-1">Open Xaml Editor</label>
         <button
-          className="ml-5 bg-accent text-text px-4 py-1 rounded hover:bg-hover"
+          className="ml-5 rounded bg-accent px-4 py-1 text-onAccent hover:brightness-110"
           onClick={handleOpenXamlEditor}
         >
           Launch
