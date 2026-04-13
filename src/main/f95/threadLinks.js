@@ -38,6 +38,7 @@ const FILE_HOST_PATTERNS = [
   /(^|\.)sendspace\.com$/i,
   /(^|\.)anonfiles\.com$/i,
   /(^|\.)filecrypt\.cc$/i,
+  /(^|\.)files\.fm$/i,
 ];
 
 const FILE_HOST_HINT_PATTERNS = [
@@ -58,6 +59,7 @@ const FILE_HOST_HINT_PATTERNS = [
   { pattern: /\bcatbox\b/i, host: "catbox.moe" },
   { pattern: /\bsendspace\b/i, host: "sendspace.com" },
   { pattern: /\bfilecrypt\b/i, host: "filecrypt.cc" },
+  { pattern: /\bfiles\.?fm\b/i, host: "files.fm" },
 ];
 
 const NON_DOWNLOAD_SECTION_PATTERNS = [
@@ -301,6 +303,34 @@ function dedupeLinksByHost(inputLinks) {
   return links;
 }
 
+function normalizeReleaseHint(value) {
+  const normalized = sanitizeVariantLabel(value);
+  if (!normalized) {
+    return "";
+  }
+
+  if (/^(download|spoiler|compressed)$/i.test(normalized)) {
+    return "";
+  }
+
+  if (
+    /^(win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux|win(?:dows)?|pc|linux|mac(?:os)?|osx|android|ios)$/i.test(
+      normalized,
+    )
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function buildVariantSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function classifyThreadDownloadLink(rawLink) {
   const url = cleanText(rawLink?.url);
   if (!url) {
@@ -322,6 +352,9 @@ function classifyThreadDownloadLink(rawLink) {
   const isF95Download = isF95Host && looksLikeF95DownloadPath(parsedUrl);
   const isPreviewAttachment = isF95Host && looksLikePreviewAttachment(parsedUrl);
   const lineLabel = extractLineLabel(lineText, label);
+  if (isNonDownloadSectionLabel(lineLabel)) {
+    return null;
+  }
   const lineHostHint = extractFileHostHint(lineLabel);
   const labelHostHint = extractFileHostHint(label);
   const inferredHostHint = labelHostHint || lineHostHint;
@@ -332,14 +365,29 @@ function classifyThreadDownloadLink(rawLink) {
   const sectionHint = cleanText(rawLink?.sectionHint || "");
   const isCompressedSection = /\bcompressed\b/i.test(sectionHint);
   const baseVariantLabel = resolveVariantLabel(lineLabel, variant);
-  const variantId =
+  let variantId =
     isCompressedSection && variant.id !== "general"
       ? `compressed-${variant.id}`
       : variant.id;
-  const variantLabel =
+  let variantLabel =
     isCompressedSection && baseVariantLabel
       ? `Compressed ${baseVariantLabel}`
       : baseVariantLabel;
+  const platformLabel = baseVariantLabel || variant.label || "General";
+  const releaseHint = normalizeReleaseHint(rawLink?.releaseHint);
+  let releaseLabel = "";
+  if (releaseHint) {
+    const releaseSlug = buildVariantSlug(releaseHint) || "section";
+    variantId = `release-${releaseSlug}-${variantId}`;
+    releaseLabel = releaseHint;
+    if (variant.id === "general") {
+      variantLabel = releaseHint;
+    } else if (variantLabel) {
+      variantLabel = `${releaseHint} · ${variantLabel}`;
+    }
+  } else if (isCompressedSection) {
+    releaseLabel = "Compressed";
+  }
   const isDownloadableF95Attachment =
     isF95Host &&
     parsedUrl.pathname.includes("/attachments/") &&
@@ -352,10 +400,6 @@ function classifyThreadDownloadLink(rawLink) {
   }
 
   if (isSocialHost(hostname) || shouldIgnoreByText({ label, lineText, contextText })) {
-    return null;
-  }
-
-  if (isNonDownloadSectionLabel(lineLabel)) {
     return null;
   }
 
@@ -382,6 +426,8 @@ function classifyThreadDownloadLink(rawLink) {
     lineLabel: variantLabel,
     variantId,
     variantLabel: variantLabel,
+    platformLabel: platformLabel || variantLabel || "General",
+    releaseLabel,
     order: Number(rawLink?.order) || 0,
   };
 }
@@ -410,11 +456,19 @@ function normalizeThreadDownloadLinks(rawLinks) {
       variantMap.set(variantKey, {
         id: link.variantId,
         label: link.variantLabel,
+        platformLabel: link.platformLabel || link.variantLabel || "General",
+        releaseLabel: link.releaseLabel || "",
+        firstOrder: link.order,
         links: [],
       });
     }
 
-    variantMap.get(variantKey).links.push(link);
+    const currentVariant = variantMap.get(variantKey);
+    if (link.order < currentVariant.firstOrder) {
+      currentVariant.firstOrder = link.order;
+    }
+
+    currentVariant.links.push(link);
   }
 
   const variants = [...variantMap.values()]
@@ -425,6 +479,10 @@ function normalizeThreadDownloadLinks(rawLinks) {
       ),
     }))
     .sort((left, right) => {
+      if (left.firstOrder !== right.firstOrder) {
+        return left.firstOrder - right.firstOrder;
+      }
+
       const leftIndex = PLATFORM_PRIORITY.indexOf(left.id);
       const rightIndex = PLATFORM_PRIORITY.indexOf(right.id);
       if (leftIndex !== rightIndex) {

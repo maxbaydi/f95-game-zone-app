@@ -1080,7 +1080,7 @@ async function resolveMaskedF95Url(session, maskedUrl) {
         code: "captcha_required",
         actionUrl: maskedUrl,
         userMessage:
-          "This mirror needs captcha confirmation before Atlas can continue. Finish the captcha, then retry the install.",
+          "This mirror needs captcha confirmation before F95Launcher can continue. Finish the captcha, then retry the install.",
       },
     );
   }
@@ -1126,7 +1126,7 @@ async function resolveCountdownLandingDownloadUrl(session, rawUrl) {
         code: "captcha_required",
         actionUrl: finalUrl,
         userMessage:
-          "This mirror needs captcha confirmation before Atlas can continue. Finish the captcha, then retry the install.",
+          "This mirror needs captcha confirmation before F95Launcher can continue. Finish the captcha, then retry the install.",
       },
     );
   }
@@ -1351,7 +1351,7 @@ async function inspectDownloadedPackage(input) {
     TEXTUAL_PAGE_EXTENSIONS.has(extension)
   ) {
     throw new DownloadValidationError(
-      "Mirror returned an HTML/text page instead of a game package. F95 Game Zone App must not treat that as a successful install.",
+      "Mirror returned an HTML/text page instead of a game package. F95Launcher must not treat that as a successful install.",
       {
         code: "html_payload",
       },

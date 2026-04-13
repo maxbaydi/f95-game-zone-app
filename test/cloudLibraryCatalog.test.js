@@ -40,6 +40,17 @@ test("buildCloudLibraryCatalogEntry builds a stable cloud-library entry from a g
   assert.equal(entry.title, "Example Game");
   assert.equal(entry.creator, "Dev Team");
   assert.equal(entry.installedVersionCount, 1);
+  assert.equal(entry.isFavorite, false);
+
+  const favoriteEntry = buildCloudLibraryCatalogEntry({
+    record_id: 8,
+    atlas_id: 200,
+    title: "Fav Game",
+    creator: "Studio",
+    isFavorite: true,
+    versions: [],
+  });
+  assert.equal(favoriteEntry.isFavorite, true);
 });
 
 test("mergeCloudLibraryCatalogEntries keeps the richer local/remote entry per identity", () => {
@@ -79,6 +90,34 @@ test("mergeCloudLibraryCatalogEntries keeps the richer local/remote entry per id
   assert.equal(merged[1].identityKey, "atlas:2");
 });
 
+test("mergeCloudLibraryCatalogEntries preserves isFavorite from either side", () => {
+  const merged = mergeCloudLibraryCatalogEntries(
+    [
+      {
+        identityKey: "atlas:10",
+        atlasId: "10",
+        title: "Local Fav",
+        creator: "Dev",
+        isFavorite: true,
+        updatedAt: "2026-04-05T08:00:00.000Z",
+      },
+    ],
+    [
+      {
+        identityKey: "atlas:10",
+        atlasId: "10",
+        title: "Local Fav",
+        creator: "Dev",
+        isFavorite: false,
+        updatedAt: "2026-04-05T10:00:00.000Z",
+      },
+    ],
+  );
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].isFavorite, true);
+});
+
 test("getRemoteOnlyCloudLibraryEntries returns only cloud entries missing locally", () => {
   const remoteOnly = getRemoteOnlyCloudLibraryEntries(
     [
@@ -115,4 +154,11 @@ test("parseCloudLibraryCatalogManifest normalizes malformed input safely", () =>
   assert.equal(parsed.entries.length, 1);
   assert.equal(parsed.entries[0].identityKey, "atlas:4");
   assert.equal(parsed.entries[0].installedVersionCount, 2);
+  assert.equal(parsed.entries[0].isFavorite, false);
+
+  const parsedWithFav = parseCloudLibraryCatalogManifest({
+    version: 1,
+    entries: [{ identityKey: "atlas:5", title: "Fav", isFavorite: true }],
+  });
+  assert.equal(parsedWithFav.entries[0].isFavorite, true);
 });

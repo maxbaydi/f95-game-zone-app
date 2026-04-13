@@ -527,6 +527,18 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
   const fs = require("fs");
   const lz4 = require("lz4js");
 
+  const sendDbUpdateProgress = (payload) => {
+    if (
+      mainWindow &&
+      typeof mainWindow.isDestroyed === "function" &&
+      !mainWindow.isDestroyed() &&
+      mainWindow.webContents &&
+      !mainWindow.webContents.isDestroyed()
+    ) {
+      mainWindow.webContents.send("db-update-progress", payload);
+    }
+  };
+
   try {
     const url = "https://atlas-gamesdb.com/api/updates";
     const response = await axios.get(url);
@@ -568,7 +580,7 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
       const outputPath = path.join(updatesDir, name);
 
       // Download update
-      mainWindow.webContents.send("db-update-progress", {
+      sendDbUpdateProgress({
         text: `Downloading Database Update ${processed + 1}/${total}`,
         progress: processed,
         total,
@@ -583,7 +595,7 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
       const decompressedData = Buffer.from(lz4.decompress(compressedData));
       const data = JSON.parse(decompressedData.toString("utf8"));
       // Process atlas_data
-      mainWindow.webContents.send("db-update-progress", {
+      sendDbUpdateProgress({
         text: `Processing Atlas Metadata ${processed + 1}/${total}`,
         progress: processed,
         total,
@@ -593,7 +605,7 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
       }
 
       // Process f95_zone_data
-      mainWindow.webContents.send("db-update-progress", {
+      sendDbUpdateProgress({
         text: `Processing F95 Metadata ${processed + 1}/${total}`,
         progress: processed,
         total,
@@ -616,7 +628,7 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
       });
 
       processed++;
-      mainWindow.webContents.send("db-update-progress", {
+      sendDbUpdateProgress({
         text: `Processed Update ${processed}/${total}`,
         progress: processed,
         total,

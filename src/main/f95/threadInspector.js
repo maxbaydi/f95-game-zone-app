@@ -62,6 +62,8 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
   };
   const platformMatchPattern =
     /\b(win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux|win(?:dows)?|pc|linux|mac(?:os)?|osx|android|ios)\b(?:\s*\([^)]*\))?\s*:/gi;
+  const releaseHintPattern =
+    /\b(season\s*\d+(?:\s*&\s*\d+)?|s\d+|episode\s*\d+(?:\.\d+)?|ep(?:isode)?\s*\d+(?:\.\d+)?|chapter\s*\d+|part\s*\d+|artbook(?:\s*\([^)]*\))?)\b/gi;
 
   const normalizeEngineLabel = (value) => {
     const token = cleanText(value)
@@ -79,25 +81,25 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     }
 
     if (
-      /win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux/i.test(
+      /^(?:win(?:dows)?\s*\/\s*linux|linux\s*\/\s*win(?:dows)?|windows?\s*&\s*linux)\b/i.test(
         token,
       )
     ) {
       return "Windows / Linux";
     }
-    if (/^(win(?:dows)?|pc)$/i.test(token)) {
+    if (/^(?:win(?:dows)?|pc)\b/i.test(token)) {
       return "Windows";
     }
-    if (/^linux$/i.test(token)) {
+    if (/^linux\b/i.test(token)) {
       return "Linux";
     }
-    if (/^(mac|macos|osx)$/i.test(token)) {
+    if (/^(?:mac|macos|osx)\b/i.test(token)) {
       return "Mac";
     }
-    if (/^android$/i.test(token)) {
+    if (/^android\b/i.test(token)) {
       return "Android";
     }
-    if (/^ios$/i.test(token)) {
+    if (/^ios\b/i.test(token)) {
       return "iOS";
     }
     return "";
@@ -119,17 +121,51 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     return matchedLabel;
   };
 
-  const findSectionHint = (beforeText) => {
-    const normalizedBefore = cleanText(beforeText);
-    if (!normalizedBefore) {
-      return "";
-    }
+  const normalizeReleaseHint = (rawValue) =>
+    cleanText(rawValue).replace(/\s+/g, " ");
 
-    if (/\bcompressed\b/i.test(normalizedBefore)) {
-      return "Compressed";
+  const findNearestReleaseHeading = (lines) => {
+    const normalizedLines = Array.isArray(lines) ? lines : [];
+    for (let index = normalizedLines.length - 1; index >= 0; index -= 1) {
+      const candidate = normalizeReleaseHint(normalizedLines[index]);
+      if (!candidate) {
+        continue;
+      }
+
+      if (/^(season\s*\d+(?:\s*&\s*\d+)?|s\d+|episode\s*\d+(?:\.\d+)?|ep(?:isode)?\s*\d+(?:\.\d+)?|chapter\s*\d+|part\s*\d+)$/.test(candidate.toLowerCase())) {
+        return candidate;
+      }
     }
 
     return "";
+  };
+
+  const findNearestReleaseHint = (inputText) => {
+    const normalizedInput = String(inputText || "");
+    if (!normalizedInput) {
+      return "";
+    }
+
+    let matchedReleaseHint = "";
+    let match = releaseHintPattern.exec(normalizedInput);
+    while (match) {
+      matchedReleaseHint = normalizeReleaseHint(match[1] || "");
+      match = releaseHintPattern.exec(normalizedInput);
+    }
+    releaseHintPattern.lastIndex = 0;
+    return matchedReleaseHint;
+  };
+
+  const extractLeadingLabel = (lineText) => {
+    const normalizedLine = cleanText(lineText);
+    if (!normalizedLine) {
+      return "";
+    }
+    const separatorIndex = normalizedLine.indexOf(":");
+    if (separatorIndex <= 0) {
+      return "";
+    }
+    return cleanText(normalizedLine.slice(0, separatorIndex));
   };
 
   const peelLeadingNoisePrefixes = (value) => {
@@ -293,117 +329,165 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
   const parsedTitle = parseThreadTitle(rawTitle, titleEngine);
 
   const links = [];
-  const anchors = Array.from(firstPostRoot.querySelectorAll("a[href]"));
+  const BLOCK_TAGS = new Set([
+    "DIV",
+    "P",
+    "LI",
+    "UL",
+    "OL",
+    "TABLE",
+    "TBODY",
+    "TR",
+    "TD",
+    "TH",
+    "BLOCKQUOTE",
+    "SECTION",
+    "ARTICLE",
+    "HR",
+  ]);
 
-  const hasLineBreakDescendant = (node) =>
-    Boolean(node?.querySelector && node.querySelector("br"));
+  const createLineState = () => ({
+    textParts: [],
+    anchors: [],
+  });
 
-  const getLineContainer = (anchor) => {
-    const blockContainer = anchor.closest("p, li, td, blockquote");
-    if (blockContainer) {
-      return blockContainer;
+  const appendTextPart = (lineState, value) => {
+    const normalized = cleanText(value);
+    if (!normalized) {
+      return;
     }
-
-    let node = anchor.parentElement;
-    while (node && node !== firstPostRoot) {
-      if (hasLineBreakDescendant(node)) {
-        return node;
-      }
-      node = node.parentElement;
-    }
-
-    return firstPostRoot;
+    lineState.textParts.push(normalized);
   };
 
-  const getLinkLineContext = (anchor) => {
-    const lineContainer = getLineContainer(anchor);
-    if (!lineContainer) {
-      return {
-        lineText: cleanText(anchor.innerText || anchor.textContent || ""),
-        platformLabel: "",
-      };
-    }
-
-    try {
-      const beforeRange = document.createRange();
-      beforeRange.selectNodeContents(lineContainer);
-      beforeRange.setEndBefore(anchor);
-      const beforeRawText = beforeRange.toString();
-      const beforeText =
-        cleanText(beforeRawText.split(/\n+/).pop() || "") || "";
-
-      const afterRange = document.createRange();
-      afterRange.selectNodeContents(lineContainer);
-      afterRange.setStartAfter(anchor);
-      const afterText =
-        cleanText(afterRange.toString().split(/\n+/)[0] || "") || "";
-
-      let resolvedLineText = cleanText(
-        beforeText +
-          " " +
-          cleanText(anchor.innerText || anchor.textContent || "") +
-          " " +
-          afterText,
-      );
-      const platformLabel = findNearestPlatformLabel(beforeRawText);
-      if (
-        platformLabel &&
-        !new RegExp(
-          "\\b" + platformLabel.replace(/[.*+?^{}()|[\]\\$]/g, "\\$&") + "\\b",
-          "i",
-        ).test(resolvedLineText)
-      ) {
-        resolvedLineText = cleanText(platformLabel + ": " + resolvedLineText);
-      }
-
-      return {
-        lineText: resolvedLineText,
-        platformLabel,
-        sectionHint: findSectionHint(beforeRawText),
-      };
-    } catch {
-      return {
-        lineText: cleanText(lineContainer.innerText || lineContainer.textContent || ""),
-        platformLabel: "",
-        sectionHint: "",
-      };
-    }
-  };
-
-  for (const anchor of anchors) {
-    const href = cleanText(anchor.getAttribute("href") || anchor.href);
-    if (!href || href.startsWith("#") || href.startsWith("javascript:")) {
-      continue;
-    }
-
-    const resolvedUrl = new URL(href, location.origin);
+  const isDownloadCandidateUrl = (resolvedUrl) => {
     const isF95Host = /(^|\.)f95zone\.to$/i.test(resolvedUrl.hostname);
-    const isDownloadCandidate =
+    return (
       resolvedUrl.pathname.includes("/masked/") ||
       resolvedUrl.pathname.includes("/attachments/") ||
-      !isF95Host;
+      !isF95Host
+    );
+  };
 
-    if (!isDownloadCandidate) {
-      continue;
+  const pushAnchorLinksFromLine = (lineText, anchors, state) => {
+    for (const anchor of anchors) {
+      const href = cleanText(anchor.getAttribute("href") || anchor.href);
+      if (!href || href.startsWith("#") || href.startsWith("javascript:")) {
+        continue;
+      }
+
+      const resolvedUrl = new URL(href, location.origin);
+      if (!isDownloadCandidateUrl(resolvedUrl)) {
+        continue;
+      }
+
+      links.push({
+        url: resolvedUrl.href,
+        label:
+          cleanText(anchor.innerText || anchor.textContent) || resolvedUrl.hostname,
+        host: resolvedUrl.hostname,
+        lineText,
+        contextText: lineText,
+        platformHint: state.platformHint || "",
+        releaseHint: state.releaseHint || "",
+        sectionHint: state.sectionHint || "",
+        isLightboxImage:
+          anchor.classList.contains("js-lbImage") ||
+          anchor.hasAttribute("data-sub-html") ||
+          Boolean(anchor.querySelector("img.bbImage")),
+        order: links.length,
+      });
     }
-    const lineContext = getLinkLineContext(anchor);
-    const lineText = lineContext.lineText;
-    links.push({
-      url: resolvedUrl.href,
-      label:
-        cleanText(anchor.innerText || anchor.textContent) || resolvedUrl.hostname,
-      host: resolvedUrl.hostname,
-      lineText,
-      contextText: lineText,
-      platformHint: lineContext.platformLabel,
-      sectionHint: lineContext.sectionHint,
-      isLightboxImage:
-        anchor.classList.contains("js-lbImage") ||
-        anchor.hasAttribute("data-sub-html") ||
-        Boolean(anchor.querySelector("img.bbImage")),
-      order: links.length,
+  };
+
+  const flushLine = (lineState, state) => {
+    const lineText = cleanText(lineState.textParts.join(" "));
+    if (!lineText && lineState.anchors.length === 0) {
+      return;
+    }
+
+    const leadingLabel = extractLeadingLabel(lineText);
+    const explicitPlatformLabel = normalizePlatformLabel(leadingLabel);
+    const explicitReleaseHint = explicitPlatformLabel
+      ? ""
+      : findNearestReleaseHint(leadingLabel);
+
+    if (lineState.anchors.length === 0) {
+      const releaseHeading = findNearestReleaseHeading([lineText]);
+      if (releaseHeading) {
+        state.currentRelease = releaseHeading;
+      }
+      if (/\bcompressed\b/i.test(lineText)) {
+        state.currentSection = "Compressed";
+      }
+      lineState.textParts = [];
+      lineState.anchors = [];
+      return;
+    }
+
+    const lineReleaseHint = explicitReleaseHint || state.currentRelease || "";
+    const lineSectionHint =
+      /\bcompressed\b/i.test(lineText) ? "Compressed" : state.currentSection || "";
+
+    pushAnchorLinksFromLine(lineText, lineState.anchors, {
+      platformHint: explicitPlatformLabel,
+      releaseHint: lineReleaseHint,
+      sectionHint: lineSectionHint,
     });
-  }
+
+    lineState.textParts = [];
+    lineState.anchors = [];
+  };
+
+  const walkNodes = (nodes, state, lineState) => {
+    for (const node of Array.from(nodes)) {
+      if (!node) {
+        continue;
+      }
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        appendTextPart(lineState, node.textContent || "");
+        continue;
+      }
+
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        continue;
+      }
+
+      const tagName = String(node.tagName || "").toUpperCase();
+      if (tagName === "BR") {
+        flushLine(lineState, state);
+        continue;
+      }
+
+      if (tagName === "A" && node.hasAttribute("href")) {
+        lineState.anchors.push(node);
+        appendTextPart(lineState, node.innerText || node.textContent || "");
+        continue;
+      }
+
+      if (BLOCK_TAGS.has(tagName) && node !== firstPostRoot) {
+        flushLine(lineState, state);
+        const childState = {
+          currentRelease: state.currentRelease,
+          currentSection: state.currentSection,
+        };
+        const childLineState = createLineState();
+        walkNodes(node.childNodes, childState, childLineState);
+        flushLine(childLineState, childState);
+        continue;
+      }
+
+      walkNodes(node.childNodes, state, lineState);
+    }
+  };
+
+  const rootState = {
+    currentRelease: "",
+    currentSection: "",
+  };
+  const rootLineState = createLineState();
+  walkNodes(firstPostRoot.childNodes, rootState, rootLineState);
+  flushLine(rootLineState, rootState);
   if (links.length === 0) {
     return {
       success: false,

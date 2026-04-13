@@ -5,6 +5,7 @@ const { AutoSizer, Grid } = window.ReactVirtualized;
 const SECTION_LIBRARY = "library";
 const SECTION_UPDATES = "updates";
 const SECTION_SEARCH = "search";
+const SECTION_SETTINGS = "settings";
 
 const createDefaultSiteSearchFilters = () => ({
   text: "",
@@ -673,7 +674,7 @@ const App = () => {
             isInstalling: false,
             error:
               result?.error ||
-              "This mirror needs captcha confirmation before Atlas can continue.",
+              "This mirror needs captcha confirmation before F95Launcher can continue.",
             captchaUrl: result?.actionUrl || selectedLink.url,
           }));
           return;
@@ -2131,7 +2132,7 @@ const App = () => {
         <div className="z-50 flex h-[70px] w-[60px] shrink-0 items-center justify-center border-r border-border bg-gradient-to-b from-tertiary to-primary">
           <img
             src="./assets/images/logo.png"
-            alt="F95 Game Zone App"
+            alt="F95Launcher"
             className="h-[48px] w-[48px] object-contain"
             draggable={false}
           />
@@ -2145,7 +2146,9 @@ const App = () => {
                   ? "Updates"
                   : activeSection === SECTION_SEARCH
                     ? "Search"
-                    : "Games"}
+                    : activeSection === SECTION_SETTINGS
+                      ? "Settings"
+                      : "Games"}
               </div>
             </div>
             <div className="flex min-w-0 flex-1 justify-center">
@@ -2226,7 +2229,7 @@ const App = () => {
           updateCount={updateAvailableCount}
         />
         <div className="ml-[60px] flex flex-1 overflow-hidden">
-          {activeSection !== SECTION_SEARCH && showGameList && (
+          {activeSection !== SECTION_SEARCH && activeSection !== SECTION_SETTINGS && showGameList && (
             <div className="atlas-glass-subtle w-[220px] shrink-0 overflow-y-auto border-r border-border">
               <div className="sticky top-0 z-10 flex min-h-[5rem] items-center border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
                 {activeSection === SECTION_UPDATES
@@ -2267,7 +2270,9 @@ const App = () => {
                 className="relative z-0 flex-1 overflow-y-auto overflow-x-hidden bg-transparent px-0.5 pt-6 pb-3"
                 ref={gameGridRef}
               >
-                {activeSection === SECTION_SEARCH ? (
+                {activeSection === SECTION_SETTINGS ? (
+                  <window.SettingsPanel />
+                ) : activeSection === SECTION_SEARCH ? (
                   <window.F95BrowserWorkspace />
                 ) : visibleLibraryGames.length === 0 ? (
                   renderEmptyState()
@@ -2345,7 +2350,7 @@ const App = () => {
               </div>
             </div>
 
-            {activeSection !== SECTION_SEARCH &&
+            {activeSection !== SECTION_SEARCH && activeSection !== SECTION_SETTINGS &&
               (selectedGame || isSelectedGameLoading) && (
                 <window.LibraryDetailsPanel
                   game={selectedGameDetails}

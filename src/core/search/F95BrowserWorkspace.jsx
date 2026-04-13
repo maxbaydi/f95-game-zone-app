@@ -595,7 +595,7 @@ const F95BrowserWorkspace = () => {
           });
           setThreadInfo(null);
           setStatusMessage(
-            "This mirror needs a captcha before F95 Game Zone App can continue. Finish it in the browser below, then retry the install.",
+            "This mirror needs a captcha before F95Launcher can continue. Finish it in the browser below, then retry the install.",
           );
           withWebview((webview) => {
             webview.loadURL(captchaUrl);

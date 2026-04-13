@@ -123,7 +123,7 @@ async function validateRemovableInstallDirectory(input) {
     return {
       ok: false,
       error:
-        "Atlas refused to delete the selected install path because it is not a folder.",
+        "F95Launcher refused to delete the selected install path because it is not a folder.",
       resolvedPath,
     };
   }
@@ -132,7 +132,7 @@ async function validateRemovableInstallDirectory(input) {
     return {
       ok: false,
       error:
-        "Atlas refused to delete the selected install path because it resolves to a drive root.",
+        "F95Launcher refused to delete the selected install path because it resolves to a drive root.",
       resolvedPath,
     };
   }
@@ -151,7 +151,7 @@ async function validateRemovableInstallDirectory(input) {
     return {
       ok: false,
       error:
-        "Atlas refused to delete the selected install path because it is a protected app or library root.",
+        "F95Launcher refused to delete the selected install path because it is a protected app or library root.",
       resolvedPath,
     };
   }
@@ -166,7 +166,7 @@ async function validateRemovableInstallDirectory(input) {
     return {
       ok: false,
       error:
-        "Atlas refused to delete the selected install path because it overlaps another library entry.",
+        "F95Launcher refused to delete the selected install path because it overlaps another library entry.",
       resolvedPath,
     };
   }
@@ -304,7 +304,7 @@ async function removeLibraryGame(request, dependencies) {
     return {
       success: false,
       code: "GAME_NOT_FOUND",
-      error: "F95 Game Zone App could not find this game in your library.",
+      error: "F95Launcher could not find this game in your library.",
     };
   }
 
@@ -324,7 +324,7 @@ async function removeLibraryGame(request, dependencies) {
         success: false,
         code: "SAVE_STATE_UNAVAILABLE",
         error:
-          "F95 Game Zone App could not inspect save locations right now. Nothing was removed.",
+          "F95Launcher could not inspect save locations right now. Nothing was removed.",
       };
     }
 
@@ -339,7 +339,7 @@ async function removeLibraryGame(request, dependencies) {
         success: false,
         code: "SAVE_STATE_UNAVAILABLE",
         error:
-          "F95 Game Zone App could not inspect save locations right now. Nothing was removed.",
+          "F95Launcher could not inspect save locations right now. Nothing was removed.",
       };
     }
   }
@@ -361,7 +361,7 @@ async function removeLibraryGame(request, dependencies) {
         success: false,
         code: "SAVE_BACKUP_FAILED",
         error:
-          "F95 Game Zone App could not preserve your save files, so the game was not removed.",
+          "F95Launcher could not preserve your save files, so the game was not removed.",
       };
     }
   }
@@ -458,7 +458,7 @@ async function removeLibraryGame(request, dependencies) {
         }
       } catch {
         warnings.push(
-          "F95 Game Zone App could not remove an older local save backup copy.",
+          "F95Launcher could not remove an older local save backup copy.",
         );
       }
     }
@@ -474,7 +474,7 @@ async function removeLibraryGame(request, dependencies) {
         code: "LIBRARY_DELETE_FAILED",
         error:
           deleteResult?.error ||
-          "F95 Game Zone App could not remove the game from your library.",
+          "F95Launcher could not remove the game from your library.",
       };
     }
 
@@ -494,7 +494,7 @@ async function removeLibraryGame(request, dependencies) {
       success: false,
       code: "FILESYSTEM_DELETE_FAILED",
       error:
-        "F95 Game Zone App could not finish deleting the selected files. The library entry was kept.",
+        "F95Launcher could not finish deleting the selected files. The library entry was kept.",
     };
   }
 }

@@ -28,6 +28,8 @@ const Settings = () => {
         return <window.Metadata />;
       case "Cloud Saves":
         return <window.CloudSync />;
+      case "Notifications":
+        return <window.Notifications />;
       default:
         return <div className="p-4 text-text">Select a settings category</div>;
     }
@@ -69,7 +71,7 @@ const Settings = () => {
         {/* Settings Sidebar */}
         <div className="w-[180px] bg-primary h-full border-r border-border -webkit-app-region-no-drag">
           <div className="text-center text-accent font-bold text-md mt-4 mb-4 antialiased -webkit-app-region-drag">
-            F95 GAME ZONE APP
+            F95LAUNCHER
           </div>
           <ul>
             {window.settingsIcons.map((item) => (

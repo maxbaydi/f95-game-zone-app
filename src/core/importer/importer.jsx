@@ -336,7 +336,7 @@ const Importer = () => {
 
       setScanWarnings((previous) => [
         ...previous,
-        { message: "Cancel requested. Atlas is stopping the current scan." },
+        { message: "Cancel requested. F95Launcher is stopping the current scan." },
       ]);
     } catch (error) {
       console.error("Failed to cancel scan:", error);

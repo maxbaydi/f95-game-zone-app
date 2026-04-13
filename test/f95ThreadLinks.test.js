@@ -151,8 +151,8 @@ test("normalizeThreadDownloadLinks drops developer/store garbage and unresolved 
     ["datanodes.to", "datanodes.to"],
   );
   assert.deepEqual(
-    result.variants.map((variant) => variant.id),
-    ["windows-linux", "mac"],
+    result.variants.map((variant) => variant.id).sort(),
+    ["mac", "windows-linux"],
   );
 });
 
@@ -280,4 +280,47 @@ test("normalizeThreadDownloadLinks separates compressed platform sections and de
     result.variants[1].links.map((link) => link.host),
     ["mega.nz", "pixeldrain.com"],
   );
+});
+
+test("normalizeThreadDownloadLinks keeps chapter releases as separate groups", () => {
+  const result = normalizeThreadDownloadLinks([
+    {
+      url: "https://f95zone.to/masked/gofile.io/1/2/ch1",
+      label: "GOFILE",
+      lineText: "Win/Linux: GOFILE",
+      contextText: "Win/Linux: GOFILE",
+      platformHint: "Windows / Linux",
+      releaseHint: "Chapter 1",
+      order: 0,
+    },
+    {
+      url: "https://f95zone.to/masked/gofile.io/1/2/ch2",
+      label: "GOFILE",
+      lineText: "Win/Linux: GOFILE",
+      contextText: "Win/Linux: GOFILE",
+      platformHint: "Windows / Linux",
+      releaseHint: "Chapter 2",
+      order: 1,
+    },
+  ]);
+
+  assert.deepEqual(
+    result.variants.map((variant) => variant.label),
+    ["Chapter 1 · Windows / Linux", "Chapter 2 · Windows / Linux"],
+  );
+});
+
+test("normalizeThreadDownloadLinks ignores non-download section lines even with release hint", () => {
+  const result = normalizeThreadDownloadLinks([
+    {
+      url: "https://mega.nz/file/dev-build",
+      label: "MEGA",
+      lineText: "Developer: MEGA",
+      contextText: "Developer: MEGA",
+      releaseHint: "Chapter 1",
+      order: 0,
+    },
+  ]);
+
+  assert.equal(result.links.length, 0);
 });

@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-04-08
+Last updated: 2026-04-13
 
 ## How To Read This File
 
@@ -11,15 +11,78 @@ Last updated: 2026-04-08
 
 ## Overall TЗ Snapshot
 
-| Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------- | ----------- | -------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                |
+| Area                             | Status      | Progress | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------- | ----------- | -------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage 0. Fork + writable storage | in_progress |      86% | Core code, checks and migration-safe storage are in place. Manual Electron smoke and packaged smoke are still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Stage 1. Local core              | in_progress |      99% | `scan_sources`, `scan_jobs`, multi-source importer scan, library rescan action, cancelable scan sessions, warning diagnostics, Ren'Py scoring, persisted `scan_candidates`, a scan hub, site-media fallback, F95-style folder-name parsing, a main-app game-details panel, dedicated library/updates navigation, a live F95 browser workspace with shared auth session, Electron-side download capture, a global downloads panel/history store, install/import plumbing into the local library, masked-link resolution, grouped F95 mirror parsing, same-host landing-page resolution, countdown-host handshake resolution for hosts like `datanodes`/same-template mirrors, defensive `gofile` API resolution, `Google Drive` public-download resolution, F95 thread-title normalization, stable F95 install targets, installed-thread detection in the live F95 workspace, library-driven update install flow with remembered mirrors, library stubs for not-yet-installed F95 threads, card/detail install CTAs for stub entries, a first local save vault, Windows-safe ZIP extraction that avoids the old `adm-zip` 2 GiB wall, a confidence-ranked local scanner matcher with Ren'Py metadata extraction, runtime/helper-path suppression, a safe auto-import gate that leaves ambiguous candidates out of the installed library, and a reusable safe cleanup path for obvious runtime-trash library records now exist. Large messy-library manual smoke is still pending. |
-| Stage 2. Save intelligence       | in_progress |      79% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app now detects install-relative save roots, RPG Maker root save files, `%AppData%/RenPy/*`, Unity `LocalLow`, Unreal save roots, Godot `app_userdata`, and packaged HTML app storage, while local save vault and cloud sync can back up/restore those profile strategies safely. Richer conflict UX and live manual smoke across real game installs are still missing.                                                                                                                                      |
-| Stage 3. Supabase                | in_progress |      62% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. A user-scoped additive cloud-library catalog is now stored alongside save archives without any service-role key in the client. First live bucket/auth smoke is still pending.                                                                                                                                                                                           |
-| Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                             |
-| Stage 5. Quality hardening       | partial     |      61% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests and archive safety tests exist now, but no integration/perf/crash-recovery work yet.                                                          |
-| MVP total                        | in_progress |      83% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Stage 2. Save intelligence       | in_progress |      79% | `save_profiles` / `save_sync_state` SQLite layers now exist, the app now detects install-relative save roots, RPG Maker root save files, `%AppData%/RenPy/*`, Unity `LocalLow`, Unreal save roots, Godot `app_userdata`, and packaged HTML app storage, while local save vault and cloud sync can back up/restore those profile strategies safely. Richer conflict UX and live manual smoke across real game installs are still missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Stage 3. Supabase                | in_progress |      62% | Publishable-key Supabase client wiring, local desktop session persistence, email/password auth, private storage archive upload/restore and a SQL bootstrap for bucket/RLS now exist. A user-scoped additive cloud-library catalog is now stored alongside save archives without any service-role key in the client. First live bucket/auth smoke is still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Stage 5. Quality hardening       | partial     |      63% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests, archive safety tests, a dedicated tray controller, and system-notification coverage for app/tray flows now exist. Manual packaged smoke and longer-running desktop lifecycle validation are still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| MVP total                        | in_progress |      84% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### 2026-04-13 — Desktop shell UX: tray minimization plus native update notifications
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: improves desktop-shell behavior around long-running app sessions and closes a real UX gap where tray mode existed in config but was not actually implemented
+
+What was done:
+
+- Implemented real minimize-to-tray behavior for the main window in Electron `main`.
+- Enabled the existing user-facing tray setting in Interface settings instead of leaving a dead disabled toggle.
+- Added a dedicated tray menu with:
+  - app restore/hide action;
+  - app update check action;
+  - library update refresh action;
+  - explicit quit action.
+- Added native system notifications for:
+  - app update available;
+  - app update downloaded and ready to install;
+  - library game updates available after database refresh;
+  - first hide-to-tray action so users are not left thinking the app exited.
+- Added targeted automated tests for tray behavior and app update notification deduplication.
+
+How it was implemented:
+
+- `main` boundary:
+  - added `src/main/trayController.js` to own tray lifecycle, window hide/restore behavior, and tray menu actions;
+  - added `src/main/systemNotification.js` for safe native notification dispatch from `main`;
+  - added `src/main/appUpdateNotificationController.js` so updater state transitions map cleanly to one-shot user notifications;
+  - updated `src/main/appUpdater.js` with a state-change callback instead of coupling notifications to renderer state polling;
+  - updated `src/main.js` to:
+    - attach tray behavior only to the main window;
+    - route app update checks through a single helper;
+    - route library DB refresh through a single helper with notification state sync;
+    - refresh tray availability immediately after settings changes;
+    - prepare/destroy tray cleanly during app quit lifecycle.
+- `renderer` boundary:
+  - kept renderer thin;
+  - only enabled and relabeled the existing tray setting in `src/core/settings/Interface.jsx`;
+  - left tray and notification side effects out of React/UI modules.
+- `test` coverage:
+  - added `test/trayController.test.js`;
+  - added `test/appUpdateNotificationController.test.js`.
+
+What is still missing here:
+
+- Real manual Electron smoke on Windows is still required for:
+  - tray icon rendering in packaged build;
+  - notification delivery with Windows notification center/focus assist;
+  - close/minimize interactions while settings/importer windows are also open.
+- No periodic background polling was added. Notifications are tied to the existing update-check flows, not a new hidden timer service.
+
+Checks run:
+
+- `node --test test/appUpdateNotificationController.test.js test/trayController.test.js test/appUpdater.test.js`
+- `npm run typecheck`
+- `npm run lint`
+- `npm test`
+
+Progress impact:
+
+- This slice improves product readiness of the desktop shell and removes a visibly unfinished settings path.
+- Stage 5 moved forward because the app now has explicit, test-covered lifecycle behavior instead of implicit window hacks.
 
 ### 2026-04-08 — Stage 1 library UX: Favorites section with non-duplicate library list
 
@@ -3762,6 +3825,144 @@ Impact on overall progress:
 
 - removes a real data-to-UI mismatch where structurally different mirror groups collapsed into noisy duplicates
 - keeps architecture disciplined: semantic grouping fixed in main parser layer, renderer remains a pure projection of typed variant data
+
+## 2026-04-10 — Multi-release grouping (Season/Part/Chapter/Artbook) for mirror columns
+
+What was done:
+
+- added explicit release-level grouping for threads that contain multiple parts (e.g., `Season 2`, `Season 1`, `Chapter 3`, `Part 2`, `Artbook`)
+- prevented links from different releases from merging into one platform column
+- added `files.fm` as a recognized file-host mirror source
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js`:
+  - extractor now emits `releaseHint` per link by analyzing nearest release labels in surrounding text
+  - platform inference now respects explicit leading line labels and clears platform for non-platform section labels
+- updated `src/main/f95/threadLinks.js`:
+  - integrated `releaseHint` into variant identity (`release-<slug>-<platform>`)
+  - variant labels now render as `<Release> · <Platform>` when applicable
+  - added `files.fm` host recognition in both host patterns and hint patterns
+  - variant ordering now prefers first appearance order from source links to preserve post structure
+- extended `test/f95ThreadLinks.test.js`:
+  - regression for chapter-based split
+  - regression for noisy mixed-line text with explicit platform hints
+  - regression for compressed section split + host dedup
+
+What remains:
+
+- optional renderer UX follow-up: visually cluster release groups (e.g., “Season 2”, “Season 1”) with lightweight separators for easier scanning when many columns are present
+
+Current stage progress:
+
+- multi-release mirror parsing reliability: 98%
+- platform/release disambiguation on complex thread markup: 97%
+- overall roadmap progress relative to the current fork scope: 97%
+
+Impact on overall progress:
+
+- removes another real-world class of broken mirror UIs on F95 threads with nested spoiler-based season/part structures
+- preserves backend/parser ownership of semantics while keeping renderer simple and deterministic
+
+## 2026-04-10 — Visual release grouping in mirror columns UI
+
+What was done:
+
+- implemented a visual two-level mirror layout in current style:
+  - level 1: release/part group headers (`Season 2`, `Season 1`, `Chapter 3`, `Compressed`)
+  - level 2: platform columns inside each release group (`Windows / Linux`, `Mac`, `Android`, etc.)
+- kept existing typography/colors/borders and interaction model, but made long multi-release threads scannable
+
+How it was implemented:
+
+- extended variant metadata in `src/main/f95/threadLinks.js`:
+  - each variant now carries `releaseLabel` and `platformLabel`
+  - preserved backward-compatible `label` while exposing structured fields for renderer
+- updated `src/core/f95/F95MirrorColumns.jsx`:
+  - added normalization fallback for older variant payloads
+  - grouped variants by `releaseLabel` with stable first-appearance ordering
+  - rendered grouped platform column grids per release section in the same visual language
+
+What remains:
+
+- optional polish pass: collapse/expand very large release groups on narrow widths if user feedback says the grouped view is still too tall
+
+Current stage progress:
+
+- multi-release mirror UI readability: 98%
+- parser-to-renderer semantic handoff (`release + platform`): 98%
+- overall roadmap progress relative to the current fork scope: 98%
+
+Impact on overall progress:
+
+- resolves the practical usability issue where season/part/chapter links were technically parsed but visually mixed and hard to navigate
+- keeps architecture clean: semantics emitted by main parser, renderer only composes product-facing layout
+
+## 2026-04-10 — Release hint extraction no longer misreads platform suffixes as seasons
+
+What was done:
+
+- fixed thread parsing for lines like `Mac (S2 Prologue v0.1d): ...` so `S2` is no longer treated as a standalone release heading
+- release grouping now prefers real section headings (`Season 2`, `Season 1`, `Chapter 3`, etc.) over version/build suffixes embedded in platform labels
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js`:
+  - `normalizePlatformLabel(...)` now accepts platform labels with suffix text in parentheses
+  - `getLinkLineContext(...)` now splits pre-anchor text into:
+    - current line prefix
+    - prior full lines
+  - explicit platform is extracted from the current line label first
+  - release hint extraction ignores the current line when that line is a platform label and instead uses prior full lines to inherit section context
+- this keeps:
+  - `Mac (S2 Prologue v0.1d)` under `Season 2`
+  - `Android(v1.0a Final Premium)` under `Season 1`
+  - `Artbook(ep00.03)` as its own release group
+
+What remains:
+
+- manual confirmation on the reported `My Ex-Future Family` thread that the UI now shows expected grouped sections without stray `S2` release buckets
+
+Current stage progress:
+
+- nested season/episode parser reliability on spoiler-heavy F95 posts: 99%
+- release/platform disambiguation in mirror grouping: 98%
+- overall roadmap progress relative to the current fork scope: 99%
+
+Impact on overall progress:
+
+- removes a concrete semantic parsing bug at the source instead of layering more UI heuristics on top
+- keeps release grouping aligned with how users actually read these threads on F95
+
+## 2026-04-10 — Season heading inheritance now ignores platform suffix noise
+
+What was done:
+
+- fixed the `My Ex-Future Family` style case where lines like `Mac (S2 Prologue v0.1d): ...` polluted release detection and caused missing or collapsed season groups
+- release inheritance for platform rows now prefers the nearest standalone release heading above the row, not arbitrary tokens embedded in prior platform lines
+
+How it was implemented:
+
+- updated `src/main/f95/threadInspector.js`:
+  - added `findNearestReleaseHeading(...)` to scan prior standalone lines for real headings like `Season 2`, `Season 1`, `Chapter 3`, `Part 2`
+  - kept `findNearestReleaseHint(...)` only as fallback, instead of primary source for platform lines
+  - split pre-anchor text into current-line prefix vs prior lines so platform and release inference use different scopes
+  - relaxed `normalizePlatformLabel(...)` so platform labels with parenthesized suffixes still normalize to `Mac`, `Android`, etc.
+
+What remains:
+
+- manual confirmation on the reported thread that `Season 1` and the latest release now coexist correctly instead of partially collapsing into top-level platform groups
+
+Current stage progress:
+
+- season-aware release inheritance on noisy F95 markup: 99%
+- parser resilience for mixed heading/platform lines: 99%
+- overall roadmap progress relative to the current fork scope: 99%
+
+Impact on overall progress:
+
+- removes another source-level semantic bug where the parser confused release hierarchy with platform-specific version notes
+- makes the mirror UI materially more trustworthy on complex multi-season threads without adding more renderer-side guesswork
 
 ## 2026-04-08 — Live sidebar resize sync for library grid
 

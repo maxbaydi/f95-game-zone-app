@@ -1,15 +1,15 @@
 {
-  "name": "f95-game-zone-app",
+  "name": "f95launcher",
   "version": "1.2.4",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
   },
-  "description": "F95 Game Zone App: desktop library, installs, updates, and cloud save sync for F95 games",
+  "description": "F95Launcher: desktop library, installs, updates, and cloud save sync for F95 games",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "f95-game-zone-app": "npm run build:css && electron .",
+    "f95launcher": "npm run build:css && electron .",
     "build": "npm run build:css && electron-builder --win --x64",
     "dev:css:watch": "postcss src/assets/css/tailwind.css -o src/assets/css/tailwind.output.css --watch",
     "dev:web": "node scripts/dev-serve.js",
@@ -25,8 +25,8 @@
     "ci:check": "npm run build:css && npm run lint && npm run typecheck && npm run test"
   },
   "build": {
-    "appId": "com.maxbaydi.f95gamezoneapp",
-    "productName": "F95 Game Zone App",
+    "appId": "com.maxbaydi.f95launcher",
+    "productName": "F95Launcher",
     "publish": {
       "provider": "github",
       "owner": "maxbaydi",

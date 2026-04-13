@@ -71,6 +71,7 @@ function buildCloudLibraryCatalogEntry(game) {
     bannerUrl: String(game?.banner_url || "").trim(),
     status: String(game?.status || "").trim(),
     category: String(game?.category || "").trim(),
+    isFavorite: Boolean(game?.isFavorite),
     installedVersionCount: versions.length,
     updatedAt: new Date().toISOString(),
   };
@@ -107,6 +108,7 @@ function parseCloudLibraryCatalogManifest(input) {
           bannerUrl: String(entry?.bannerUrl || "").trim(),
           status: String(entry?.status || "").trim(),
           category: String(entry?.category || "").trim(),
+          isFavorite: Boolean(entry?.isFavorite),
           installedVersionCount: Math.max(0, Number(entry?.installedVersionCount || 0)),
           updatedAt: String(entry?.updatedAt || "").trim(),
         }))
@@ -177,7 +179,13 @@ function choosePreferredCloudLibraryEntry(left, right) {
   const leftUpdatedAt = new Date(left.updatedAt || 0).getTime() || 0;
   const rightUpdatedAt = new Date(right.updatedAt || 0).getTime() || 0;
 
-  return rightUpdatedAt > leftUpdatedAt ? right : left;
+  const preferred = rightUpdatedAt > leftUpdatedAt ? right : left;
+
+  if (left.isFavorite || right.isFavorite) {
+    return { ...preferred, isFavorite: true };
+  }
+
+  return preferred;
 }
 
 function sortCloudLibraryCatalogEntries(entries) {

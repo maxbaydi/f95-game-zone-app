@@ -1,10 +1,24 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  dialog,
+  shell,
+  screen,
+  Menu,
+  Notification,
+  Tray,
+  nativeImage,
+} = require("electron");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
 const axios = require("axios");
 const ini = require("ini");
 const { initializeAppPaths } = require("./main/appPaths");
+const {
+  createAppUpdateNotificationController,
+} = require("./main/appUpdateNotificationController");
 const { extractArchiveSafely } = require("./main/archive/extractArchive");
 const { toStoredImagePath } = require("./main/assetPaths");
 const { createAppUpdaterController } = require("./main/appUpdater");
@@ -49,6 +63,13 @@ const {
   refreshSaveProfiles,
 } = require("./main/saveProfiles");
 const { removeLibraryGame } = require("./main/gameRemoval");
+const {
+  createTrayController,
+  isMinimizeToTrayEnabled,
+} = require("./main/trayController");
+const {
+  createLibraryUpdateNotificationController,
+} = require("./main/libraryUpdateNotificationController");
 const { upsertSaveSyncState } = require("./main/db/saveSyncStateStore");
 const {
   buildCloudLibraryDeleteRequest,
@@ -139,7 +160,6 @@ const {
   getSteamIDbyRecord,
   db,
 } = require("./database");
-const { Menu } = require("electron");
 const cp = require("child_process");
 const contextMenuData = new Map();
 
@@ -155,6 +175,7 @@ let appConfig;
 let databaseConnection = null;
 let cloudSaveService = null;
 let cloudSaveQueue = Promise.resolve();
+let libraryUpdateRefreshPromise = null;
 
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 
@@ -166,7 +187,6 @@ const updatesDir = appPaths.updates;
 const downloadsDir = appPaths.downloads;
 const imagesDir = appPaths.images;
 const configPath = appPaths.config;
-const appUpdater = createAppUpdaterController({ app });
 let f95Session = null;
 const f95InstallQueue = [];
 const f95InstallContexts = new Map();
@@ -187,16 +207,65 @@ const APP_WINDOW_ICON_PATH = path.join(
   "appicon.ico",
 );
 
+function createTrayImage() {
+  const trayImage = nativeImage.createFromPath(APP_WINDOW_ICON_PATH);
+
+  if (trayImage.isEmpty()) {
+    return APP_WINDOW_ICON_PATH;
+  }
+
+  return trayImage.resize({ width: 16, height: 16 });
+}
+
+const trayController = createTrayController({
+  app,
+  Menu,
+  Tray,
+  Notification,
+  createTrayImage,
+  getConfig: () => appConfig || defaultConfig,
+  onCheckForAppUpdates: () => runAppUpdateCheck("tray-menu"),
+  onCheckForLibraryUpdates: () => runLibraryUpdateRefresh("tray-menu"),
+  tooltip: "F95Launcher",
+});
+
+const appUpdateNotificationController = createAppUpdateNotificationController({
+  Notification,
+  iconPath: APP_WINDOW_ICON_PATH,
+  onActivate: () => {
+    trayController.showMainWindow();
+  },
+});
+
+const libraryUpdateNotificationController =
+  createLibraryUpdateNotificationController({
+    Notification,
+    iconPath: APP_WINDOW_ICON_PATH,
+    onClick: () => {
+      trayController.showMainWindow();
+    },
+  });
+
+const appUpdater = createAppUpdaterController({
+  app,
+  onStateChanged: (nextState, previousState) => {
+    const config = appConfig || defaultConfig;
+    if (config?.Notifications?.appUpdates === false) {
+      return;
+    }
+    appUpdateNotificationController.handleStateChange(nextState, previousState);
+  },
+});
+
 // ────────────────────────────────────────────────
 // WINDOW CREATION FUNCTIONS
 // ────────────────────────────────────────────────
 
 function resolveMainWindowBounds() {
-  const workArea =
-    screen.getPrimaryDisplay()?.workAreaSize || {
-      width: MAIN_WINDOW_DEFAULT_WIDTH,
-      height: MAIN_WINDOW_DEFAULT_HEIGHT,
-    };
+  const workArea = screen.getPrimaryDisplay()?.workAreaSize || {
+    width: MAIN_WINDOW_DEFAULT_WIDTH,
+    height: MAIN_WINDOW_DEFAULT_HEIGHT,
+  };
   const screenWidth = Math.max(
     Number(workArea.width) || MAIN_WINDOW_DEFAULT_WIDTH,
     MAIN_WINDOW_SAFE_MIN_WIDTH,
@@ -253,6 +322,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
+  trayController.attachMainWindow(mainWindow);
   appUpdater.attachWindow(mainWindow);
 
   if (process.defaultApp || appConfig?.Interface?.showDebugConsole) {
@@ -401,6 +471,59 @@ function createGameDetailsWindow(recordId) {
   });
 }
 
+async function runAppUpdateCheck(reason = "manual") {
+  try {
+    return await appUpdater.checkForUpdates();
+  } catch (error) {
+    console.error(
+      `[app.updater] Failed to check for updates (${reason}):`,
+      error,
+    );
+    throw error;
+  }
+}
+
+async function runLibraryUpdateRefresh(reason = "manual") {
+  if (libraryUpdateRefreshPromise) {
+    return libraryUpdateRefreshPromise;
+  }
+
+  libraryUpdateRefreshPromise = (async () => {
+    const safeWindow =
+      mainWindow &&
+      typeof mainWindow.isDestroyed === "function" &&
+      !mainWindow.isDestroyed()
+        ? mainWindow
+        : null;
+    const result = await checkDbUpdates(updatesDir, safeWindow);
+
+    if (result?.success) {
+      try {
+        const config = appConfig || defaultConfig;
+        const allowNotify =
+          Number(result?.total || 0) > 0 &&
+          config?.Notifications?.libraryUpdates !== false;
+        await libraryUpdateNotificationController.syncFromAllGames({
+          getGames: () => getGames(appPaths, 0, null),
+          allowNotify,
+          reason,
+        });
+      } catch (error) {
+        console.error(
+          `[library.updates] Failed to refresh notification state (${reason}):`,
+          error,
+        );
+      }
+    }
+
+    return result;
+  })().finally(() => {
+    libraryUpdateRefreshPromise = null;
+  });
+
+  return libraryUpdateRefreshPromise;
+}
+
 function normalizeF95DownloadUrl(url) {
   return String(url || "").trim();
 }
@@ -506,11 +629,7 @@ function getLibraryIdentityKey(game) {
   );
 }
 
-function findMatchingLibraryGame(
-  libraryGames,
-  metadata,
-  fallbackName = "",
-) {
+function findMatchingLibraryGame(libraryGames, metadata, fallbackName = "") {
   const normalizedF95Id = extractF95IdFromUrl(metadata?.threadUrl || "");
   const normalizedTitle = normalizeLibraryMatchText(
     metadata?.title || fallbackName,
@@ -538,7 +657,8 @@ function findMatchingLibraryGame(
       existingGame ||
       libraryGames.find(
         (game) => String(game?.f95_id || "") === String(normalizedF95Id),
-      ) || null;
+      ) ||
+      null;
   }
 
   if (!existingGame && normalizedTitle) {
@@ -717,7 +837,9 @@ async function resolveAtlasGameMetadata(atlasId) {
 }
 
 async function buildF95ThreadLibraryMetadata(input) {
-  const parsedTitle = parseF95ThreadTitle(input?.rawTitle || input?.title || "");
+  const parsedTitle = parseF95ThreadTitle(
+    input?.rawTitle || input?.title || "",
+  );
   const atlasMetadata = await prepareDownloadedGameMetadata({
     threadUrl: input?.threadUrl || "",
   });
@@ -735,16 +857,17 @@ async function buildF95ThreadLibraryMetadata(input) {
     version: String(
       input?.version || parsedTitle.version || atlasData.version || "",
     ).trim(),
-    engine: resolveEngineLabel(input?.engine, parsedTitle.engine, atlasData.engine),
+    engine: resolveEngineLabel(
+      input?.engine,
+      parsedTitle.engine,
+      atlasData.engine,
+    ),
     atlasId: atlasMetadata.atlasId || null,
     f95Id: atlasMetadata.f95Id || extractF95IdFromUrl(input?.threadUrl || ""),
   };
 }
 
-async function upsertLibraryGameFromMetadata(
-  metadata,
-  options = {},
-) {
+async function upsertLibraryGameFromMetadata(metadata, options = {}) {
   const libraryGames = Array.isArray(options.libraryGames)
     ? options.libraryGames
     : await getGames(appPaths, 0, null);
@@ -803,12 +926,10 @@ async function upsertLibraryGameFromMetadata(
     }
   }
 
-  const localGame =
-    existingGame ||
-    {
-      record_id: recordId,
-      versions: [],
-    };
+  const localGame = existingGame || {
+    record_id: recordId,
+    versions: [],
+  };
 
   localGame.record_id = recordId;
   localGame.title = gamePayload.title;
@@ -892,6 +1013,10 @@ async function materializeCloudLibraryCatalogEntries(entries, reason) {
           reason,
         },
       );
+
+      if (entry?.isFavorite && result?.recordId) {
+        await setGameFavorite(result.recordId, true).catch(() => {});
+      }
 
       if (result.added) {
         added += 1;
@@ -996,9 +1121,7 @@ async function mapWithConcurrency(items, limit, worker) {
     }
   }
 
-  await Promise.all(
-    Array.from({ length: concurrency }, () => runWorker()),
-  );
+  await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
 }
 
 async function runBulkCloudSaveAction(mode, options = {}) {
@@ -1012,7 +1135,10 @@ async function runBulkCloudSaveAction(mode, options = {}) {
   }
 
   const installedGames = (await getGames(appPaths, 0, null)).filter(
-    (game) => game?.record_id && Array.isArray(game?.versions) && game.versions.length > 0,
+    (game) =>
+      game?.record_id &&
+      Array.isArray(game?.versions) &&
+      game.versions.length > 0,
   );
   const total = installedGames.length;
   const summary = {
@@ -1073,9 +1199,10 @@ async function runBulkCloudSaveAction(mode, options = {}) {
           };
         }
       } else {
-        const reconcileResult = await getReadyCloudSaveService().reconcileGameSaves({
-          recordId: game.record_id,
-        });
+        const reconcileResult =
+          await getReadyCloudSaveService().reconcileGameSaves({
+            recordId: game.record_id,
+          });
         const action = reconcileResult?.action || "noop";
         result = {
           ...result,
@@ -1260,9 +1387,11 @@ async function processPendingCloudLibraryDeletesNow(reason) {
     collectCloudLibraryDeleteCandidateKeys(pendingRequests);
 
   try {
-    const result = await getReadyCloudSaveService().removeLibraryCatalogEntries({
-      targets: pendingRequests,
-    });
+    const result = await getReadyCloudSaveService().removeLibraryCatalogEntries(
+      {
+        targets: pendingRequests,
+      },
+    );
 
     for (const request of pendingRequests) {
       await deletePendingCloudLibraryDeleteRequest(
@@ -1332,9 +1461,8 @@ async function syncCloudLibraryCatalogNow(reason, options = {}) {
     ]),
   });
   const shouldMaterializeRemoteOnly = Boolean(options?.materializeRemoteOnly);
-  const result = await getReadyCloudSaveService().syncLibraryCatalog(
-    normalizedOptions,
-  );
+  const result =
+    await getReadyCloudSaveService().syncLibraryCatalog(normalizedOptions);
   const materialized = shouldMaterializeRemoteOnly
     ? await materializeCloudLibraryCatalogEntries(
         result?.remoteOnlyEntries || [],
@@ -1364,8 +1492,9 @@ async function syncCloudLibraryCatalogNow(reason, options = {}) {
 
 function scheduleCloudLibraryCatalogSync(reason, options = {}) {
   const normalizedOptions = normalizeCloudLibrarySyncOptions(options);
-  return queueCloudSaveTask(`sync cloud library catalog (${reason})`, async () =>
-    syncCloudLibraryCatalogNow(reason, normalizedOptions),
+  return queueCloudSaveTask(
+    `sync cloud library catalog (${reason})`,
+    async () => syncCloudLibraryCatalogNow(reason, normalizedOptions),
   );
 }
 
@@ -1905,7 +2034,10 @@ async function persistF95InstalledGame(payload) {
     title: payload.title,
     creator: payload.metadata?.creator || "Unknown",
     version: payload.metadata?.version || "Downloaded",
-    engine: resolveEngineLabel(payload.detectedEngine, payload.metadata?.engine),
+    engine: resolveEngineLabel(
+      payload.detectedEngine,
+      payload.metadata?.engine,
+    ),
     description: payload.metadata?.threadUrl
       ? `Installed from ${payload.metadata.threadUrl}`
       : "Installed from F95",
@@ -1945,7 +2077,10 @@ async function persistF95InstalledGame(payload) {
       payload.existingGame.atlas_id !== gameRecord.atlasId
     ) {
       try {
-        await addAtlasMapping(payload.existingGame.record_id, gameRecord.atlasId);
+        await addAtlasMapping(
+          payload.existingGame.record_id,
+          gameRecord.atlasId,
+        );
       } catch (error) {
         console.warn("[f95.install] Failed to update atlas mapping:", {
           recordId: payload.existingGame.record_id,
@@ -2416,6 +2551,10 @@ const defaultConfig = {
     publishableKey: "sb_publishable_HrdpFN4qdU010h9DNHR7OA_oZBZ1YLw",
     storageBucket: "atlas-cloud-saves",
   },
+  Notifications: {
+    appUpdates: true,
+    libraryUpdates: true,
+  },
   F95Mirrors: {},
 };
 
@@ -2505,8 +2644,9 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
       cloudProjectKey && gameBeforeRemoval
         ? buildGameCloudLibraryDeleteRequest(gameBeforeRemoval)
         : null;
-    const hasUnresolvableCloudDelete =
-      Boolean(cloudProjectKey && gameBeforeRemoval && !pendingCloudDeleteRequest);
+    const hasUnresolvableCloudDelete = Boolean(
+      cloudProjectKey && gameBeforeRemoval && !pendingCloudDeleteRequest,
+    );
 
     if (pendingCloudDeleteRequest) {
       try {
@@ -2590,10 +2730,11 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
           cloudAuthState?.authenticated &&
           pendingCloudDeleteRequest.requestKey
         ) {
-          const remainingPendingDeletes = await listPendingCloudLibraryDeleteRequests(
-            databaseConnection,
-            cloudProjectKey,
-          ).catch(() => []);
+          const remainingPendingDeletes =
+            await listPendingCloudLibraryDeleteRequests(
+              databaseConnection,
+              cloudProjectKey,
+            ).catch(() => []);
 
           if (
             remainingPendingDeletes.some(
@@ -2621,7 +2762,7 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
     return {
       success: false,
       code: "INTERNAL_REMOVE_ERROR",
-      error: "F95 Game Zone App could not remove the selected game.",
+      error: "F95Launcher could not remove the selected game.",
     };
   }
 });
@@ -2665,7 +2806,7 @@ ipcMain.handle("set-game-favorite", async (_event, payload) => {
     console.error("[library.favorite] Failed to update game favorite:", error);
     return {
       success: false,
-      error: "F95 Game Zone App could not update Favorites for this game.",
+      error: "F95Launcher could not update Favorites for this game.",
     };
   }
 });
@@ -2693,7 +2834,7 @@ ipcMain.handle("get-app-update-state", async () => {
 });
 
 ipcMain.handle("check-app-update", async () => {
-  return appUpdater.checkForUpdates();
+  return runAppUpdateCheck("renderer");
 });
 
 ipcMain.handle("download-app-update", async () => {
@@ -2705,11 +2846,11 @@ ipcMain.handle("install-app-update", async () => {
 });
 
 ipcMain.handle("check-updates", async () => {
-  return appUpdater.checkForUpdates();
+  return runAppUpdateCheck("legacy-renderer");
 });
 
 ipcMain.handle("check-db-updates", async () => {
-  return checkDbUpdates(updatesDir, mainWindow);
+  return runLibraryUpdateRefresh("renderer");
 });
 
 ipcMain.handle("minimize-window", () => {
@@ -2800,6 +2941,7 @@ ipcMain.handle("save-settings", async (event, settings) => {
   try {
     appConfig = settings;
     fs.writeFileSync(configPath, ini.stringify(settings));
+    trayController.refresh();
     await broadcastCloudAuthState().catch((error) => {
       console.error(
         "[cloud.auth] Failed to refresh auth state after settings save:",
@@ -3167,16 +3309,13 @@ ipcMain.handle("install-f95-thread", async (event, payload) => {
         code: "captcha_required",
         error:
           error.userMessage ||
-          "This mirror needs captcha confirmation before F95 Game Zone App can continue.",
+          "This mirror needs captcha confirmation before F95Launcher can continue.",
         actionUrl: error.actionUrl || downloadUrl,
       };
     }
     return {
       success: false,
-      error: getErrorMessage(
-        error,
-        "Failed to resolve the selected mirror.",
-      ),
+      error: getErrorMessage(error, "Failed to resolve the selected mirror."),
     };
   }
 
@@ -4253,7 +4392,10 @@ const importGamesInternal = async (params) => {
         execPath,
         folderSize: size,
       };
-      const existingGame = findPreferredGameByPath(existingGamesByPath, gamePath);
+      const existingGame = findPreferredGameByPath(
+        existingGamesByPath,
+        gamePath,
+      );
       let recordId;
 
       if (existingGame?.record_id) {
@@ -4300,7 +4442,10 @@ const importGamesInternal = async (params) => {
       }
       console.log("adding mapping");
       console.log("recordId:", recordId, "atlasId:", resolvedGame.atlasId);
-      if (resolvedGame.atlasId && existingGame?.atlas_id !== resolvedGame.atlasId) {
+      if (
+        resolvedGame.atlasId &&
+        existingGame?.atlas_id !== resolvedGame.atlasId
+      ) {
         try {
           await addAtlasMapping(recordId, resolvedGame.atlasId);
           console.log("mapping added");
@@ -4393,9 +4538,9 @@ const importGamesInternal = async (params) => {
       try {
         const bannerUrl = await getBannerUrl(game.atlasId);
         const screenUrls = await getScreensUrlList(game.atlasId);
-    const previewCount = downloadPreviewImages
-      ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
-      : 0;
+        const previewCount = downloadPreviewImages
+          ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
+          : 0;
         const totalImages =
           (downloadBannerImages && bannerUrl ? 2 : 0) + previewCount;
 
@@ -4468,9 +4613,12 @@ async function runLibraryDuplicateCleanup() {
   }
 
   if (cleanup.failed.length > 0) {
-    console.warn("[library.duplicates] Failed to remove some duplicate records", {
-      failed: cleanup.failed,
-    });
+    console.warn(
+      "[library.duplicates] Failed to remove some duplicate records",
+      {
+        failed: cleanup.failed,
+      },
+    );
     mainWindow.webContents.send("import-warning", {
       message: `Failed to clean up ${cleanup.failed.length} duplicate library record(s).`,
     });
@@ -4746,6 +4894,10 @@ function loadConfig() {
       CloudSync: {
         ...defaultConfig.CloudSync,
         ...(appConfig?.CloudSync || {}),
+      },
+      Notifications: {
+        ...defaultConfig.Notifications,
+        ...(appConfig?.Notifications || {}),
       },
       F95Mirrors: {
         ...(defaultConfig.F95Mirrors || {}),
@@ -5536,20 +5688,24 @@ app.whenReady().then(async () => {
   });
   createWindow();
   setTimeout(() => {
-    backfillMissingVersionFolderSizes().then((result) => {
-      if (result.updated > 0) {
-        console.log(
-          `[library.size] Backfilled folder size for ${result.updated} version records (scanned ${result.scanned}).`,
-        );
-      }
-    }).catch((error) => {
-      console.warn("[library.size] Folder-size backfill failed:", error);
-    });
+    backfillMissingVersionFolderSizes()
+      .then((result) => {
+        if (result.updated > 0) {
+          console.log(
+            `[library.size] Backfilled folder size for ${result.updated} version records (scanned ${result.scanned}).`,
+          );
+        }
+      })
+      .catch((error) => {
+        console.warn("[library.size] Folder-size backfill failed:", error);
+      });
   }, 1200);
-  const initialCloudAuthState = await broadcastCloudAuthState().catch((error) => {
-    console.error("[cloud.auth] Failed to initialize auth state:", error);
-    return null;
-  });
+  const initialCloudAuthState = await broadcastCloudAuthState().catch(
+    (error) => {
+      console.error("[cloud.auth] Failed to initialize auth state:", error);
+      return null;
+    },
+  );
   if (initialCloudAuthState?.authenticated) {
     scheduleCloudInstalledSavesReconcile("startup");
     scheduleCloudLibraryCatalogSync("startup");
@@ -5557,11 +5713,25 @@ app.whenReady().then(async () => {
   broadcastF95AuthState().catch((error) => {
     console.error("[f95.auth] Failed to initialize auth state:", error);
   });
-  appUpdater.checkForUpdates().catch((error) => {
+  runAppUpdateCheck("startup").catch((error) => {
     console.error("Failed to initialize app updater:", error);
   });
 });
 
+app.on("before-quit", () => {
+  trayController.prepareForQuit();
+});
+
+app.on("will-quit", () => {
+  trayController.destroy();
+});
+
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform === "darwin") {
+    return;
+  }
+  if (isMinimizeToTrayEnabled(appConfig)) {
+    return;
+  }
+  app.quit();
 });

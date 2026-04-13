@@ -97,6 +97,7 @@ function buildLatestReleaseUrl(owner, repo) {
  *   httpGet?: (url: string) => Promise<any>,
  *   owner?: string,
  *   repo?: string,
+ *   onStateChanged?: ((nextState: any, previousState: any) => void) | null,
  * }} input
  */
 function createAppUpdaterController(input) {
@@ -128,10 +129,19 @@ function createAppUpdaterController(input) {
    * @param {Partial<typeof state>} patch
    */
   function updateState(patch) {
+    const previousState = state;
     state = {
       ...state,
       ...patch,
     };
+
+    if (typeof input.onStateChanged === "function") {
+      try {
+        input.onStateChanged(state, previousState);
+      } catch (error) {
+        console.error("[app.updater] state change callback failed", error);
+      }
+    }
 
     if (mainWindow?.webContents?.send) {
       mainWindow.webContents.send("update-status", state);
