@@ -10,6 +10,8 @@ const {
   Tray,
   nativeImage,
 } = require("electron");
+
+app.setAppUserModelId("com.maxbaydi.f95launcher");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
@@ -227,6 +229,7 @@ const trayController = createTrayController({
   onCheckForAppUpdates: () => runAppUpdateCheck("tray-menu"),
   onCheckForLibraryUpdates: () => runLibraryUpdateRefresh("tray-menu"),
   tooltip: "F95Launcher",
+  iconPath: APP_WINDOW_ICON_PATH,
 });
 
 const appUpdateNotificationController = createAppUpdateNotificationController({

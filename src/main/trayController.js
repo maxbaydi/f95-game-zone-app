@@ -21,6 +21,7 @@ function isMinimizeToTrayEnabled(config) {
  *   onCheckForAppUpdates?: (() => Promise<any> | any) | null,
  *   onCheckForLibraryUpdates?: (() => Promise<any> | any) | null,
  *   tooltip?: string,
+ *   iconPath?: string | null,
  * }} input
  */
 function createTrayController(input) {
@@ -141,6 +142,7 @@ function createTrayController(input) {
       Notification: input.Notification,
       title: "F95Launcher — App minimized to tray",
       body: "F95Launcher is still running in the tray. Open it from the tray icon when you need it.",
+      icon: input.iconPath || undefined,
       silent: true,
       onClick: () => {
         showMainWindow();
