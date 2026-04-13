@@ -184,21 +184,42 @@ function createTrayController(input) {
     return true;
   }
 
+  function forceRepaintTransparentWindow(windowInstance) {
+    if (
+      process.platform !== "win32" ||
+      typeof windowInstance.getSize !== "function" ||
+      typeof windowInstance.setSize !== "function"
+    ) {
+      return;
+    }
+
+    const [width, height] = windowInstance.getSize();
+    windowInstance.setSize(width + 1, height);
+    windowInstance.setSize(width, height);
+  }
+
   function showMainWindow() {
     const windowInstance = getWindow();
     if (!windowInstance) {
       return false;
     }
 
+    const wasHidden = !windowInstance.isVisible?.();
+
     if (windowInstance.isMinimized?.()) {
       windowInstance.restore();
     }
 
-    if (!windowInstance.isVisible?.()) {
+    if (wasHidden) {
       windowInstance.show();
     }
 
     windowInstance.focus?.();
+
+    if (wasHidden) {
+      forceRepaintTransparentWindow(windowInstance);
+    }
+
     syncTrayMenu();
     return true;
   }

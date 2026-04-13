@@ -1,6 +1,6 @@
 {
   "name": "f95launcher",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
@@ -60,7 +60,6 @@
     "asar": true,
     "nodeGypRebuild": false,
     "win": {
-      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ],
