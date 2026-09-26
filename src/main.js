@@ -45,6 +45,7 @@ const {
   selectTransferMode,
 } = require("./main/f95/directDownload");
 const { buildDirectTransferOptions } = require("./main/f95/transferOptions");
+const { createMirrorActionFlow } = require("./main/f95/mirrorActionFlow");
 const {
   DownloadCancelledError,
   DownloadValidationError,
@@ -1697,6 +1698,8 @@ function createF95DownloadContext(request) {
     prepared: null,
     abortController: null,
     downloadItem: null,
+    // "Finish the step in the browser" flow (captcha / Cloudflare), if any.
+    actionFlow: null,
     cancelled: false,
     targetPath: "",
     reservedPath: "",
@@ -1704,6 +1707,181 @@ function createF95DownloadContext(request) {
 
   f95DownloadContexts.set(contextId, context);
   return context;
+}
+
+function stopF95MirrorActionFlow(context) {
+  const flow = context?.actionFlow;
+  if (!flow) {
+    return;
+  }
+  context.actionFlow = null;
+  try {
+    flow.stop();
+  } catch (error) {
+    console.warn("[f95.download] Failed to stop the browser-step flow:", error);
+  }
+}
+
+/**
+ * Embedded browser window (same session as the downloader, so cookies such
+ * as cf_clearance are shared) wrapped for createMirrorActionFlow.
+ */
+function openF95MirrorActionWindow(url, hostLabel) {
+  const navigationListeners = new Set();
+  const closedListeners = new Set();
+  const browserWindow = createF95BrowserWindow({
+    BrowserWindow,
+    appConfig,
+    url,
+    title: `${hostLabel}: finish the step in this window`,
+    reuseKey: "__atlasF95ActionWindow",
+    onNavigation: (info) => {
+      broadcastF95BrowserNavigation(info);
+      for (const listener of [...navigationListeners]) {
+        try {
+          listener(info);
+        } catch (error) {
+          console.warn("[f95.download] Browser-step navigation listener failed:", error);
+        }
+      }
+    },
+  });
+  browserWindow.once("closed", () => {
+    for (const listener of [...closedListeners]) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn("[f95.download] Browser-step close listener failed:", error);
+      }
+    }
+  });
+
+  return {
+    webContentsId: browserWindow.webContents.id,
+    onNavigated(callback) {
+      navigationListeners.add(callback);
+      return () => navigationListeners.delete(callback);
+    },
+    onClosed(callback) {
+      closedListeners.add(callback);
+      return () => closedListeners.delete(callback);
+    },
+    close() {
+      if (!browserWindow.isDestroyed()) {
+        browserWindow.close();
+      }
+    },
+    isOpen: () => !browserWindow.isDestroyed(),
+  };
+}
+
+/**
+ * A mirror asked for a human step (captcha, Cloudflare check, link page).
+ * Open it in the embedded browser and keep re-resolving quietly; the
+ * transfer starts by itself once the page lets us through. A file download
+ * the user starts inside that window is adopted by the will-download
+ * listener.
+ * @param {any} context
+ * @param {string} actionUrl
+ */
+function startF95MirrorActionFlow(context, actionUrl) {
+  stopF95MirrorActionFlow(context);
+  const targetUrl =
+    String(actionUrl || "").trim() || context.request.downloadUrl;
+  const hostLabel = describeF95DownloadHost(context);
+  context.cancelled = false;
+  context.abortController = null;
+  context.downloadItem = null;
+  context.prepared = null;
+  releaseF95DownloadPath(context);
+
+  f95DownloadsStore.awaitingAction(context.id, {
+    actionUrl: targetUrl,
+    hostLabel,
+    text: `${hostLabel} needs a quick step in the browser window. Finish it there and the download continues by itself.`,
+  });
+  broadcastF95Downloads();
+
+  const flow = createMirrorActionFlow({
+    actionUrl: targetUrl,
+    hostLabel,
+    logger: console,
+    openWindow: (url) => openF95MirrorActionWindow(url, hostLabel),
+    resolveMirror: (signal) =>
+      prepareF95DownloadUrl(getReadyF95Session(), context.request.downloadUrl, {
+        signal,
+        platformHint: context.request.platformHint,
+        retry: { attempts: 1 },
+        requestTimeoutMs: 20000,
+      }),
+    onStatus: (text) => {
+      if (context.actionFlow !== flow) {
+        return;
+      }
+      f95DownloadsStore.status(context.id, { text });
+      broadcastF95Downloads();
+    },
+    onResolved: (prepared) => {
+      if (context.actionFlow !== flow) {
+        return;
+      }
+      context.actionFlow = null;
+      context.abortController = new AbortController();
+      context.prepared = prepared;
+      context.hostLabel = prepared.hostLabel || context.hostLabel;
+      context.requestedUrl = prepared.resolvedUrl;
+      context.metadata.sourceHost = prepared.sourceHost;
+      context.metadata.mirrorHost =
+        prepared.mirrorHost || context.metadata.mirrorHost;
+      if (selectTransferMode(prepared) === "session") {
+        startSessionF95Download(context, prepared);
+      } else {
+        void startDirectF95Download(context, prepared);
+      }
+    },
+    onGaveUp: (error) => {
+      if (context.actionFlow !== flow) {
+        return;
+      }
+      context.actionFlow = null;
+      context.abortController = null;
+      console.warn("[f95.download] Browser step not completed:", error);
+      markF95DownloadFailed(context, error, "resolve");
+    },
+  });
+  context.actionFlow = flow;
+  flow.start();
+
+  return {
+    success: true,
+    queued: true,
+    awaitingAction: true,
+    id: context.id,
+    actionUrl: targetUrl,
+    hostLabel,
+  };
+}
+
+/**
+ * A download the user started inside the browser-step window belongs to the
+ * context waiting on that window.
+ * @param {import("electron").WebContents | undefined} webContents
+ */
+function adoptF95ActionContext(webContents) {
+  const webContentsId = webContents?.id;
+  if (webContentsId === undefined) {
+    return null;
+  }
+  for (const context of f95DownloadContexts.values()) {
+    const flow = context.actionFlow;
+    if (flow && flow.matchesWebContents(webContentsId)) {
+      flow.adoptDownload();
+      context.actionFlow = null;
+      context.abortController = new AbortController();
+      return context;
+    }
+  }
+  return null;
 }
 
 function pruneF95DownloadContexts() {
@@ -1983,6 +2161,7 @@ function buildF95CancelledResult(context) {
  * visible (status "resolving") before any network request is made.
  */
 async function runF95DownloadContext(context) {
+  stopF95MirrorActionFlow(context);
   const controller = new AbortController();
   context.abortController = controller;
   context.cancelled = false;
@@ -2039,18 +2218,17 @@ async function runF95DownloadContext(context) {
     }
 
     context.abortController = null;
-    console.error("[f95.download] Failed to resolve requested mirror:", error);
-    const details = markF95DownloadFailed(context, error, "resolve");
+    const details = describeF95DownloadError(context, error, "resolve");
     if (details.errorCode === "captcha_required") {
-      return {
-        success: false,
-        id: context.id,
-        code: "captcha_required",
-        error: details.message,
-        actionUrl: details.actionUrl,
-      };
+      console.warn(
+        "[f95.download] Mirror needs a browser step, opening it:",
+        details.actionUrl,
+      );
+      return startF95MirrorActionFlow(context, details.actionUrl);
     }
 
+    console.error("[f95.download] Failed to resolve requested mirror:", error);
+    markF95DownloadFailed(context, error, "resolve");
     return {
       success: false,
       id: context.id,
@@ -2246,6 +2424,9 @@ async function startDirectF95Download(context, prepared) {
       fetchImpl: createF95TransferFetch(),
       signal: controller.signal,
       hostLabel,
+      // Cloudflare clearances earned in the browser window are bound to the
+      // session's user agent, so the transfer must present the same one.
+      userAgent: getReadyF95Session().getUserAgent(),
       fallbackFileName,
       resolveTargetPath: (fileName) => {
         releaseF95DownloadPath(context);
@@ -2334,8 +2515,22 @@ async function startDirectF95Download(context, prepared) {
       return;
     }
 
-    console.error("[f95.download] Direct download failed:", error);
     context.abortController = null;
+    if (
+      error instanceof MirrorActionRequiredError ||
+      error?.code === "captcha_required"
+    ) {
+      console.warn(
+        "[f95.download] Transfer needs a browser step, opening it:",
+        error.actionUrl || prepared.requestedUrl,
+      );
+      startF95MirrorActionFlow(
+        context,
+        error.actionUrl || prepared.requestedUrl || context.request.downloadUrl,
+      );
+      return;
+    }
+    console.error("[f95.download] Direct download failed:", error);
     markF95DownloadFailed(context, error, "download");
     return;
   }
@@ -2737,8 +2932,9 @@ async function importDownloadedF95Package(downloadPath, metadata) {
 const F95_SESSION_DOWNLOAD_MAX_RESUMES = 5;
 
 function attachF95DownloadListener() {
-  getReadyF95Session().on("will-download", (event, item) => {
-    const context = resolveF95InstallContext(item);
+  getReadyF95Session().on("will-download", (event, item, webContents) => {
+    const context =
+      resolveF95InstallContext(item) || adoptF95ActionContext(webContents);
 
     if (!context) {
       return;
@@ -3713,6 +3909,7 @@ ipcMain.handle("cancel-f95-download", async (event, id) => {
     const context = f95DownloadContexts.get(downloadId);
     if (context) {
       context.cancelled = true;
+      stopF95MirrorActionFlow(context);
       try {
         context.abortController?.abort();
       } catch (error) {
@@ -3770,6 +3967,33 @@ ipcMain.handle("retry-f95-download", async (event, id) => {
   }
 
   return runF95DownloadContext(context);
+});
+
+ipcMain.handle("open-f95-download-action", async (event, id) => {
+  const downloadId = String(id || "").trim();
+  const entry = f95DownloadsStore.get(downloadId);
+  const context = f95DownloadContexts.get(downloadId);
+  if (!entry || !context?.request?.downloadUrl) {
+    return {
+      success: false,
+      error: "This download can no longer be resumed. Start it again from the game thread.",
+    };
+  }
+  if (!["error", "cancelled", "action"].includes(entry.status)) {
+    return { success: false, error: "This download is still running." };
+  }
+  try {
+    return startF95MirrorActionFlow(
+      context,
+      entry.actionUrl || context.actionFlow?.actionUrl || context.request.downloadUrl,
+    );
+  } catch (error) {
+    console.error("[f95.download] Failed to open the browser step:", error);
+    return {
+      success: false,
+      error: getErrorMessage(error, "The browser window could not be opened."),
+    };
+  }
 });
 
 ipcMain.handle("clear-f95-download-history", async () => {

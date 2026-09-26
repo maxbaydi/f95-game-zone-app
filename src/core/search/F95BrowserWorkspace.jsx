@@ -613,9 +613,11 @@ const F95BrowserWorkspace = () => {
       setThreadInfo(null);
       setPendingCaptchaAction(null);
       setStatusMessage(
-        `Queued ${payload.title} via ${
-          result?.sourceHost || link.host || link.label
-        }. Download and install will continue in the background.`,
+        result?.awaitingAction
+          ? `${result.hostLabel || link.label || "The mirror"} needs a quick step in the browser window that just opened. Finish it there and ${payload.title} downloads by itself.`
+          : `Queued ${payload.title} via ${
+              result?.sourceHost || link.host || link.label
+            }. Download and install will continue in the background.`,
       );
     } catch (error) {
       console.error("Failed to queue F95 install:", error);

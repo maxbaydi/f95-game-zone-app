@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-04-13
+Last updated: 2026-09-26
 
 ## How To Read This File
 
@@ -20,6 +20,32 @@ Last updated: 2026-04-13
 | Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Stage 5. Quality hardening       | partial     |      63% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests, archive safety tests, a dedicated tray controller, and system-notification coverage for app/tray flows now exist. Manual packaged smoke and longer-running desktop lifecycle validation are still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | MVP total                        | in_progress |      84% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### 2026-09-26 — Живая проверка зеркал, Gofile, шаг в браузере с автопродолжением
+
+- Status: in_progress
+- Progress: 55%
+- ТЗ coverage: закрывает «загрузка через зеркала F95» на реальных серверах; UX капчи/Cloudflare
+
+What was done:
+
+- `scripts/check-mirrors.js` (`npm run check:mirrors`): реальные ссылки через код приложения (resolver → downloadToFile → inspectDownloadedPackage), SHA-256, размер, `7za t`, `--simulate-drop` (докачка по Range), `--capture` (фикстуры), `--thread` (зеркала стартового поста F95), `--jar`.
+- Общий модуль опций передачи `src/main/f95/transferOptions.js` — main.js и скрипт строят опции `downloadToFile` одинаково; передача использует UA сессии.
+- `src/main/f95/cookieJar.js` — Node-сессия с cookie-jar; `fetchWithCookieJar` следует редиректам с куками и пишет Set-Cookie.
+- Gofile: новая формула website-token, ротация токенов, переиспользование гостевого аккаунта из cookie; фикстуры в `test/fixtures/hosts/gofile`.
+- Общий парсер лендингов: Referer страницы у финальной цели; pomf-клоны (qu.ax) через парсер; фикстура `test/fixtures/hosts/pomf`.
+- `src/main/f95/mirrorActionFlow.js` + main.js: капча/Cloudflare открываются в окне, после прохождения загрузка стартует сама; загрузка, начатая в окне, усыновляется; статус `action` в сторе и панели.
+- Документация: `docs/check-mirrors.md`, `docs/mirror-browser-step.md`, `docs/mirror-verification.md`, индекс `docs/README.md`.
+
+How:
+
+- Живой прогон на публичных файлах и собственных тестовых загрузках (Gofile, Litterbox, Buzzheavier, qu.ax, Dropbox); ответы серверов сохранены обезличенно как фикстуры; регрессионные тесты офлайн.
+
+What is left:
+
+- Ссылки/cookies от пользователя: F95 masked, MEGA, Pixeldrain, MediaFire, Mixdrop, Uploadhaven, XFileSharing-семейство и остальные хосты из списка; проверка Cloudflare-хостов в приложении.
+- Ручная проверка в приложении: статусы, отмена/повтор, окно шага в браузере, отсутствие `.part`.
+- Итоговая таблица в `docs/mirror-verification.md`.
 
 ### 2026-04-13 — Desktop shell UX: tray minimization plus native update notifications
 

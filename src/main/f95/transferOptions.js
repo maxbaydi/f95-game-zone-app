@@ -32,13 +32,18 @@ function sanitizeDownloadFileName(value, fallback = DEFAULT_FALLBACK_FILE_NAME) 
 /**
  * Request headers for the transfer: a browser-like identity plus whatever
  * the resolver asked for (cookies, referer, ...). Resolver headers win.
+ *
+ * Pass the identity of the session the user solves browser checks in
+ * (`session.getUserAgent()` in Electron): Cloudflare clearances are bound
+ * to the user agent that earned them.
  * @param {{headers?: Record<string, string> | null}} prepared
+ * @param {{userAgent?: string}} [options]
  * @returns {Record<string, string>}
  */
-function buildDirectTransferHeaders(prepared) {
+function buildDirectTransferHeaders(prepared, options = {}) {
   return {
     accept: "*/*",
-    "user-agent": DIRECT_DOWNLOAD_USER_AGENT,
+    "user-agent": String(options.userAgent || "").trim() || DIRECT_DOWNLOAD_USER_AGENT,
     ...(prepared?.headers || {}),
   };
 }
@@ -71,6 +76,7 @@ function buildDirectTransferHeaders(prepared) {
  *   resolveTargetPath: (fileName: string) => string,
  *   signal?: AbortSignal | null,
  *   hostLabel?: string,
+ *   userAgent?: string,
  *   fallbackFileName?: string,
  *   onTarget?: ((info: any) => void) | null,
  *   onProgress?: ((info: any) => void) | null,
@@ -104,7 +110,7 @@ function buildDirectTransferOptions(input) {
   const options = {
     fetchImpl: input.fetchImpl,
     url: resolvedUrl,
-    headers: buildDirectTransferHeaders(prepared),
+    headers: buildDirectTransferHeaders(prepared, { userAgent: input.userAgent }),
     signal: input.signal || null,
     hostLabel: input.hostLabel || prepared.hostLabel || "",
     fileNameHint: String(prepared.fileName || "").trim(),

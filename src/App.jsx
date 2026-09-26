@@ -899,14 +899,24 @@ const App = () => {
 
       setDownloadsPanelOpen(true);
       closeF95UpdateModal();
-      appToast.info(
-        `${selectedLink.label || "The selected mirror"} is being prepared. Progress is shown in Downloads.`,
-        {
-          title: `Queued ${
-            modalState.thread.title || getDisplayTitle(modalState.game)
-          }`,
-        },
-      );
+      if (result?.awaitingAction) {
+        appToast.info(
+          `${result.hostLabel || selectedLink.label || "The mirror"} needs a quick step in the browser window that just opened. Finish it there and the download continues by itself.`,
+          {
+            title: "Your turn in the browser",
+            duration: 8000,
+          },
+        );
+      } else {
+        appToast.info(
+          `${selectedLink.label || "The selected mirror"} is being prepared. Progress is shown in Downloads.`,
+          {
+            title: `Queued ${
+              modalState.thread.title || getDisplayTitle(modalState.game)
+            }`,
+          },
+        );
+      }
     } catch (error) {
       console.error("Failed to queue game update:", error);
       setF95UpdateModal((previous) => ({

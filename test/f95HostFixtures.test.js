@@ -63,6 +63,7 @@ const CONTENTS_OK = {
   },
 };
 
+/** @returns {any} */
 function gofileRoutes(contentsHandler) {
   return [
     ["https://api.gofile.io/accounts", (url) => jsonResponse(url, GUEST)],
@@ -137,7 +138,7 @@ test("gofile: when every token is rejected the error is explicit and not retried
 
   await assert.rejects(
     resolveGofileTarget(ctx, "https://gofile.io/d/2cmlCIGh"),
-    (error) =>
+    (/** @type {any} */ error) =>
       error instanceof MirrorError &&
       error.code === "access_denied" &&
       error.retryable === false &&
@@ -167,7 +168,7 @@ test("gofile: a rate-limited account bootstrap surfaces as a retryable rate_limi
 
   await assert.rejects(
     resolveGofileTarget(ctx, "https://gofile.io/d/2cmlCIGh"),
-    (error) =>
+    (/** @type {any} */ error) =>
       error instanceof MirrorError &&
       error.code === "rate_limited" &&
       error.retryable === true &&
@@ -184,7 +185,7 @@ test("gofile: a rate-limited content lookup is retryable too", async () => {
   const ctx = createResolverContext({ session, sleep: noSleep });
   await assert.rejects(
     resolveGofileTarget(ctx, "https://gofile.io/d/2cmlCIGh"),
-    (error) => error.code === "rate_limited" && error.retryable === true,
+    (/** @type {any} */ error) => error.code === "rate_limited" && error.retryable === true,
   );
 });
 

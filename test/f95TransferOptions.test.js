@@ -43,6 +43,25 @@ test("buildDirectTransferHeaders lets the resolver override the defaults", () =>
   assert.equal(headers.accept, "application/zip");
 });
 
+test("buildDirectTransferHeaders can use the browser session identity (Cloudflare clearances are bound to it)", () => {
+  const headers = buildDirectTransferHeaders(preparedFixture(), {
+    userAgent: "Mozilla/5.0 Electron/37",
+  });
+  assert.equal(headers["user-agent"], "Mozilla/5.0 Electron/37");
+  assert.equal(
+    buildDirectTransferHeaders(preparedFixture(), { userAgent: "" })["user-agent"],
+    DIRECT_DOWNLOAD_USER_AGENT,
+  );
+  const options = buildDirectTransferOptions({
+    prepared: preparedFixture(),
+    fetchImpl: async () => new Response("x"),
+    resolveTargetPath: (fileName) => fileName,
+    userAgent: "Mozilla/5.0 Electron/37",
+  });
+  assert.equal(options.headers["user-agent"], "Mozilla/5.0 Electron/37");
+  assert.equal(Object.prototype.hasOwnProperty.call(options, "userAgent"), false);
+});
+
 test("buildDirectTransferHeaders tolerates a prepared download without headers", () => {
   const headers = buildDirectTransferHeaders(preparedFixture({ headers: undefined }));
   assert.deepEqual(Object.keys(headers).sort(), ["accept", "user-agent"]);
