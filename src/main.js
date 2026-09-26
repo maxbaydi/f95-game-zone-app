@@ -46,6 +46,7 @@ const {
 } = require("./main/f95/directDownload");
 const { buildDirectTransferOptions } = require("./main/f95/transferOptions");
 const { createMirrorActionFlow } = require("./main/f95/mirrorActionFlow");
+const { createElectronResolverSession } = require("./main/f95/electronSession");
 const {
   DownloadCancelledError,
   DownloadValidationError,
@@ -1092,6 +1093,21 @@ function getReadyF95Session() {
   return f95Session;
 }
 
+let f95ResolverSession = null;
+
+/**
+ * The F95 session as the resolvers and the transfer must see it: cookies of
+ * the partition attached explicitly (Electron's session.fetch sends none)
+ * and manual redirects served by net.request. See electronSession.js.
+ */
+function getF95ResolverSession() {
+  const session = getReadyF95Session();
+  if (!f95ResolverSession || f95ResolverSession.raw !== session) {
+    f95ResolverSession = createElectronResolverSession(session);
+  }
+  return f95ResolverSession;
+}
+
 function getReadyCloudSaveService() {
   if (!cloudSaveService) {
     throw new Error("Cloud save service is not initialized yet.");
@@ -1808,7 +1824,7 @@ function startF95MirrorActionFlow(context, actionUrl) {
     logger: console,
     openWindow: (url) => openF95MirrorActionWindow(url, hostLabel),
     resolveMirror: (signal) =>
-      prepareF95DownloadUrl(getReadyF95Session(), context.request.downloadUrl, {
+      prepareF95DownloadUrl(getF95ResolverSession(), context.request.downloadUrl, {
         signal,
         platformHint: context.request.platformHint,
         retry: { attempts: 1 },
@@ -2192,7 +2208,7 @@ async function runF95DownloadContext(context) {
   let prepared = null;
   try {
     prepared = await prepareF95DownloadUrl(
-      getReadyF95Session(),
+      getF95ResolverSession(),
       context.request.downloadUrl,
       {
         signal: controller.signal,
@@ -2298,7 +2314,7 @@ function startSessionF95Download(context, prepared) {
  * fallback to Node's fetch carrying the same cookies.
  */
 function createF95TransferFetch() {
-  const f95SessionInstance = getReadyF95Session();
+  const f95SessionInstance = getF95ResolverSession();
   return async (url, init) => {
     if (typeof f95SessionInstance.fetch === "function") {
       try {

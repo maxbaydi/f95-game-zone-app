@@ -50,6 +50,17 @@ function parseBuzzheavierUrl(rawUrl) {
   return { origin: parsedUrl.origin, id, direct: false };
 }
 
+function isSamePage(leftUrl, rightUrl) {
+  const left = safeParseUrl(leftUrl);
+  const right = safeParseUrl(rightUrl);
+  return Boolean(
+    left &&
+      right &&
+      left.origin === right.origin &&
+      left.pathname.replace(/\/+$/, "") === right.pathname.replace(/\/+$/, ""),
+  );
+}
+
 /**
  * Buzzheavier's download button is an htmx request: GET /{id}/download with
  * `hx-request: true` answers with an `hx-redirect` header pointing at the
@@ -83,12 +94,17 @@ async function resolveBuzzheavierTarget(ctx, rawUrl) {
   if (hxRedirect) {
     await cancelResponseBody(response);
     const redirectUrl = buildAbsoluteUrl(pageUrl, hxRedirect);
-    if (redirectUrl) {
+    // Without a valid Cloudflare clearance the endpoint answers 204 with an
+    // hx-redirect back to the page itself; that is not a file.
+    if (redirectUrl && !isSamePage(redirectUrl, pageUrl)) {
       return {
         url: redirectUrl,
         headers: { referer: pageUrl },
         transfer: "direct",
       };
+    }
+    if (redirectUrl) {
+      return resolveGenericLandingTarget(ctx, pageUrl, { hostLabel: HOST_LABEL });
     }
   }
 
