@@ -7,11 +7,12 @@ const path = require("path");
 const {
   DownloadValidationError,
   MirrorActionRequiredError,
-  extractHtmlDownloadCandidates,
   extractGofileContentId,
   extractGoogleDriveConfirmUrl,
   extractGoogleDriveDirectUrlFromHtml,
   extractGoogleDriveFileId,
+  extractHtmlDownloadCandidates,
+  extractMixdropFileRef,
   generateGofileWebsiteToken,
   inspectDownloadedPackage,
   parseCountdownLandingConfig,
@@ -22,6 +23,9 @@ const {
   resolveGoogleDriveUrl,
   resolveHtmlLandingDownloadUrl,
   resolveKnownFileHostUrl,
+  resolveMixdropUrl,
+  resolveUploadhavenUrl,
+  unpackDeanEdwardsPackedJs,
 } = require("../src/main/f95/downloadSupport");
 
 test("resolveKnownFileHostUrl rewrites Pixeldrain viewer links to direct download API", () => {
@@ -497,7 +501,7 @@ test("extractGoogleDriveConfirmUrl rebuilds the confirm download URL from warnin
 });
 
 test("generateGofileWebsiteToken matches the current frontend handshake format", () => {
-  const token = generateGofileWebsiteToken("abc123token", {
+  const token = generateGofileWebsiteToken("abc123token", "5d4f7g8sd45fsd", {
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     language: "en-US",
     nowMs: 1712345678000,
@@ -512,11 +516,23 @@ test("generateGofileWebsiteToken matches the current frontend handshake format",
 test("resolveGofileUrl uses guest account bootstrap and content API to find the direct file URL", async () => {
   const calls = [];
   const session = {
+    cookies: {
+      async set() {},
+    },
     async fetch(url, options = {}) {
       calls.push({
         url,
         method: options.method || "GET",
       });
+
+      if (url === "https://gofile.io/dist/js/config.js") {
+        return {
+          ok: true,
+          async text() {
+            return 'var websiteToken = "static-wt-test";';
+          },
+        };
+      }
 
       if (url === "https://api.gofile.io/accounts") {
         return {
@@ -550,10 +566,7 @@ test("resolveGofileUrl uses guest account bootstrap and content API to find the 
 
       if (url === "https://api.gofile.io/contents/MovsLG") {
         assert.equal(options.headers.authorization, "Bearer guest-token-123");
-        assert.equal(
-          options.headers["x-website-token"],
-          generateGofileWebsiteToken("guest-token-123"),
-        );
+        assert.equal(options.headers["x-website-token"], "static-wt-test");
         assert.equal(options.headers["x-bl"], "en-US");
         return {
           ok: true,
@@ -589,13 +602,26 @@ test("resolveGofileUrl uses guest account bootstrap and content API to find the 
   assert.deepEqual(calls, [
     { url: "https://api.gofile.io/accounts", method: "POST" },
     { url: "https://api.gofile.io/accounts/website", method: "GET" },
+    { url: "https://gofile.io/dist/js/config.js", method: "GET" },
     { url: "https://api.gofile.io/contents/MovsLG", method: "GET" },
   ]);
 });
 
 test("resolveGofileUrl prefers child file links over noisy folder downloadPage values", async () => {
   const session = {
+    cookies: {
+      async set() {},
+    },
     async fetch(url) {
+      if (url === "https://gofile.io/dist/js/config.js") {
+        return {
+          ok: true,
+          async text() {
+            return 'var websiteToken = "4fd6sg89d7s6";';
+          },
+        };
+      }
+
       if (url === "https://api.gofile.io/accounts") {
         return {
           ok: true,
@@ -1125,5 +1151,495 @@ test("prepareF95DownloadUrl returns a typed captcha-required error for masked li
       );
       return true;
     },
+  );
+});
+
+test("extractMixdropFileRef understands common mixdrop URL shapes", () => {
+  assert.equal(
+    extractMixdropFileRef("https://mixdrop.ag/f/lOd3o"),
+    "lOd3o",
+  );
+  assert.equal(
+    extractMixdropFileRef("https://mixdrop.co/e/abc123"),
+    "abc123",
+  );
+  assert.equal(
+    extractMixdropFileRef("https://www.mixdrop.to/f/xyz789"),
+    "xyz789",
+  );
+  assert.equal(extractMixdropFileRef("https://example.com/f/lOd3o"), "");
+  assert.equal(extractMixdropFileRef("https://mixdrop.ag/api"), "");
+});
+
+test("unpackDeanEdwardsPackedJs decodes a packed JavaScript payload", () => {
+  const packed = `eval(function(p,a,c,k,e,d){e=function(c){return c.toString(36)};if(!''.replace(/^/,String)){while(c--){d[c.toString(a)]=k[c]||c.toString(a)}k=[function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}('1.0="//2-3.4.5/6/7/8.9?a";',11,11,'wurl|MDCore|delivery|node|mixdrop|ch|dl|abc123|game|zip|download'.split('|'),0,{}))`;
+
+  const unpacked = unpackDeanEdwardsPackedJs(packed);
+
+  assert.equal(
+    unpacked,
+    'MDCore.wurl="//delivery-node.mixdrop.ch/dl/abc123/game.zip?download";',
+  );
+});
+
+test("unpackDeanEdwardsPackedJs returns empty string for non-packed input", () => {
+  assert.equal(unpackDeanEdwardsPackedJs("console.log('hello')"), "");
+  assert.equal(unpackDeanEdwardsPackedJs(""), "");
+  assert.equal(unpackDeanEdwardsPackedJs(null), "");
+});
+
+test("unpackDeanEdwardsPackedJs rejects excessive counts and unsupported radices", () => {
+  for (const [radix, count] of [
+    [36, "1000000000"],
+    [36, "9007199254740992"],
+    [36, "9".repeat(400)],
+    [1, "1"],
+    [63, "1"],
+  ]) {
+    const packed = `eval(function(p,a,c,k,e,d){}('0',${radix},${count},'value'.split('|'),0,{}))`;
+    assert.equal(unpackDeanEdwardsPackedJs(packed), "");
+  }
+});
+
+test("resolveMixdropUrl extracts the CDN download URL from a packed download page", async () => {
+  const createMockResponse = ({
+    url,
+    contentType,
+    contentDisposition = "",
+    text = "",
+  }) => ({
+    ok: true,
+    url,
+    headers: {
+      get(name) {
+        const normalized = String(name || "").toLowerCase();
+        if (normalized === "content-type") return contentType;
+        if (normalized === "content-disposition") return contentDisposition;
+        return "";
+      },
+    },
+    async text() {
+      return text;
+    },
+    body: {
+      async cancel() {
+        return undefined;
+      },
+    },
+  });
+
+  const calls = [];
+  const session = {
+    async fetch(url) {
+      calls.push(url);
+
+      if (url === "https://mixdrop.ag/f/lOd3o") {
+        return createMockResponse({
+          url,
+          contentType: "text/html; charset=utf-8",
+          text: `
+            <html>
+              <body>
+                <script>eval(function(p,a,c,k,e,d){e=function(c){return c.toString(36)};if(!''.replace(/^/,String)){while(c--){d[c.toString(a)]=k[c]||c.toString(a)}k=[function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}('1.0="//2-3.4.5/6/7/8.9?a";',11,11,'wurl|MDCore|delivery|node|mixdrop|ch|dl|abc123|game|zip|download'.split('|'),0,{}))</script>
+              </body>
+            </html>
+          `,
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  };
+
+  const resolvedUrl = await resolveMixdropUrl(
+    session,
+    "https://mixdrop.ag/f/lOd3o",
+  );
+
+  assert.equal(
+    resolvedUrl,
+    "https://delivery-node.mixdrop.ch/dl/abc123/game.zip?download",
+  );
+  assert.deepEqual(calls, ["https://mixdrop.ag/f/lOd3o"]);
+});
+
+test("resolveMixdropUrl converts embed URLs to file page URLs before fetching", async () => {
+  const calls = [];
+  const session = {
+    async fetch(url) {
+      calls.push(url);
+      return {
+        ok: true,
+        url,
+        headers: {
+          get(name) {
+            if (name.toLowerCase() === "content-type") return "text/html";
+            return "";
+          },
+        },
+        async text() {
+          return `<script>eval(function(p,a,c,k,e,d){e=function(c){return c.toString(36)};if(!''.replace(/^/,String)){while(c--){d[c.toString(a)]=k[c]||c.toString(a)}k=[function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}('0="//1.2/3/4.5";',6,6,'wurl|cdn|mixdrop.ch|dl|file|rar'.split('|'),0,{}))</script>`;
+        },
+        body: {
+          async cancel() {
+            return undefined;
+          },
+        },
+      };
+    },
+  };
+
+  await resolveMixdropUrl(session, "https://mixdrop.co/e/xyz");
+
+  assert.equal(calls[0], "https://mixdrop.co/f/xyz");
+});
+
+test("resolveMixdropUrl throws when the file page shows a removal notice", async () => {
+  const session = {
+    async fetch() {
+      return {
+        ok: true,
+        url: "https://mixdrop.ag/f/removed",
+        headers: {
+          get(name) {
+            if (name.toLowerCase() === "content-type") return "text/html";
+            return "";
+          },
+        },
+        async text() {
+          return "<html><body><h2>WE ARE SORRY</h2><p>File was removed.</p></body></html>";
+        },
+        body: {
+          async cancel() {
+            return undefined;
+          },
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => resolveMixdropUrl(session, "https://mixdrop.ag/f/removed"),
+    /no longer exists/,
+  );
+});
+
+test("resolveMixdropUrl falls back to browser action when packed JS cannot be decoded", async () => {
+  const session = {
+    async fetch() {
+      return {
+        ok: true,
+        url: "https://mixdrop.ag/f/opaque",
+        headers: {
+          get(name) {
+            if (name.toLowerCase() === "content-type") return "text/html";
+            return "";
+          },
+        },
+        async text() {
+          return "<html><body><p>Normal page without packed JS</p></body></html>";
+        },
+        body: {
+          async cancel() {
+            return undefined;
+          },
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => resolveMixdropUrl(session, "https://mixdrop.ag/f/opaque"),
+    (error) => {
+      assert.ok(error instanceof MirrorActionRequiredError);
+      assert.equal(error.code, "mirror_action_required");
+      return true;
+    },
+  );
+});
+
+test("resolveMixdropUrl skips non-mixdrop URLs without fetching", async () => {
+  const session = {
+    async fetch() {
+      throw new Error("Fetch must not be called for non-mixdrop URLs.");
+    },
+  };
+
+  const resolvedUrl = await resolveMixdropUrl(
+    session,
+    "https://example.com/f/abc123",
+  );
+
+  assert.equal(resolvedUrl, "https://example.com/f/abc123");
+});
+
+test("resolveUploadhavenUrl submits the free download form and follows the redirect to the file", async () => {
+  const createMockResponse = ({
+    url,
+    contentType,
+    contentDisposition = "",
+    text = "",
+  }) => ({
+    ok: true,
+    url,
+    headers: {
+      get(name) {
+        const normalized = String(name || "").toLowerCase();
+        if (normalized === "content-type") return contentType;
+        if (normalized === "content-disposition") return contentDisposition;
+        return "";
+      },
+    },
+    async text() {
+      return text;
+    },
+    body: {
+      async cancel() {
+        return undefined;
+      },
+    },
+  });
+
+  const calls = [];
+  const session = {
+    async fetch(url, options = {}) {
+      calls.push({
+        url,
+        method: options.method || "GET",
+      });
+
+      if (
+        url === "https://uploadhaven.com/download/abc123" &&
+        (options.method || "GET") === "GET"
+      ) {
+        return createMockResponse({
+          url,
+          contentType: "text/html; charset=utf-8",
+          text: `
+            <html>
+              <body>
+                <form method="POST">
+                  <input type="hidden" name="_token" value="csrf-token-xyz">
+                  <div id="submitFree">
+                    <span>Please wait...</span>
+                  </div>
+                </form>
+              </body>
+            </html>
+          `,
+        });
+      }
+
+      if (
+        url === "https://uploadhaven.com/download/abc123" &&
+        (options.method || "GET") === "POST"
+      ) {
+        return createMockResponse({
+          url: "https://cdn.uploadhaven.com/files/game-v1.zip",
+          contentType: "application/octet-stream",
+          contentDisposition: 'attachment; filename="game-v1.zip"',
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  };
+
+  const resolvedUrl = await resolveUploadhavenUrl(
+    session,
+    "https://uploadhaven.com/download/abc123",
+  );
+
+  assert.equal(
+    resolvedUrl,
+    "https://cdn.uploadhaven.com/files/game-v1.zip",
+  );
+  assert.deepEqual(calls, [
+    {
+      url: "https://uploadhaven.com/download/abc123",
+      method: "GET",
+    },
+    {
+      url: "https://uploadhaven.com/download/abc123",
+      method: "POST",
+    },
+  ]);
+});
+
+test("resolveUploadhavenUrl extracts the download link from the post-submit HTML page", async () => {
+  const createMockResponse = ({
+    url,
+    contentType,
+    text = "",
+  }) => ({
+    ok: true,
+    url,
+    headers: {
+      get(name) {
+        const normalized = String(name || "").toLowerCase();
+        if (normalized === "content-type") return contentType;
+        return "";
+      },
+    },
+    async text() {
+      return text;
+    },
+    body: {
+      async cancel() {
+        return undefined;
+      },
+    },
+  });
+
+  const session = {
+    async fetch(url, options = {}) {
+      if ((options.method || "GET") === "GET") {
+        return createMockResponse({
+          url,
+          contentType: "text/html",
+          text: `
+            <html>
+              <body>
+                <form>
+                  <input type="hidden" name="_token" value="token123">
+                </form>
+              </body>
+            </html>
+          `,
+        });
+      }
+
+      return createMockResponse({
+        url,
+        contentType: "text/html",
+        text: `
+          <html>
+            <body>
+              <a href="https://dl.uploadhaven.com/abc/game.zip" class="btn">Download</a>
+            </body>
+          </html>
+        `,
+      });
+    },
+  };
+
+  const resolvedUrl = await resolveUploadhavenUrl(
+    session,
+    "https://uploadhaven.com/download/xyz789",
+  );
+
+  assert.equal(
+    resolvedUrl,
+    "https://dl.uploadhaven.com/abc/game.zip",
+  );
+});
+
+test("resolveUploadhavenUrl throws MirrorActionRequiredError when POST returns HTML without a download link", async () => {
+  const createMockResponse = ({
+    url,
+    contentType,
+    text = "",
+  }) => ({
+    ok: true,
+    url,
+    headers: {
+      get(name) {
+        const normalized = String(name || "").toLowerCase();
+        if (normalized === "content-type") return contentType;
+        return "";
+      },
+    },
+    async text() {
+      return text;
+    },
+    body: {
+      async cancel() {
+        return undefined;
+      },
+    },
+  });
+
+  const session = {
+    async fetch(url, options = {}) {
+      if ((options.method || "GET") === "GET") {
+        return createMockResponse({
+          url,
+          contentType: "text/html",
+          text: `<html><body><form><input type="hidden" name="_token" value="tok"></form></body></html>`,
+        });
+      }
+
+      return createMockResponse({
+        url: "https://uploadhaven.com/email",
+        contentType: "text/html",
+        text: `<html><body><p>Please enter your email</p></body></html>`,
+      });
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      resolveUploadhavenUrl(
+        session,
+        "https://uploadhaven.com/download/abc123",
+      ),
+    (error) => {
+      assert.ok(error instanceof MirrorActionRequiredError);
+      assert.equal(error.code, "mirror_action_required");
+      assert.equal(
+        error.actionUrl,
+        "https://uploadhaven.com/download/abc123",
+      );
+      return true;
+    },
+  );
+});
+
+test("resolveUploadhavenUrl skips non-uploadhaven URLs without fetching", async () => {
+  const session = {
+    async fetch() {
+      throw new Error("Fetch must not be called for non-uploadhaven URLs.");
+    },
+  };
+
+  const resolvedUrl = await resolveUploadhavenUrl(
+    session,
+    "https://example.com/download/abc123",
+  );
+
+  assert.equal(resolvedUrl, "https://example.com/download/abc123");
+});
+
+test("resolveUploadhavenUrl throws when file is no longer available", async () => {
+  const session = {
+    async fetch() {
+      return {
+        ok: true,
+        url: "https://uploadhaven.com/download/gone",
+        headers: {
+          get(name) {
+            if (name.toLowerCase() === "content-type") return "text/html";
+            return "";
+          },
+        },
+        async text() {
+          return "<html><body><p>This file not found or has been removed.</p></body></html>";
+        },
+        body: {
+          async cancel() {
+            return undefined;
+          },
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      resolveUploadhavenUrl(
+        session,
+        "https://uploadhaven.com/download/gone",
+      ),
+    /no longer exists/,
   );
 });

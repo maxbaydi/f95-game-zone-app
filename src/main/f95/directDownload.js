@@ -21,8 +21,11 @@ function normalizeHostname(hostname) {
 function shouldUseDirectSessionDownload(rawUrl) {
   try {
     const parsedUrl = new URL(String(rawUrl || ""));
-    return DIRECT_SESSION_DOWNLOAD_HOSTS.has(
-      normalizeHostname(parsedUrl.hostname),
+    const hostname = normalizeHostname(parsedUrl.hostname);
+    return (
+      DIRECT_SESSION_DOWNLOAD_HOSTS.has(hostname) ||
+      (hostname.endsWith(".gofile.io") &&
+        parsedUrl.pathname.startsWith("/download"))
     );
   } catch {
     return false;

@@ -30,12 +30,28 @@ test("resolveDownloadFileName falls back to the final URL path when headers are 
   assert.equal(filename, "game-build.zip");
 });
 
-test("shouldUseDirectSessionDownload only targets the Google Drive family", () => {
+test("shouldUseDirectSessionDownload targets Google Drive and Gofile CDN", () => {
   assert.equal(
     shouldUseDirectSessionDownload(
       "https://drive.usercontent.google.com/uc?id=test&export=download",
     ),
     true,
+  );
+  assert.equal(
+    shouldUseDirectSessionDownload(
+      "https://store7.gofile.io/download/web/abc123/game.zip",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldUseDirectSessionDownload(
+      "https://cold-na-phx-2.gofile.io/download/web/abc123/game.zip",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldUseDirectSessionDownload("https://gofile.io/d/abc123"),
+    false,
   );
   assert.equal(
     shouldUseDirectSessionDownload("https://pixeldrain.com/api/file/AbCd123"),

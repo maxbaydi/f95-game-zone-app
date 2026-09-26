@@ -4489,3 +4489,42 @@ Impact on overall progress:
 
 - closes the exact log-proven hole where `processed pending deletes` was followed by a stale `remoteOnly` resurrection
 - makes delete behavior deterministic instead of depending on storage propagation timing
+
+## 2026-09-26 — Prepare pending mirror download changes for GitHub
+
+What was done:
+
+- reviewed the four pending source/test changes for Gofile, Mixdrop, and Uploadhaven downloads before publication
+- updated Gofile guest requests, website-token discovery/fallback, and account-cookie setup; enabled direct session downloads for Gofile CDN URLs
+- added Mixdrop packed-page decoding and Uploadhaven free-download form resolution with browser-action fallback
+- corrected type narrowing in two new error assertions without weakening their runtime checks
+- bounded packed-page keyword counts and radix values to prevent remote pages from monopolizing the main process
+
+How it was implemented:
+
+- changes stay in `src/main/f95/directDownload.js`, `src/main/f95/downloadSupport.js`, and their existing tests
+- the decoder rejects counts above 10,000, unsafe integers, and radices outside 2–62; regression cases cover huge/infinite counts and unsupported radices
+- no dependency, storage-layout, renderer, preload, or IPC contract changes
+
+Checks:
+
+- `npm run ci:check` passed: CSS build, lint, typecheck, and all 212 tests
+- independent verification passed `node --test test/f95DirectDownload.test.js test/f95DownloadSupport.test.js`: all 43 tests
+- `git diff --check` and review of publishable paths for accidental credentials or local data
+
+What remains / manual verification steps:
+
+- in Electron, select an available Gofile mirror and verify progress, completed package validation, and the expected library destination
+- repeat with Mixdrop and Uploadhaven; verify that unresolved or challenged mirrors offer the embedded-browser continuation
+- actual downloads from live providers and installer packaging were not exercised during this Git publication task; fixture tests do not prove current provider compatibility
+
+Current stage progress:
+
+- pending patch preparation and automated verification: 100%
+- live mirror smoke verification: not performed
+- overall roadmap estimate remains the previously recorded 97%; this maintenance slice does not claim new roadmap completion
+
+Impact on overall progress:
+
+- publishes pending mirror compatibility work with regression coverage and explicit verification limits
+- preserves existing local-library and save-sync behavior
