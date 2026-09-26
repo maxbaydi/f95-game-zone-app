@@ -39,6 +39,7 @@ const CLEARED_ERROR_FIELDS = {
   error: "",
   errorCode: "",
   actionUrl: "",
+  actionMode: "",
 };
 
 function isActiveStatus(status) {
@@ -95,6 +96,7 @@ function toPublicEntry(entry) {
     ...publicEntry,
     errorCode: publicEntry.errorCode || "",
     actionUrl: publicEntry.actionUrl || "",
+    actionMode: publicEntry.actionMode || "",
     hostLabel: publicEntry.hostLabel || "",
     canCancel: CANCELLABLE_STATUSES.has(entry.status),
     canRetry: RETRYABLE_STATUSES.has(entry.status) && hasRetryPayload === true,
@@ -127,6 +129,7 @@ function createDownloadsStore() {
         speedBytesPerSecond: 0,
         errorCode: "",
         actionUrl: "",
+        actionMode: "",
         hostLabel: "",
         createdAt: now,
         updatedAt: now,
@@ -217,7 +220,9 @@ function createDownloadsStore() {
     /**
      * The mirror needs the user in the browser (captcha, Cloudflare check).
      * The entry stays active and cancellable; `actionUrl` lets the UI reopen
-     * the page. Ignored for cancelled or unknown entries.
+     * the page. `mode: "file"` means the page was opened in the user's own
+     * browser and the app waits for the downloaded file to be handed over.
+     * Ignored for cancelled or unknown entries.
      */
     awaitingAction(id, patch = {}) {
       const existing = findEntry(id);
@@ -232,6 +237,7 @@ function createDownloadsStore() {
         speedBytesPerSecond: 0,
         error: "",
         errorCode: "",
+        actionMode: patch.mode === "file" ? "file" : "window",
         actionUrl: patch.actionUrl || existing.actionUrl || "",
         text:
           patch.text ||
@@ -280,6 +286,7 @@ function createDownloadsStore() {
         speedBytesPerSecond: 0,
         errorCode: "",
         actionUrl: "",
+        actionMode: "",
         ...patch,
       });
     },

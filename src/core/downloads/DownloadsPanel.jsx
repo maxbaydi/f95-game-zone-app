@@ -163,6 +163,14 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
     item.canRetry ?? (item.status === "error" || item.status === "cancelled");
   const eta = item.status === "downloading" ? formatDownloadEta(item) : "";
   const hostLabel = item.hostLabel || item.sourceLabel || item.sourceHost || "";
+  // The page was opened in the user's own browser; the app waits for the file.
+  const waitingForFile = item.status === "action" && item.actionMode === "file";
+  // Mirrors guarded by bot detection cannot be finished in the embedded
+  // window, so every browser step offers the "own browser + pick file" way.
+  const showManualHelp =
+    item.status === "action" || (item.status === "error" && Boolean(item.actionUrl));
+  const canInstallFromFile =
+    item.status === "action" || (item.status === "error" && canRetry);
 
   const runItemAction = async (actionKey, action) => {
     if (pendingAction) {
@@ -219,6 +227,33 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       if (result && result.success === false) {
         throw new Error(result.error || "The download folder could not be opened.");
       }
+    });
+
+  const handleOpenInBrowser = () =>
+    runItemAction("browser", async () => {
+      const result = await callDownloadsApi("openF95DownloadInBrowser", item.id);
+      if (!result?.success) {
+        throw new Error(result?.error || "The link could not be opened in your browser.");
+      }
+      downloadsToast()?.info(
+        `${result.hostLabel || "The mirror"} opened in your browser. Download the file there, then pick it here.`,
+        { title: "Download in your browser", duration: 7000 },
+      );
+    });
+
+  const handleInstallFromFile = () =>
+    runItemAction("file", async () => {
+      const result = await callDownloadsApi("installF95DownloadFromFile", item.id);
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.success) {
+        throw new Error(result?.error || "The file could not be used.");
+      }
+      downloadsToast()?.info(`Installing ${item.title || "the game"} from ${result.fileName}.`, {
+        title: "Install from file",
+        duration: 4000,
+      });
     });
 
   const handleSolveCaptcha = () =>
@@ -333,9 +368,78 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         </div>
       )}
 
+      {showManualHelp && (
+        <div
+          className={`atlas-rise-enter mt-3 rounded-xl border p-3 transition-colors duration-500 ${
+            waitingForFile
+              ? "border-amber-400/40 bg-amber-500/10"
+              : "border-border bg-white/[0.03]"
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            <span
+              className={`material-symbols-outlined mt-0.5 shrink-0 text-[18px] ${
+                waitingForFile ? "text-amber-200 atlas-pop" : "text-text/45"
+              }`}
+              aria-hidden
+            >
+              {waitingForFile ? "folder_zip" : "open_in_browser"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text">
+                {waitingForFile
+                  ? "Waiting for your file"
+                  : "Stuck on this page?"}
+              </div>
+              <div className="mt-0.5 text-xs leading-relaxed text-text/60">
+                {waitingForFile
+                  ? "When the browser finishes downloading, pick the file and the install starts right away."
+                  : "Open it in your own browser, download the file there, then pick it here. The install continues as usual."}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleInstallFromFile}
+                  disabled={Boolean(pendingAction)}
+                  className={`inline-flex items-center gap-1 border px-2.5 py-1 text-xs transition disabled:opacity-50 ${
+                    waitingForFile
+                      ? "border-amber-400/50 bg-amber-400/20 text-amber-50 hover:bg-amber-400/30"
+                      : "border-border bg-white/5 text-text hover:bg-white/10"
+                  }`}
+                >
+                  {pendingAction === "file" ? (
+                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                  ) : (
+                    <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                      upload_file
+                    </span>
+                  )}
+                  Pick downloaded file
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenInBrowser}
+                  disabled={Boolean(pendingAction)}
+                  className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {pendingAction === "browser" ? (
+                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                  ) : (
+                    <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                      open_in_new
+                    </span>
+                  )}
+                  {waitingForFile ? "Open the link again" : "Open in my browser"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {(canCancel || canRetry || item.status === "completed" || item.actionUrl) && (
         <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          {item.actionUrl && (item.status === "error" || item.status === "action") && (
+          {item.actionUrl && !waitingForFile && (item.status === "error" || item.status === "action") && (
             <button
               type="button"
               onClick={handleSolveCaptcha}
@@ -380,6 +484,24 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                 </span>
               )}
               Retry
+            </button>
+          )}
+          {canInstallFromFile && !showManualHelp && (
+            <button
+              type="button"
+              onClick={handleInstallFromFile}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+              title="Install from a file you downloaded yourself"
+            >
+              {pendingAction === "file" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                  upload_file
+                </span>
+              )}
+              Install from file
             </button>
           )}
           {item.status === "completed" && item.recordId && onOpenLibraryRecord && (
