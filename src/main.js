@@ -41,17 +41,15 @@ const {
 } = require("./main/f95/session");
 const { createDownloadsStore } = require("./main/f95/downloadsStore");
 const {
-  DIRECT_DOWNLOAD_USER_AGENT,
   downloadToFile,
   selectTransferMode,
 } = require("./main/f95/directDownload");
+const { buildDirectTransferOptions } = require("./main/f95/transferOptions");
 const {
   DownloadCancelledError,
   DownloadValidationError,
-  createMegaDecryptTransform,
   getMirrorHostInfo,
   inspectDownloadedPackage,
-  interpretMirrorTransferError,
   MirrorActionRequiredError,
   MirrorError,
   normalizeEngineLabel,
@@ -2241,26 +2239,14 @@ async function startDirectF95Download(context, prepared) {
   let result = null;
   try {
     await fs.promises.mkdir(downloadsDir, { recursive: true });
-    result = await downloadToFile({
+    // Options are built by the shared module so scripts/check-mirrors.js
+    // exercises exactly the same transfer configuration as the app.
+    result = await downloadToFile(buildDirectTransferOptions({
+      prepared,
       fetchImpl: createF95TransferFetch(),
-      url: prepared.resolvedUrl,
-      headers: {
-        accept: "*/*",
-        "user-agent": DIRECT_DOWNLOAD_USER_AGENT,
-        ...(prepared.headers || {}),
-      },
       signal: controller.signal,
       hostLabel,
-      fileNameHint: prepared.fileName || "",
-      expectedSize: prepared.size || 0,
       fallbackFileName,
-      rangeMode: prepared.rangeMode || "header",
-      createTransform:
-        prepared.transfer === "mega" && prepared.mega
-          ? (offset) => createMegaDecryptTransform({ ...prepared.mega, offset })
-          : null,
-      interpretErrorResponse: (info) =>
-        interpretMirrorTransferError(prepared, info),
       resolveTargetPath: (fileName) => {
         releaseF95DownloadPath(context);
         const reservedPath = reserveF95DownloadPath(
@@ -2332,7 +2318,7 @@ async function startDirectF95Download(context, prepared) {
         });
         broadcastF95Downloads();
       },
-    });
+    }));
   } catch (error) {
     releaseF95DownloadPath(context);
     if (context.abortController !== controller) {

@@ -5,6 +5,8 @@
  * host modules can be unit-tested with stubbed `session.fetch` responses.
  */
 
+const { parseSetCookieHeader } = require("../cookieJar");
+
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -479,23 +481,135 @@ async function buildCookieHeader(session, url) {
   }
 }
 
+const MAX_COOKIE_JAR_REDIRECTS = 20;
+
+function isRedirectStatus(status) {
+  return [301, 302, 303, 307, 308].includes(Number(status));
+}
+
+function readSetCookieHeaders(response) {
+  try {
+    const headers = response?.headers;
+    if (!headers) {
+      return [];
+    }
+    if (typeof headers.getSetCookie === "function") {
+      return headers.getSetCookie();
+    }
+    const raw = headers.get("set-cookie");
+    return raw ? [raw] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Persist the cookies a response sets into the session jar (Electron's
+ * `session.cookies.set` or the Node jar from ../cookieJar.js).
+ * @param {any} session
+ * @param {Response} response
+ * @param {string} requestUrl
+ */
+async function storeResponseCookies(session, response, requestUrl) {
+  if (!session?.cookies?.set) {
+    return;
+  }
+  for (const headerValue of readSetCookieHeaders(response)) {
+    const cookie = parseSetCookieHeader(headerValue, requestUrl);
+    if (!cookie) {
+      continue;
+    }
+    const record = {
+      url: requestUrl,
+      name: cookie.name,
+      value: cookie.value,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+    };
+    if (!cookie.hostOnly) {
+      record.domain = cookie.domain;
+    }
+    if (cookie.expirationDate > 0) {
+      record.expirationDate = cookie.expirationDate;
+    }
+    try {
+      await session.cookies.set(record);
+    } catch {
+      // A cookie the jar refuses must not fail the request.
+    }
+  }
+}
+
+function isSameOrigin(leftUrl, rightUrl) {
+  const left = safeParseUrl(leftUrl);
+  const right = safeParseUrl(rightUrl);
+  return Boolean(left && right && left.origin === right.origin);
+}
+
 /**
  * Global fetch with the session cookie jar attached manually.
+ *
+ * Redirects are followed hop by hop (like Chromium does for `session.fetch`)
+ * so cookies set on an intermediate hop are sent on the next one and every
+ * `Set-Cookie` ends up in the jar. `redirect: "manual"` returns the first
+ * response untouched.
  * @param {any} session
  * @param {string} url
  * @param {any} [options]
  */
 async function fetchWithCookieJar(session, url, options) {
-  const headers = new Headers(options?.headers || {});
-  const cookieHeader = await buildCookieHeader(session, url);
-  if (cookieHeader && !headers.has("cookie")) {
-    headers.set("cookie", cookieHeader);
+  const { redirect = "follow", ...requestInit } = options || {};
+  const headers = new Headers(requestInit.headers || {});
+  let currentUrl = String(url);
+  let method = String(requestInit.method || "GET").toUpperCase();
+  let body = requestInit.body;
+
+  for (let hop = 0; hop <= MAX_COOKIE_JAR_REDIRECTS; hop += 1) {
+    const hopHeaders = new Headers(headers);
+    const cookieHeader = await buildCookieHeader(session, currentUrl);
+    if (cookieHeader && !hopHeaders.has("cookie")) {
+      hopHeaders.set("cookie", cookieHeader);
+    }
+
+    const response = await fetch(currentUrl, {
+      ...requestInit,
+      method,
+      body,
+      headers: hopHeaders,
+      redirect: redirect === "follow" ? "manual" : redirect,
+    });
+    await storeResponseCookies(session, response, currentUrl);
+
+    if (redirect !== "follow" || !isRedirectStatus(response.status)) {
+      return response;
+    }
+    const location = getHeader(response, "location");
+    const nextUrl = location ? buildAbsoluteUrl(currentUrl, location) : "";
+    if (!nextUrl) {
+      return response;
+    }
+    await cancelResponseBody(response);
+
+    const status = Number(response.status);
+    if (status === 303 || ((status === 301 || status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+      headers.delete("content-type");
+      headers.delete("content-length");
+      headers.delete("content-encoding");
+    }
+    if (!isSameOrigin(currentUrl, nextUrl)) {
+      headers.delete("authorization");
+      headers.delete("cookie");
+    }
+    currentUrl = nextUrl;
   }
 
-  return fetch(url, {
-    ...options,
-    headers,
-  });
+  throw new MirrorError(
+    `${hostnameOf(url) || "The mirror"} redirected too many times.`,
+    { code: "too_many_redirects" },
+  );
 }
 
 /**
@@ -1091,6 +1205,7 @@ module.exports = {
   safeDecodeHtmlEntities,
   safeParseUrl,
   sleep,
+  storeResponseCookies,
   stripHtmlTags,
   throwIfAborted,
   withRetry,
