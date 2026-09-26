@@ -8,13 +8,18 @@ const {
   cancelResponseBody,
   createActionRequiredError,
   createHttpError,
+  getHeader,
   hostMatchesDomain,
+  isFileResponse,
   normalizeHostname,
   normalizeText,
   pickBestFile,
   readResponseJson,
+  readResponseText,
   safeParseUrl,
+  stripHtmlTags,
 } = require("./common");
+const { parseContentDispositionFilename } = require("../directDownload");
 
 const DROPBOX_DOMAINS = ["dropbox.com", "dropboxusercontent.com", "db.tt"];
 const ONEDRIVE_DOMAINS = [
@@ -64,6 +69,18 @@ function buildDropboxDirectUrl(rawUrl) {
   return parsedUrl.toString();
 }
 
+const DROPBOX_LABEL = "Dropbox";
+const DROPBOX_GONE_PATTERN =
+  /file deleted|file not found|link (?:has been|is) disabled|doesn.t exist|no longer (?:exists|available)|this link has expired|error \(4\d\d\)/i;
+
+/**
+ * Dropbox answers `?dl=1` with a redirect to dl.dropboxusercontent.com for a
+ * live share, with the file itself for some links, and with an HTML page
+ * (HTTP 200) when the share was deleted or disabled. Probe with a one-byte
+ * range so the deleted case never reaches the transfer.
+ * @param {any} ctx
+ * @param {string} rawUrl
+ */
 async function resolveDropboxTarget(ctx, rawUrl) {
   let sourceUrl = rawUrl;
   if (normalizeHostname(safeParseUrl(rawUrl)?.hostname || "") === "db.tt") {
@@ -72,10 +89,60 @@ async function resolveDropboxTarget(ctx, rawUrl) {
     sourceUrl = response.url || rawUrl;
   }
 
-  return {
-    url: buildDropboxDirectUrl(sourceUrl),
-    transfer: "direct",
-  };
+  const directUrl = buildDropboxDirectUrl(sourceUrl);
+  if (normalizeHostname(safeParseUrl(directUrl)?.hostname || "").endsWith("dropboxusercontent.com")) {
+    return { url: directUrl, transfer: "direct" };
+  }
+
+  const probe = await ctx.fetch(directUrl, {
+    method: "GET",
+    redirect: "manual",
+    headers: { range: "bytes=0-0" },
+  });
+  const status = Number(probe.status) || 0;
+
+  if (status >= 300 && status < 400) {
+    const location = getHeader(probe, "location");
+    await cancelResponseBody(probe);
+    const target = location ? new URL(location, directUrl).toString() : directUrl;
+    return { url: target, transfer: "direct" };
+  }
+
+  if (status === 404 || status === 410) {
+    await cancelResponseBody(probe);
+    throw new MirrorError("Dropbox says this file no longer exists. Pick another mirror.", {
+      code: "not_found",
+      status,
+    });
+  }
+  if (!probe.ok) {
+    await cancelResponseBody(probe);
+    throw interpretDropboxTransferError({ status }) || createHttpError(probe, DROPBOX_LABEL);
+  }
+
+  if (isFileResponse(probe)) {
+    await cancelResponseBody(probe);
+    return {
+      url: directUrl,
+      transfer: "direct",
+      fileName: parseContentDispositionFilename(getHeader(probe, "content-disposition")),
+    };
+  }
+
+  const html = await readResponseText(probe, 200000);
+  const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "";
+  if (DROPBOX_GONE_PATTERN.test(title) || DROPBOX_GONE_PATTERN.test(stripHtmlTags(html).slice(0, 4000))) {
+    throw new MirrorError(
+      `Dropbox says this file was deleted or the link is disabled (${normalizeText(title) || "no title"}). Pick another mirror.`,
+      { code: "not_found" },
+    );
+  }
+
+  throw createActionRequiredError(
+    DROPBOX_LABEL,
+    rawUrl,
+    "returned a web page instead of the file (sign-in or an interstitial). Download it from the Dropbox page in the browser window.",
+  );
 }
 
 function interpretDropboxTransferError({ status }) {
