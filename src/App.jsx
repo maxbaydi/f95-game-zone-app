@@ -303,6 +303,15 @@ const App = () => {
     beginAttempts: beginF95UpdateAttempts,
     resetAttempts: resetF95UpdateAttempts,
   } = useF95InstallAttemptsHook();
+  const [onboarding, setOnboarding] = useState({
+    isOpen: false,
+    step: "welcome",
+  });
+  const [settingsPageRequest, setSettingsPageRequest] = useState({
+    page: "general",
+    nonce: 0,
+  });
+  const [hasLoadedGames, setHasLoadedGames] = useState(false);
   const [deleteGameModal, setDeleteGameModal] = useState(
     createDefaultDeleteGameModalState,
   );
@@ -444,6 +453,27 @@ const App = () => {
       closeF95UpdateModal();
     }
   }, [f95Downloads.items, f95UpdateModal.isOpen, f95UpdateModal.handoff]);
+
+  useEffect(() => {
+    if (activeSection !== SECTION_LIBRARY || !hasLoadedGames || games.length > 0) {
+      return;
+    }
+    window.electronAPI
+      .getScanSources()
+      .then((result) => result?.success && setScanSources(result.sources || []))
+      .catch(() => {});
+  }, [activeSection, hasLoadedGames, games.length]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onSettingsChanged?.((config) => {
+      if (!config) {
+        return;
+      }
+      setShowGameList(config.Interface?.showGameList !== false);
+      setDefaultGameFolder(String(config.Library?.gameFolder || "").trim());
+    });
+    return () => unsubscribe?.();
+  }, []);
 
   const handleSiteFilterChange = (filters) => {
     setSiteSearchFilters(filters);
@@ -883,7 +913,10 @@ const App = () => {
   };
 
   const addScanSource = async () => {
-    const selectedPath = await window.electronAPI.selectDirectory();
+    const selectedPath = await window.electronAPI.selectDirectory({
+      title: "Choose a folder that contains games",
+      buttonLabel: "Scan this folder",
+    });
     if (!selectedPath) {
       return { success: false, cancelled: true };
     }
@@ -926,7 +959,10 @@ const App = () => {
   };
 
   const replaceScanSource = async (source) => {
-    const selectedPath = await window.electronAPI.selectDirectory();
+    const selectedPath = await window.electronAPI.selectDirectory({
+      title: "Choose the new location of this folder",
+      defaultPath: source.path,
+    });
     if (!selectedPath) {
       return { success: false, cancelled: true };
     }
@@ -971,12 +1007,7 @@ const App = () => {
     return { success: true };
   };
 
-  const chooseLibraryFolder = async () => {
-    const selectedPath = await window.electronAPI.selectDirectory();
-    if (!selectedPath) {
-      return { success: false, cancelled: true };
-    }
-
+  const saveLibraryFolder = async (selectedPath) => {
     const result = await window.electronAPI.setDefaultGameFolder(selectedPath);
     if (!result?.success) {
       return {
@@ -1030,20 +1061,71 @@ const App = () => {
     setShowGameList(newVisible);
 
     window.electronAPI
-      .getConfig()
-      .then((config) => {
-        const newConfig = {
-          ...config,
-          Interface: {
-            ...config.Interface,
-            showGameList: newVisible,
-          },
-        };
-        window.electronAPI.saveSettings(newConfig);
-      })
+      .updateSettings("Interface", { showGameList: newVisible })
       .catch((err) =>
         console.error("Failed to save game list visibility:", err),
       );
+  };
+
+  const isOnboardingCompleted = (config) => {
+    const completed = config?.Onboarding?.completed;
+    return completed === true || String(completed).toLowerCase() === "true";
+  };
+
+  const decideOnboarding = async (gameCount) => {
+    const config = await window.electronAPI.getConfig().catch(() => null);
+    if (!config || isOnboardingCompleted(config)) {
+      return;
+    }
+
+    if (gameCount > 0) {
+      // Existing users with a library don't need the first-run walkthrough.
+      await window.electronAPI
+        .updateSettings("Onboarding", {
+          completed: true,
+          completedAt: new Date().toISOString(),
+        })
+        .catch(() => {});
+      return;
+    }
+
+    setOnboarding({ isOpen: true, step: "welcome" });
+  };
+
+  const openOnboarding = (step = "welcome") => {
+    setOnboarding({ isOpen: true, step });
+  };
+
+  const openSettingsPage = (page) => {
+    setSettingsPageRequest((previous) => ({
+      page,
+      nonce: previous.nonce + 1,
+    }));
+    setActiveSection(SECTION_SETTINGS);
+  };
+
+  const refreshLibrarySetupState = async () => {
+    const [sourcesResult, folder] = await Promise.all([
+      window.electronAPI.getScanSources().catch(() => null),
+      window.electronAPI.getDefaultGameFolder().catch(() => ""),
+    ]);
+    setScanSources(sourcesResult?.success ? sourcesResult.sources || [] : []);
+    setDefaultGameFolder(String(folder || "").trim());
+  };
+
+  const finishOnboarding = async ({ startScan, goTo, skipped } = {}) => {
+    setOnboarding((previous) => ({ ...previous, isOpen: false }));
+    await refreshLibrarySetupState();
+
+    if (goTo === "search") {
+      setActiveSection(SECTION_SEARCH);
+    } else if (!skipped) {
+      setActiveSection(SECTION_LIBRARY);
+    }
+
+    if (startScan) {
+      void rescanLibrary();
+    }
   };
 
   const loadScanHubData = async () => {
@@ -1217,12 +1299,20 @@ const App = () => {
         setTotalVersions(
           gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
         );
+        setHasLoadedGames(true);
+        void decideOnboarding(gamesArray.length);
       })
       .catch((error) => {
         console.error("Failed to fetch games:", error);
         setGames([]);
         setTotalVersions(0);
+        setHasLoadedGames(true);
       });
+
+    window.electronAPI
+      .getScanSources()
+      .then((result) => setScanSources(result?.success ? result.sources || [] : []))
+      .catch(() => {});
 
     // Load banner size from template
     window.electronAPI
@@ -2256,9 +2346,10 @@ const App = () => {
           }
         : {
             eyebrow: "User Library",
-            emptyTitle: "Library is empty",
-            emptyDescription:
-              "Scan your configured sources to populate the library and discovery queue.",
+            emptyTitle: hasLoadedGames ? "No games match your search" : "Loading your library...",
+            emptyDescription: hasLoadedGames
+              ? "Try another title or creator, or clear the search box."
+              : "",
           };
 
   const renderEmptyState = () => (
@@ -2377,7 +2468,10 @@ const App = () => {
           updateCount={updateAvailableCount}
         />
         <div className="ml-[60px] flex flex-1 overflow-hidden">
-          {activeSection !== SECTION_SEARCH && activeSection !== SECTION_SETTINGS && showGameList && (
+          {activeSection !== SECTION_SEARCH &&
+            activeSection !== SECTION_SETTINGS &&
+            showGameList &&
+            !(hasLoadedGames && games.length === 0) && (
             <div className="atlas-glass-subtle w-[220px] shrink-0 overflow-y-auto border-r border-border">
               <div className="sticky top-0 z-10 flex min-h-[5rem] items-center border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
                 {activeSection === SECTION_UPDATES
@@ -2419,9 +2513,30 @@ const App = () => {
                 ref={gameGridRef}
               >
                 {activeSection === SECTION_SETTINGS ? (
-                  <window.SettingsPanel />
+                  <window.SettingsPanel
+                    initialPage={settingsPageRequest.page}
+                    pageRequest={settingsPageRequest.nonce}
+                    onRunSetup={() => openOnboarding("folder")}
+                    onScanNow={() => rescanLibrary()}
+                    isScanRunning={isLibraryScanRunning}
+                  />
                 ) : activeSection === SECTION_SEARCH ? (
                   <window.F95BrowserWorkspace />
+                ) : activeSection === SECTION_LIBRARY &&
+                  hasLoadedGames &&
+                  games.length === 0 ? (
+                  <window.LibraryGettingStarted
+                    gameFolder={defaultGameFolder}
+                    hasScanSources={scanSources.some(
+                      (source) => source.isEnabled,
+                    )}
+                    isScanRunning={isLibraryScanRunning}
+                    onFindGames={() => openOnboarding("scan")}
+                    onScanNow={() => rescanLibrary()}
+                    onBrowseF95={() => setActiveSection(SECTION_SEARCH)}
+                    onAddGame={addGame}
+                    onOpenLibrarySettings={() => openSettingsPage("library")}
+                  />
                 ) : visibleLibraryGames.length === 0 ? (
                   renderEmptyState()
                 ) : activeSection === SECTION_LIBRARY ? (
@@ -2536,7 +2651,15 @@ const App = () => {
         onToggleSource={toggleScanSource}
         onReplaceSource={replaceScanSource}
         onRemoveSource={removeScanSource}
-        onChooseLibraryFolder={chooseLibraryFolder}
+        onSaveLibraryFolder={saveLibraryFolder}
+      />
+
+      <window.OnboardingWizard
+        isOpen={onboarding.isOpen}
+        initialStep={onboarding.step}
+        cloudAuthState={cloudAuthState}
+        onOpenCloud={() => setIsCloudAuthOpen(true)}
+        onFinish={finishOnboarding}
       />
 
       <window.CloudAuthPanel

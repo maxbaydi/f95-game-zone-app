@@ -22,6 +22,7 @@
       publishableKey: "",
       storageBucket: "",
     },
+    Onboarding: { completed: true },
     F95Mirrors: {},
   };
 
@@ -85,6 +86,49 @@
     getConfig: () =>
       Promise.resolve(JSON.parse(JSON.stringify(WEB_PREVIEW_CONFIG))),
     saveSettings: p({ success: true }),
+    updateSettings: (section, values) => {
+      WEB_PREVIEW_CONFIG[section] = {
+        ...(WEB_PREVIEW_CONFIG[section] || {}),
+        ...(values || {}),
+      };
+      return Promise.resolve({
+        success: true,
+        config: JSON.parse(JSON.stringify(WEB_PREVIEW_CONFIG)),
+      });
+    },
+    getAppInfo: () =>
+      Promise.resolve({
+        version: "web-preview",
+        platform: "web",
+        isPackaged: false,
+        isFreshInstall: false,
+        paths: {},
+        defaults: {
+          gameExtensions: "exe,swf,flv,f4v,rag,cmd,bat,jar,html",
+          extractionExtensions: "zip,7z,rar",
+        },
+      }),
+    inspectFolder: (targetPath) =>
+      Promise.resolve({
+        path: String(targetPath || ""),
+        exists: false,
+        writable: false,
+        freeBytes: null,
+        totalBytes: null,
+        status: "error",
+        warnings: [
+          {
+            code: "desktop_only",
+            level: "error",
+            message: "Folders can only be checked in the desktop app.",
+          },
+        ],
+      }),
+    suggestLibraryFolders: () => Promise.resolve([]),
+    detectGameFolders: () => Promise.resolve([]),
+    relaunchApp: pn,
+    onSettingsChanged: listenUnsub,
+    subscribeF95AuthChanged: listenUnsub,
     getCloudAuthState: () =>
       Promise.resolve({ success: true, state: CLOUD_AUTH_STATE }),
     signInCloud: p({ success: false, error: "Desktop only", state: null }),
@@ -165,6 +209,11 @@
     }),
     cancelF95BrowserHandoff: p({ success: false, error: "Desktop only" }),
     onF95InstallAttempt: listenUnsub,
+    onF95BrowserNavigation: listen,
+    openF95BrowserUrl: (payload) => openUrl(payload?.url),
+    refreshLibraryPreviews: p({ success: false, error: "Desktop only" }),
+    setGameFavorite: p({ success: false, error: "Desktop only" }),
+    removeLibraryGame: p({ success: false, error: "Desktop only" }),
     addAtlasMapping: p({}),
     findF95Id: () => Promise.resolve(null),
     getAtlasData: () => Promise.resolve(null),

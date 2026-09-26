@@ -4565,3 +4565,41 @@ What remains / manual verification steps:
 - force a failing first mirror and confirm the dialog shows the switch and the install continues from the backup mirror
 - pick a MEGA mirror, press Download on the MEGA page and confirm the file is installed; also confirm `Stop waiting` removes the entry
 - live provider behavior was not exercised; the tier list reflects the resolvers that exist in `downloadSupport.js`
+
+## 2026-09-26 — First-run setup assistant, reworked settings and folder selection
+
+What was done:
+
+- first launch now opens a setup assistant (welcome → games folder → existing games → accounts → done), every step skippable and re-runnable from Settings → General:
+  - games folder: suggestions per drive with free space; a roomy non-system drive is recommended, otherwise `~/Games/F95Launcher`; risky picks are explained before saving
+  - existing games: Downloads, Desktop, `~/Games`, `~/Documents/Games` and `X:\Games|F95|F95Zone|F95 Games` are probed and folders that hold games are pre-ticked with a game count
+  - accounts: F95 login and cloud saves with live connected state
+  - done: summary checklist, tray and update-notification toggles, and "Scan & open my library" which starts the first scan
+- existing users with a library are marked as onboarded silently; empty libraries show a "getting started" screen (add existing games / download from F95 / add one game) with the install folder status instead of "Library is empty"
+- settings were rebuilt: grouped navigation with icons, instant saving with a "Saved" indicator (no `alert()`s), restart-required badges with "Restart now", and an attention dot when no games folder is chosen
+  - Library & folders merges the old Library and Scan Sources pages: install folder health (free space bar, status, one-click fixes), scan folders with switches, missing-drive detection and "Locate…", "Found on this PC" suggestions, "Scan now", and file types as chips with reset
+  - About & help: version and update actions, app/log/cache folders, developer console
+  - removed placeholder pages and controls (Platforms, Metadata, theme loader, XAML editor, single-option startup selects, unused sidebar toggle)
+- folder dialogs are titled, parented to the calling window, start in the current folder and can create folders; the games folder is created on save and rejected with a reason when it can't be used
+- Scan Hub uses the same folder picker
+
+How it was implemented:
+
+- `src/main/folderInsights.js`: folder health (write probe via temp dir, `statfs` free space, protected/app/cloud-synced/drive-root/low-space warnings), drive listing, library suggestions and game-folder detection, all with timeouts
+- `src/main/settingsPatch.js`: allow-listed, type-normalized partial updates; `update-settings` IPC replaces renderer read-modify-write of the whole config
+- `src/main.js`: `update-settings`, `get-app-info`, `inspect-folder`, `suggest-library-folders`, `detect-game-folders`, `relaunch-app`, `settings-changed` broadcast, improved `select-directory` and `set-default-game-folder`, `Onboarding` and `Appearance` config sections
+- banner template choice is stored in `Appearance.bannerTemplate`; it used to be appended as a raw line to `config.ini` and was lost on the next config save (the legacy line is still read)
+- renderer: `settingsKit.jsx` (hooks, cards, switch, `FolderPicker`, suggestions), `GeneralSettings.jsx`, `LibrarySettings.jsx`, new `SettingsPanel.jsx`, `onboarding/OnboardingWizard.jsx`, `App.jsx`, `ScanHubPanel.jsx`
+- `web-preview-api.js`: mocks for the new APIs plus the five APIs that were missing and crashed `npm run dev:web`
+
+Checks:
+
+- `npm run lint`, `npm run typecheck`
+- `npm test`: 249 pass; the same 5 environment-only failures as the base commit (Windows paths, missing 7-Zip binary)
+- rendered the whole app (offline copy of `index.html` with mocked Windows drives and folders) through the full assistant, the empty library, Settings (General, Library & folders, About) and Scan Hub in Chromium; no page errors
+
+What remains / manual verification steps:
+
+- on Windows: fresh profile → assistant opens; pick the recommended drive, add found folders, finish and confirm the scan starts and games appear
+- confirm drive detection is quick with a disconnected network drive mapped
+- existing profile with games → no assistant; Settings → General → Run setup assistant works
