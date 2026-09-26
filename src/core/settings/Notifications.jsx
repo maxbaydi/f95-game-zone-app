@@ -1,64 +1,87 @@
 const Notifications = () => {
   const [appUpdates, setAppUpdates] = React.useState(true);
   const [libraryUpdates, setLibraryUpdates] = React.useState(true);
+  const Row = window.SettingsRow;
+  const Toggle = window.SettingsToggle;
 
   React.useEffect(() => {
-    window.electronAPI.getConfig().then((config) => {
-      const notificationSettings = config.Notifications || {};
-      setAppUpdates(notificationSettings.appUpdates !== false);
-      setLibraryUpdates(notificationSettings.libraryUpdates !== false);
-    });
+    let active = true;
+    const load = window.AtlasSettings
+      ? window.AtlasSettings.load()
+      : window.electronAPI.getConfig();
+    Promise.resolve(load)
+      .then((config) => {
+        if (!active) {
+          return;
+        }
+        const notificationSettings = config?.Notifications || {};
+        setAppUpdates(
+          notificationSettings.appUpdates !== false &&
+            notificationSettings.appUpdates !== "false",
+        );
+        setLibraryUpdates(
+          notificationSettings.libraryUpdates !== false &&
+            notificationSettings.libraryUpdates !== "false",
+        );
+      })
+      .catch((error) =>
+        console.error("Failed to load notification settings:", error),
+      );
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const saveSettings = (updatedSettings) => {
-    window.electronAPI.getConfig().then((config) => {
-      const newConfig = {
-        ...config,
-        Notifications: { ...config.Notifications, ...updatedSettings },
-      };
-      window.electronAPI.saveSettings(newConfig);
-    });
-  };
+  const saveSettings = (updatedSettings) =>
+    window.AtlasSettings
+      ? window.AtlasSettings.save("Notifications", updatedSettings)
+      : window.electronAPI.getConfig().then((config) =>
+          window.electronAPI.saveSettings({
+            ...config,
+            Notifications: { ...config.Notifications, ...updatedSettings },
+          }),
+        );
 
-  const handleAppUpdatesChange = () => {
-    const next = !appUpdates;
+  const handleAppUpdatesChange = (next) => {
     setAppUpdates(next);
-    saveSettings({ appUpdates: next });
+    saveSettings({ appUpdates: next }).catch(() => setAppUpdates(!next));
   };
 
-  const handleLibraryUpdatesChange = () => {
-    const next = !libraryUpdates;
+  const handleLibraryUpdatesChange = (next) => {
     setLibraryUpdates(next);
-    saveSettings({ libraryUpdates: next });
+    saveSettings({ libraryUpdates: next }).catch(() =>
+      setLibraryUpdates(!next),
+    );
   };
+
+  if (!Row || !Toggle) {
+    return null;
+  }
 
   return (
     <div className="p-5 text-text">
-      <div className="flex items-center mb-2">
-        <label className="flex-1">App update notifications</label>
-        <input
-          type="checkbox"
-          className="mr-5"
+      <Row
+        index={0}
+        title="App update notifications"
+        description="Notify when a new app version is available or ready to install."
+      >
+        <Toggle
+          label="App update notifications"
           checked={appUpdates}
           onChange={handleAppUpdatesChange}
         />
-      </div>
-      <p className="text-xs opacity-50 mb-2">
-        Notify when a new app version is available or ready to install.
-      </p>
-      <div className="border-t border-text opacity-25 my-2"></div>
-      <div className="flex items-center mb-2">
-        <label className="flex-1">Library update notifications</label>
-        <input
-          type="checkbox"
-          className="mr-5"
+      </Row>
+      <Row
+        index={1}
+        title="Library update notifications"
+        description="Notify when library games have new versions after a metadata refresh."
+      >
+        <Toggle
+          label="Library update notifications"
           checked={libraryUpdates}
           onChange={handleLibraryUpdatesChange}
         />
-      </div>
-      <p className="text-xs opacity-50 mb-2">
-        Notify when library games have new versions after a metadata refresh.
-      </p>
+      </Row>
     </div>
   );
 };

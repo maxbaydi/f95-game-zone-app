@@ -39,12 +39,26 @@ const Sidebar = ({
     },
   ];
 
+  const activeIndex = items.findIndex(
+    (item) => item.id === activeSection && !item.isExternal,
+  );
+
   return React.createElement(
-    "div",
+    "nav",
     {
+      "aria-label": "Sections",
       className:
         "w-[60px] flex min-w-[60px] flex-col items-center border-r border-border bg-primary py-px fixed z-50 h-full shadow-glass-sm",
     },
+    React.createElement("div", {
+      key: "indicator",
+      className: "atlas-sidebar-indicator",
+      "aria-hidden": "true",
+      style: {
+        transform: `translateY(${Math.max(activeIndex, 0) * 68 + 1}px)`,
+        opacity: activeIndex >= 0 ? 1 : 0,
+      },
+    }),
     items.map((item) => {
       const isActive = activeSection === item.id && !item.isExternal;
 
@@ -54,21 +68,24 @@ const Sidebar = ({
           key: item.id,
           type: "button",
           title: item.label,
+          "aria-label": item.label,
+          "aria-current": isActive ? "page" : undefined,
           className:
-            "group relative flex h-[68px] w-full cursor-pointer items-center justify-center bg-transparent transition-colors [-webkit-app-region:no-drag] hover:bg-tertiary/35",
+            "group relative flex h-[68px] w-full cursor-pointer items-center justify-center bg-transparent transition-colors duration-450 [-webkit-app-region:no-drag] hover:bg-tertiary/35 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
           onClick: () => onSelectSection?.(item.id),
         },
         React.createElement("div", {
-          className: `absolute left-0 top-0 h-full w-[3px] bg-gradient-to-b from-accentBar to-accent transition-opacity shadow-glow-accent ${
-            isActive ? "opacity-100" : "opacity-0 group-hover:opacity-80"
+          className: `absolute left-0 top-0 h-full w-[3px] bg-accent/40 transition-opacity duration-450 ${
+            isActive ? "opacity-0" : "opacity-0 group-hover:opacity-80"
           }`,
         }),
         item.badge &&
           React.createElement(
             "div",
             {
+              key: `badge-${item.badge > 99 ? "99+" : item.badge}`,
               className:
-                "absolute right-2 top-3 min-w-[18px] border border-glam/50 bg-glam px-1.5 py-0.5 text-[10px] font-semibold text-onAccent shadow-glow-glam",
+                "atlas-badge-enter absolute right-2 top-3 min-w-[18px] border border-glam/50 bg-glam px-1.5 py-0.5 text-center text-[10px] font-semibold text-onAccent shadow-glow-glam",
             },
             item.badge > 99 ? "99+" : String(item.badge),
           ),
@@ -76,17 +93,20 @@ const Sidebar = ({
           "div",
           {
             className:
-              "pointer-events-none absolute left-[68px] whitespace-nowrap border border-border bg-secondary px-3 py-1.5 text-xs text-text opacity-0 shadow-glass transition-opacity group-hover:opacity-100",
+              "atlas-tooltip pointer-events-none absolute left-[68px] z-50 whitespace-nowrap border border-border bg-secondary px-3 py-1.5 text-xs text-text shadow-glass",
           },
           item.label,
         ),
         React.createElement(
           "svg",
           {
-            className: `w-6 h-6 transition-colors ${
-              isActive ? "text-accent" : "text-border group-hover:text-text"
+            className: `w-6 h-6 transition-[color,transform] duration-500 ease-spring ${
+              isActive
+                ? "scale-110 text-accent"
+                : "text-border group-hover:scale-105 group-hover:text-text"
             }`,
             viewBox: item.viewBox,
+            "aria-hidden": "true",
           },
           item.path.map((pathStr, index) =>
             React.createElement("path", {

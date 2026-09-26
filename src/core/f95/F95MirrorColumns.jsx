@@ -40,7 +40,28 @@ const normalizeHostToken = (host) => {
   return token.replace(/[^a-z0-9]+/gi, "").toUpperCase();
 };
 
+// `support` / `hostLabel` come from the main-process host registry
+// (src/main/f95/hosts) when the thread inspector knows the mirror.
+const MIRROR_SUPPORT_META = {
+  auto: {
+    dot: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]",
+    title: "Downloads and installs automatically",
+  },
+  browser: {
+    dot: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.55)]",
+    title: "May need a captcha or login in the embedded browser",
+  },
+  unsupported: {
+    dot: "bg-red-400/80",
+    title: "Automatic download is not supported for this host",
+  },
+};
+
 const getF95MirrorDisplayName = (link) => {
+  const registryLabel = String(link?.hostLabel || "").trim();
+  if (registryLabel) {
+    return registryLabel.toUpperCase();
+  }
   const hostLabel = normalizeHostToken(link?.host);
   if (hostLabel) {
     return hostLabel;
@@ -147,7 +168,7 @@ const F95MirrorColumns = ({
         return (
           <section key={releaseGroup.key} className="min-w-0">
             {releaseGroup.releaseLabel && (
-              <div className="mb-3 text-sm font-semibold text-text/90">
+              <div className="atlas-list-enter mb-3 text-sm font-semibold text-text/90">
                 {releaseGroup.releaseLabel}
               </div>
             )}
@@ -158,10 +179,11 @@ const F95MirrorColumns = ({
                   gridTemplateColumns: `repeat(${columnCount}, minmax(5.5rem, 1fr))`,
                 }}
               >
-                {releaseGroup.variants.map((variant) => (
+                {releaseGroup.variants.map((variant, variantIndex) => (
                   <section
                     key={`${variant.id}-${variant.label}`}
-                    className="min-w-0 px-3 sm:px-4"
+                    className="atlas-rise-enter min-w-0 px-3 sm:px-4"
+                    style={{ animationDelay: `${Math.min(variantIndex, 8) * 60}ms` }}
                   >
                     <div className="border-b border-border/70 pb-2 text-[11px] uppercase tracking-[0.18em] text-text/50">
                       {variant.platformLabel || variant.label}
@@ -170,20 +192,40 @@ const F95MirrorColumns = ({
                       {variant.links.map((link) => {
                         const isSelected =
                           selectedLinkUrl && String(selectedLinkUrl) === String(link.url);
+                        const supportMeta = MIRROR_SUPPORT_META[link?.support] || null;
+                        const titleParts = [String(link?.host || "")];
+                        if (supportMeta) {
+                          titleParts.push(supportMeta.title);
+                        }
                         return (
                           <button
                             key={link.url}
                             type="button"
                             onClick={() => onSelectLink?.(link)}
                             disabled={disabled}
-                            title={String(link?.host || "")}
-                            className={`w-full rounded-md px-0 py-1 text-left text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                            aria-pressed={Boolean(isSelected)}
+                            title={titleParts.filter(Boolean).join(" — ")}
+                            className={`relative flex w-full items-center gap-2 rounded-md py-1 text-left text-xs font-semibold uppercase tracking-[0.08em] transition-[color,background-color,padding] duration-500 ${
                               isSelected
-                                ? "text-accent"
-                                : "text-text/80 hover:bg-white/5 hover:text-text"
+                                ? "bg-accent/10 pl-2 text-accent"
+                                : "pl-0 text-text/80 hover:bg-white/5 hover:pl-1.5 hover:text-text"
                             } disabled:cursor-not-allowed disabled:opacity-60`}
                           >
-                            {getF95MirrorDisplayName(link)}
+                            <span
+                              aria-hidden
+                              className={`absolute left-0 top-1 bottom-1 w-[2px] bg-accent transition-opacity duration-500 ${
+                                isSelected ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {supportMeta && (
+                              <span
+                                aria-hidden
+                                className={`h-1.5 w-1.5 shrink-0 ${supportMeta.dot}`}
+                              />
+                            )}
+                            <span className="min-w-0 truncate">
+                              {getF95MirrorDisplayName(link)}
+                            </span>
                           </button>
                         );
                       })}

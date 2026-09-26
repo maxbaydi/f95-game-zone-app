@@ -48,25 +48,34 @@ const getScanHubErrorMessage = (result, fallbackMessage) => {
   return fallbackMessage;
 };
 
-const ScanHubPanel = ({
-  isVisible,
-  isLoading,
-  sources,
-  jobs,
-  candidates,
-  isScanRunning,
-  defaultGameFolder,
-  onRefresh,
-  onClose,
-  onRescan,
-  onCancelScan,
-  onOpenFolder,
-  onAddSource,
-  onToggleSource,
-  onReplaceSource,
-  onRemoveSource,
-  onChooseLibraryFolder,
-}) => {
+const useScanHubLayer = (isOpen, props, options) =>
+  window.AtlasMotion?.useModalLayer
+    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+    : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
+
+const ScanHubPanel = (liveProps) => {
+  const layer = useScanHubLayer(liveProps.isVisible, liveProps, {
+    onClose: () => liveProps.onClose?.(),
+  });
+  const {
+    isLoading,
+    sources,
+    jobs,
+    candidates,
+    isScanRunning,
+    defaultGameFolder,
+    onRefresh,
+    onClose,
+    onRescan,
+    onCancelScan,
+    onOpenFolder,
+    onAddSource,
+    onToggleSource,
+    onReplaceSource,
+    onRemoveSource,
+    onChooseLibraryFolder,
+  } = layer.props;
+  const isVisible = liveProps.isVisible;
   const [feedback, setFeedback] = useState({
     tone: "",
     text: "",
@@ -80,7 +89,7 @@ const ScanHubPanel = ({
     }
   }, [isVisible]);
 
-  if (!isVisible) {
+  if (!layer.isMounted) {
     return null;
   }
 
@@ -128,8 +137,22 @@ const ScanHubPanel = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-onAccent/75">
-      <div className="absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary shadow-glass">
+    <div className="fixed inset-0 z-[1200]">
+      <div
+        className="atlas-overlay absolute inset-0 bg-onAccent/75 backdrop-blur-[2px]"
+        data-state={layer.state}
+        onMouseDown={() => onClose?.()}
+        aria-hidden="true"
+      />
+      <div
+        ref={layer.dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Scan Hub"
+        data-state={layer.state}
+        className="atlas-drawer-right absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary shadow-glass outline-none"
+      >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-secondary px-3 py-2">
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.2em] opacity-55">
@@ -146,23 +169,27 @@ const ScanHubPanel = ({
                 runAction("add-source", onAddSource, "Scan source added.")
               }
               disabled={busyAction === "add-source"}
-              className="bg-secondary px-2 py-1 text-xs hover:bg-selected disabled:opacity-60"
+              className="inline-flex items-center gap-1 bg-secondary px-2 py-1 text-xs transition hover:bg-selected disabled:opacity-60"
             >
+              {busyAction === "add-source" && (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              )}
               {busyAction === "add-source" ? "Adding…" : "Add Source"}
             </button>
             {isScanRunning ? (
               <button
                 type="button"
                 onClick={onCancelScan}
-                className="bg-red-700 px-2 py-1 text-xs text-white hover:bg-red-800"
+                className="atlas-fade-enter inline-flex items-center gap-1 bg-red-700 px-2 py-1 text-xs text-white transition hover:bg-red-800"
               >
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
                 Cancel Scan
               </button>
             ) : (
               <button
                 type="button"
                 onClick={onRescan}
-                className="bg-accent px-2 py-1 text-xs text-onAccent hover:brightness-110"
+                className="atlas-fade-enter bg-accent px-2 py-1 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
               >
                 Rescan Library
               </button>
@@ -170,14 +197,26 @@ const ScanHubPanel = ({
             <button
               type="button"
               onClick={onRefresh}
-              className="bg-secondary px-2 py-1 text-xs hover:bg-selected"
+              disabled={isLoading}
+              className="group inline-flex items-center gap-1 bg-secondary px-2 py-1 text-xs transition hover:bg-selected disabled:opacity-60"
             >
+              <span
+                className={`material-symbols-outlined text-[14px] leading-none ${
+                  isLoading
+                    ? "animate-spin atlas-keep-motion"
+                    : "transition-transform duration-700 group-hover:rotate-180"
+                }`}
+                aria-hidden
+              >
+                refresh
+              </span>
               Refresh
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="bg-secondary px-2 py-1 text-xs hover:bg-selected"
+              className="bg-secondary px-2 py-1 text-xs transition hover:bg-selected"
+              title="Close (Esc)"
             >
               Close
             </button>
@@ -186,16 +225,18 @@ const ScanHubPanel = ({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-8">
           {isLoading ? (
-            <div className="space-y-2">
-              <div className="h-14 animate-pulse bg-secondary/40" />
-              <div className="h-28 animate-pulse bg-secondary/30" />
-              <div className="h-36 animate-pulse bg-secondary/20" />
+            <div className="atlas-fade-enter space-y-2">
+              <div className="atlas-skeleton h-14" />
+              <div className="atlas-skeleton h-28" />
+              <div className="atlas-skeleton h-36" />
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="atlas-view-enter space-y-3">
               {feedback.text && (
                 <div
-                  className={`border p-2 text-sm ${
+                  key={feedback.text}
+                  role={feedback.tone === "error" ? "alert" : "status"}
+                  className={`${feedback.tone === "error" ? "atlas-shake" : "atlas-rise-enter"} border p-2 text-sm ${
                     feedback.tone === "error"
                       ? "border-red-500/35 bg-red-500/10 text-red-100"
                       : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
@@ -287,10 +328,11 @@ const ScanHubPanel = ({
                     </div>
                   ) : (
                     <div className="mt-2 divide-y divide-border/30">
-                      {sources.map((source) => (
+                      {sources.map((source, sourceIndex) => (
                         <div
                           key={source.id}
-                          className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          className="atlas-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          style={{ "--atlas-index": Math.min(sourceIndex, 12) }}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -394,10 +436,11 @@ const ScanHubPanel = ({
                     </div>
                   ) : (
                     <div className="mt-2 divide-y divide-border/30">
-                      {jobs.map((job) => (
+                      {jobs.map((job, jobIndex) => (
                         <div
                           key={job.id}
-                          className="flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          className="atlas-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          style={{ "--atlas-index": Math.min(jobIndex, 12) }}
                         >
                           <div>
                             <div className="font-medium capitalize text-text">
@@ -451,10 +494,11 @@ const ScanHubPanel = ({
                     </div>
                   ) : (
                     <div className="mt-2 divide-y divide-border/30">
-                      {candidates.map((candidate) => (
+                      {candidates.map((candidate, candidateIndex) => (
                         <div
                           key={candidate.id}
-                          className="py-2 first:pt-0 last:pb-0"
+                          className="atlas-list-enter py-2 first:pt-0 last:pb-0"
+                          style={{ "--atlas-index": Math.min(candidateIndex, 12) }}
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">

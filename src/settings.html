@@ -1,29 +1,41 @@
 <!doctype html>
-<html>
+<html lang="en" data-motion="auto">
   <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>F95Launcher Settings</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
-    />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
-    />
+    <link rel="stylesheet" href="./assets/vendor/fonts.css" />
+    <link rel="stylesheet" href="./assets/vendor/fontawesome/css/all.min.css" />
     <link rel="stylesheet" href="./assets/css/tailwind.output.css" />
-    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.6/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
     <link rel="stylesheet" href="./assets/css/main.css" />
   </head>
-  <body>
+  <body class="text-text antialiased">
+    <div id="atlas-boot" class="atlas-boot" data-state="loading" role="status">
+      <img class="atlas-boot__logo" src="./assets/images/logo.png" alt="" draggable="false" />
+      <div class="atlas-boot__title">Settings</div>
+      <div class="atlas-boot__bar atlas-progress-indeterminate atlas-keep-motion"></div>
+      <div class="atlas-boot__status">Opening settings…</div>
+      <div class="atlas-boot__error" role="alert">
+        <strong data-boot-error-title>The interface could not start</strong>
+        <div data-boot-error-message></div>
+        <pre data-boot-error-details></pre>
+        <div class="atlas-boot__actions">
+          <button type="button" data-primary data-boot-action="reload">Reload</button>
+          <button type="button" data-boot-action="copy">Copy details</button>
+          <button type="button" data-boot-action="close">Close window</button>
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
+    <script src="./core/ui/atlas-ui.js"></script>
     <script src="./web-preview-api.js"></script>
     <script src="./scrollbar-reveal.js"></script>
+    <script src="./assets/vendor/react/react.production.min.js"></script>
+    <script src="./assets/vendor/react-dom/react-dom.production.min.js"></script>
+    <script src="./assets/vendor/babel/babel.min.js"></script>
+    <script src="./core/ui/atlas-react.js"></script>
     <script src="./shared/cloudSyncErrors.js"></script>
+    <script src="./core/settings/settingsStore.js"></script>
     <script type="text/babel" src="./core/settings/settingsIcons.js"></script>
     <script type="text/babel" src="./core/cloud/CloudAuthPanel.jsx"></script>
     <script type="text/babel" src="./core/settings/Interface.jsx"></script>
@@ -38,6 +50,7 @@
       type="text/babel"
       src="./core/settings/EmulatorLauncher.jsx"
     ></script>
+    <script type="text/babel" src="./core/settings/SettingsPanel.jsx"></script>
     <script type="text/babel" src="./core/settings/Settings.jsx"></script>
   </body>
 </html>
