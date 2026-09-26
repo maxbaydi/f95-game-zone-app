@@ -4704,3 +4704,13 @@ What remains / manual verification steps:
 
 - on Windows: install from Pixeldrain/Gofile; pick a browser-only mirror and confirm the browser-step window opens and the download is installed
 - make the first mirror fail (e.g. block it) and confirm the next one is used and the Downloads entry says so
+
+## 2026-09-26 — Release 1.3.1
+
+What was done:
+
+- bumped the app to 1.3.1: the merged download pipeline (host registry, browser-step window, manual install, downloads queue with cancel/retry), the auto-fallback between mirrors inside it, the interface animation setting and the animated dialogs on top of 1.3.0
+
+Release path:
+
+- pushing to `main` triggers `.github/workflows/main.yml`, which builds Windows (NSIS) and Linux (deb, AppImage) packages and publishes the GitHub release `v1.3.1`; installed 1.3.0 apps pick it up through electron-updater
