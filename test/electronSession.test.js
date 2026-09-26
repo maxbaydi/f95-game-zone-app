@@ -1,7 +1,8 @@
 /**
- * Pure parts of the Electron resolver session: cookie selection for a URL
- * and the Cookie header. The net.request path needs Electron and is
- * exercised by scripts/check-mirrors-electron.js.
+ * Pure parts of the Electron resolver session: cookie selection for a URL,
+ * the Cookie header, Set-Cookie persistence and the transport contract. The
+ * net.request transport itself needs Electron and is exercised by
+ * scripts/check-mirrors-electron.js.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -45,7 +46,7 @@ test("mergeCookieHeader appends without duplicating names", () => {
   assert.equal(mergeCookieHeader("a=1", []), "a=1");
 });
 
-function fakeSession(fetchImpl, cookies = COOKIES) {
+function fakeSession(cookies = COOKIES) {
   const setCalls = [];
   return {
     setCalls,
@@ -59,45 +60,71 @@ function fakeSession(fetchImpl, cookies = COOKIES) {
       async remove() {},
     },
     getUserAgent: () => "Electron/37",
-    fetch: fetchImpl,
+    fetch: async () => {
+      throw new Error("session.fetch must not be used (no cookies, blocked headers)");
+    },
   };
 }
 
-test("the wrapped fetch sends the session cookies matching the URL in the Cookie header", async () => {
-  /** @type {any} */
-  let seenInit = null;
-  const session = fakeSession(async (url, init) => {
-    seenInit = init;
-    return createMockResponse({ url, body: "ok" });
+test("requests go through the transport with the session's user agent and matching cookies", async () => {
+  const seen = [];
+  const session = fakeSession();
+  const wrapped = createElectronResolverSession(session, {
+    transport: async (rawSession, url, init) => {
+      assert.equal(rawSession, session);
+      seen.push({ url, init });
+      return createMockResponse({ url, body: "ok" });
+    },
   });
-  const wrapped = createElectronResolverSession(session);
   const response = await wrapped.fetch("https://bzzhr.to/abc", {
     method: "GET",
     headers: { referer: "https://bzzhr.to/", cookie: "a=1" },
+    redirect: "manual",
   });
   assert.equal(response.status, 200);
-  const headers = new Headers(seenInit.headers);
+  const headers = new Headers(seen[0].init.headers);
   assert.equal(headers.get("cookie"), "a=1; cf_clearance=cf");
   assert.equal(headers.get("referer"), "https://bzzhr.to/");
-  assert.equal(seenInit.redirect, undefined);
+  assert.equal(headers.get("user-agent"), "Electron/37");
+  assert.equal(seen[0].init.redirect, "manual");
   assert.equal(wrapped.getUserAgent(), "Electron/37");
 });
 
 test("F95 login cookies reach masked-link requests, nothing reaches unrelated hosts", async () => {
   const seen = [];
-  const session = fakeSession(async (url, init) => {
-    seen.push(new Headers(init.headers).get("cookie"));
-    return createMockResponse({ url, body: "ok" });
+  const wrapped = createElectronResolverSession(fakeSession(), {
+    transport: async (rawSession, url, init) => {
+      seen.push(new Headers(init.headers).get("cookie"));
+      return createMockResponse({ url, body: "ok" });
+    },
   });
-  const wrapped = createElectronResolverSession(session);
   await wrapped.fetch("https://f95zone.to/masked/gofile.io/1/2/abc", { method: "POST", body: "xhr=1" });
   await wrapped.fetch("https://host.test/x", {});
   assert.deepEqual(seen, ["xf_user=u", null]);
 });
 
+test("Set-Cookie answers are stored back into the session", async () => {
+  const session = fakeSession();
+  const wrapped = createElectronResolverSession(session, {
+    transport: async (rawSession, url) =>
+      createMockResponse({
+        url,
+        body: "ok",
+        headers: { "set-cookie": "xf_session=abc; Path=/; Domain=.f95zone.to; Secure; HttpOnly" },
+      }),
+  });
+  await wrapped.fetch("https://f95zone.to/masked/x", { method: "POST", body: "xhr=1" });
+  assert.equal(session.setCalls.length, 1);
+  assert.equal(session.setCalls[0].name, "xf_session");
+  assert.equal(session.setCalls[0].domain, "f95zone.to");
+  assert.equal(session.setCalls[0].url, "https://f95zone.to/masked/x");
+});
+
 test("wrapped cookies.get({url}) finds domain cookies Electron's own URL filter misses", async () => {
-  const session = fakeSession(async (url) => createMockResponse({ url, body: "ok" }));
-  const wrapped = createElectronResolverSession(session);
+  const session = fakeSession();
+  const wrapped = createElectronResolverSession(session, {
+    transport: async (rawSession, url) => createMockResponse({ url, body: "ok" }),
+  });
   const byUrl = await wrapped.cookies.get({ url: "https://gofile.io/", name: "accountToken" });
   assert.deepEqual(byUrl.map((cookie) => cookie.value), ["g"]);
   const byDomain = await wrapped.cookies.get({ domain: "bzzhr.to" });
@@ -115,9 +142,10 @@ test("a cookie store that throws does not break the fetch", async () => {
         throw new Error("boom");
       },
     },
-    fetch: async (url) => createMockResponse({ url, body: "ok" }),
   };
-  const wrapped = createElectronResolverSession(session);
+  const wrapped = createElectronResolverSession(session, {
+    transport: async (rawSession, url) => createMockResponse({ url, body: "ok" }),
+  });
   const response = await wrapped.fetch("https://host.test/x", {});
   assert.equal(await response.text(), "ok");
   assert.equal(wrapped.getUserAgent(), "");

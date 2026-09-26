@@ -1,8 +1,8 @@
 # Шаг в браузере с автопродолжением загрузки
 
 **Статус:** active
-**Модули:** src/main/f95/mirrorActionFlow.js, src/main.js (`startF95MirrorActionFlow`, `openF95MirrorActionWindow`, `adoptF95ActionContext`, IPC `open-f95-download-action`), src/main/f95/downloadsStore.js (статус `action`), src/core/downloads/DownloadsPanel.jsx
-**Тесты:** test/mirrorActionFlow.test.js, test/downloadsStoreAction.test.js; `npm test`
+**Модули:** src/main/f95/mirrorActionFlow.js, src/main/f95/electronSession.js, src/main.js (`startF95MirrorActionFlow`, `openF95MirrorActionWindow`, `adoptF95ActionContext`, IPC `open-f95-download-action`), src/main/f95/downloadsStore.js (статус `action`), src/core/downloads/DownloadsPanel.jsx
+**Тесты:** test/mirrorActionFlow.test.js, test/downloadsStoreAction.test.js, test/electronSession.test.js, test/resolverTargetProbe.test.js; `npm test`
 
 ## Назначение
 Часть зеркал требует человека один раз: капча, проверка Cloudflare, страница-прокладка. Раньше загрузка падала в «Failed», пользователь открывал зеркало, проходил проверку и вручную жал «Retry». Теперь приложение само открывает страницу в встроенном окне, а после прохождения проверки продолжает загрузку без участия пользователя.
@@ -18,7 +18,8 @@
 - `createMirrorActionFlow` (чистый модуль, окно и таймеры инжектируются) открывает `actionUrl` в окне, подписывается на навигацию и закрытие, и «тихо» перерезолвливает зеркало: через 1,2 с после каждой навигации и каждые 5 с по таймеру. Попытки не пересекаются: навигация во время попытки ставит одну дополнительную в очередь.
 - Успешный резолв → `stop()` (окно закрывается, таймеры сняты) → `onResolved(prepared)`; main.js стартует передачу (`startDirectF95Download` или сессионную).
 - `MirrorActionRequiredError` во время ожидания — продолжаем ждать; если у ошибки другой `actionUrl`, окно переводится на него. Транзиентные ошибки (сеть, таймаут) — продолжаем. Прочие (`not_found`, `access_denied`) — `onGaveUp(error)`.
-- Окно живёт в партиции `persist:f95-auth`, как и `session.fetch` загрузчика, поэтому cf_clearance и куки капчи общие. Передача использует `session.getUserAgent()` (см. `buildDirectTransferOptions({userAgent})`): Cloudflare привязывает clearance к UA.
+- Окно живёт в партиции `persist:f95-auth`, как и загрузчик. Но `session.fetch`/`net.request` из main-процесса **не прикладывают cookies** (проверено на Electron 37, даже с `credentials: "include"`), а `cookies.get({url})` не видит доменные cookies вроде `.bzzhr.to`/`cf_clearance`. Поэтому все HTTP-запросы загрузчика идут через обёртку `createElectronResolverSession` (src/main/f95/electronSession.js): она сама подбирает cookies партиции под URL (правила из cookieJar.js) и кладёт их в заголовок `Cookie`, а `redirect: "manual"` обслуживает через `net.request` (у `session.fetch` это «Redirect was cancelled»). Передача использует `session.getUserAgent()` (см. `buildDirectTransferOptions({userAgent})`): Cloudflare привязывает clearance к UA.
+- Перерезолв в потоке идёт с `probeTarget`: после резолва целевой URL запрашивается одним байтом, и шаг завершается только когда файл реально отдаётся — иначе окно закрывалось бы раньше, чем Cloudflare выдаст clearance.
 - `will-download` в main.js: если загрузку начал webContents окна шага, контекст ожидания усыновляет её (`adoptDownload()` завершает поток, не закрывая окно) и дальше работает обычный сессионный путь.
 - Точки входа: отказ резолвера с `captcha_required` в `runF95DownloadContext`, `MirrorActionRequiredError` при передаче в `startDirectF95Download`, IPC `open-f95-download-action` (кнопка в панели). Отмена и повтор останавливают поток (`stopF95MirrorActionFlow`).
 
@@ -43,3 +44,4 @@
 
 ## История изменений
 - 2026-09-26 — первая версия по запросу: непроходимые автоматически капчи показываются в окне, загрузка продолжается сама.
+- 2026-09-26 — обёртка сессии (cookies в заголовке, ручные редиректы через net.request) и зонд цели: без них clearance из окна не доходил до загрузчика (Buzzheavier, Files.fm).

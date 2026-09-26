@@ -3,19 +3,20 @@
  * resolvers, the browser-step flow and the transfer see the same network as
  * the embedded browser window.
  *
- * Verified on Electron 37 (2026-09-26): `session.fetch` and `net.request`
- * issued from the main process send **no cookies at all** (not even with
- * `credentials: "include"`), and `session.cookies.get({url})` misses domain
- * cookies such as `.bzzhr.to`'s `cf_clearance`. So a Cloudflare check solved
- * in the window never reached the downloader. This wrapper:
+ * Verified on Electron 37 (2026-09-26, webRequest logging):
+ *  - `session.fetch` from the main process sends **no cookies** (not even
+ *    with `credentials: "include"`) and does not persist Set-Cookie;
+ *  - `session.cookies.get({url})` misses domain cookies such as
+ *    `.bzzhr.to`'s `cf_clearance`;
+ *  - `session.fetch` rejects `redirect: "manual"` ("Redirect was cancelled"),
+ *    fails a cross-origin redirect after a POST (net::ERR_FAILED) and blocks
+ *    any request carrying a `referer` header (net::ERR_BLOCKED_BY_CLIENT).
  *
- * 1. reads every cookie of the session and attaches the ones matching the
- *    request URL (RFC 6265 rules from ./cookieJar.js) in the Cookie header;
- * 2. exposes `cookies.get/set/remove` with the same URL matching so host
- *    resolvers (Gofile's stored account, ...) find domain cookies too;
- * 3. serves `redirect: "manual"` through `net.request` (whose `redirect`
- *    event exposes the Location) because `session.fetch` rejects it with
- *    "Redirect was cancelled".
+ * `net.request` has none of these limits, so every request goes through it:
+ * cookies of the partition matching the URL (RFC 6265 rules shared with
+ * ./cookieJar.js) are sent in the Cookie header, Set-Cookie answers are
+ * stored back, redirects follow the `redirect` option and the response is
+ * exposed as a WHATWG Response for the shared resolver code.
  *
  * The pure helpers are exported for unit tests; Electron is required lazily
  * so the module loads outside Electron.
@@ -23,7 +24,11 @@
 const { Readable } = require("stream");
 
 const { domainMatches, pathMatches } = require("./cookieJar");
-const { safeParseUrl } = require("./hosts/common");
+const { safeParseUrl, storeResponseCookies } = require("./hosts/common");
+
+const debugNet = process.env.F95_DEBUG_NET
+  ? (...args) => console.log("[electronSession]", ...args)
+  : () => {};
 
 /**
  * Cookies of `all` that a browser would send to `url`.
@@ -98,17 +103,21 @@ function headersToObject(headers) {
 }
 
 /**
- * `redirect: "manual"` through net.request: the first 3xx is returned as a
- * Response carrying `location`; any other answer is streamed through.
+ * One HTTP request through Electron's net.request, answered as a Response.
+ * `init.redirect` "follow" (default) lets Chromium follow; "manual" returns
+ * the first 3xx with its `location`; "error" rejects on a redirect.
  * @param {any} session
  * @param {string} url
  * @param {any} init
  * @returns {Promise<Response>}
  */
-function requestWithManualRedirect(session, url, init) {
+function requestViaNet(session, url, init) {
   const { net } = require("electron");
+  const redirectMode =
+    init?.redirect === "manual" || init?.redirect === "error" ? init.redirect : "follow";
   return new Promise((resolve, reject) => {
     let settled = false;
+    let finalUrl = url;
     const finish = (callback, value) => {
       if (!settled) {
         settled = true;
@@ -120,7 +129,7 @@ function requestWithManualRedirect(session, url, init) {
       method: String(init?.method || "GET").toUpperCase(),
       session,
       useSessionCookies: false,
-      redirect: "manual",
+      redirect: redirectMode,
     });
     const headers = new Headers(init?.headers || {});
     headers.forEach((value, key) => {
@@ -131,28 +140,39 @@ function requestWithManualRedirect(session, url, init) {
       }
     });
     if (init?.signal) {
-      init.signal.addEventListener(
-        "abort",
-        () => {
-          request.abort();
-          const error = new Error("The request was aborted.");
-          error.name = "AbortError";
-          finish(reject, error);
-        },
-        { once: true },
-      );
+      const onAbort = () => {
+        request.abort();
+        const error = new Error("The request was aborted.");
+        error.name = "AbortError";
+        finish(reject, error);
+      };
+      if (init.signal.aborted) {
+        onAbort();
+        return;
+      }
+      init.signal.addEventListener("abort", onAbort, { once: true });
     }
     request.on("redirect", (statusCode, method, redirectUrl, responseHeaders) => {
-      const response = new Response(null, {
-        status: statusCode,
-        headers: { ...headersToObject(responseHeaders), location: redirectUrl },
-      });
-      Object.defineProperty(response, "url", { value: url, configurable: true });
-      finish(resolve, response);
-      request.abort();
+      debugNet("redirect", statusCode, method, redirectUrl.slice(0, 100));
+      if (redirectMode === "manual") {
+        const response = new Response(null, {
+          status: statusCode,
+          headers: /** @type {any} */ ({
+            ...headersToObject(responseHeaders),
+            location: redirectUrl,
+          }),
+        });
+        Object.defineProperty(response, "url", { value: finalUrl, configurable: true });
+        finish(resolve, response);
+        request.abort();
+        return;
+      }
+      finalUrl = redirectUrl;
+      request.followRedirect();
     });
     request.on("response", (incoming) => {
       const status = Number(incoming.statusCode) || 0;
+      debugNet("response", status, finalUrl.slice(0, 100));
       const body =
         status === 204 || status === 304
           ? null
@@ -161,10 +181,15 @@ function requestWithManualRedirect(session, url, init) {
         status,
         headers: /** @type {any} */ (headersToObject(incoming.headers)),
       });
-      Object.defineProperty(response, "url", { value: url, configurable: true });
+      Object.defineProperty(response, "url", { value: finalUrl, configurable: true });
+      Object.defineProperty(response, "redirected", {
+        value: finalUrl !== url,
+        configurable: true,
+      });
       finish(resolve, response);
     });
     request.on("error", (error) => {
+      debugNet("error", error.message, url.slice(0, 100));
       finish(reject, error);
     });
     if (init?.body !== undefined && init?.body !== null) {
@@ -176,9 +201,11 @@ function requestWithManualRedirect(session, url, init) {
 
 /**
  * @param {any} session Electron session
+ * @param {{transport?: (session: any, url: string, init: any) => Promise<Response>}} [options]
  * @returns {{raw: any, cookies: {get: Function, set: Function, remove: Function}, getUserAgent: () => string, fetch: (url: string, init?: any) => Promise<Response>}}
  */
-function createElectronResolverSession(session) {
+function createElectronResolverSession(session, options = {}) {
+  const transport = options.transport || requestViaNet;
   const cookies = {
     /** @param {{url?: string, name?: string, domain?: string}} [filter] */
     async get(filter = {}) {
@@ -206,15 +233,27 @@ function createElectronResolverSession(session) {
       typeof session.getUserAgent === "function" ? session.getUserAgent() : "",
     async fetch(url, init = {}) {
       const headers = new Headers(init?.headers || {});
+      if (!headers.has("user-agent") && typeof session.getUserAgent === "function") {
+        headers.set("user-agent", session.getUserAgent());
+      }
       const matching = selectCookiesForUrl(await readAllCookies(session), url);
       if (matching.length > 0) {
         headers.set("cookie", mergeCookieHeader(headers.get("cookie") || "", matching));
       }
-      const request = { ...init, headers };
-      if (init?.redirect === "manual") {
-        return requestWithManualRedirect(session, url, request);
-      }
-      return session.fetch(url, request);
+      debugNet(
+        "request",
+        String(init?.method || "GET"),
+        url.slice(0, 100),
+        "redirect=",
+        init?.redirect || "follow",
+        "cookies=",
+        matching.map((cookie) => cookie.name).join(","),
+      );
+      const response = await transport(session, url, { ...init, headers });
+      debugNet("  ->", response.status, (response.url || url).slice(0, 100));
+      // Keep the jar in sync: Chromium does not persist Set-Cookie for us here.
+      await storeResponseCookies({ cookies }, response, response.url || url);
+      return response;
     },
   };
 }
@@ -222,6 +261,6 @@ function createElectronResolverSession(session) {
 module.exports = {
   createElectronResolverSession,
   mergeCookieHeader,
-  requestWithManualRedirect,
+  requestViaNet,
   selectCookiesForUrl,
 };
