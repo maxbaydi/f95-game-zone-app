@@ -65,7 +65,7 @@ const ScanHubPanel = ({
   onToggleSource,
   onReplaceSource,
   onRemoveSource,
-  onChooseLibraryFolder,
+  onSaveLibraryFolder,
 }) => {
   const [feedback, setFeedback] = useState({
     tone: "",
@@ -86,7 +86,6 @@ const ScanHubPanel = ({
 
   const enabledSources = sources.filter((source) => source.isEnabled);
   const latestJob = jobs[0];
-  const hasLibraryFolder = Boolean(String(defaultGameFolder || "").trim());
   const runAction = async (actionKey, action, successMessage) => {
     setBusyAction(actionKey);
     setFeedback({ tone: "", text: "" });
@@ -225,56 +224,17 @@ const ScanHubPanel = ({
                 </div>
 
                 <div className="border-t border-border/40 px-2 py-2">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
-                      Library folder
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          runAction(
-                            "library-folder",
-                            onChooseLibraryFolder,
-                            (result) =>
-                              `Library folder set to ${result.path || defaultGameFolder}.`,
-                          )
-                        }
-                        disabled={busyAction === "library-folder"}
-                        className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-60"
-                      >
-                        {busyAction === "library-folder"
-                          ? "Saving…"
-                          : hasLibraryFolder
-                            ? "Change folder"
-                            : "Choose folder"}
-                      </button>
-                      {hasLibraryFolder && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenFolder(defaultGameFolder)}
-                          className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
-                        >
-                          Open
-                        </button>
-                      )}
-                    </div>
+                  <div className="mb-2 text-[10px] uppercase tracking-[0.18em] opacity-55">
+                    New games install to
                   </div>
-                  {hasLibraryFolder ? (
-                    <>
-                      <div className="mt-1 break-all font-mono text-[11px] opacity-80">
-                        {defaultGameFolder}
-                      </div>
-                      <div className="mt-1 text-[10px] leading-snug opacity-50">
-                        Profile data stays in the app profile; this path is for
-                        installs only.
-                      </div>
-                    </>
-                  ) : (
-                    <div className="mt-1 text-xs opacity-60">
-                      No default library folder selected.
-                    </div>
-                  )}
+                  <window.FolderPicker
+                    compact
+                    value={defaultGameFolder}
+                    onSave={onSaveLibraryFolder}
+                    dialogTitle="Choose where F95Launcher installs games"
+                    emptyTitle="No games folder chosen yet"
+                    emptyDescription="Until you pick one, games go to the app's data folder."
+                  />
                 </div>
 
                 <div className="border-t border-border/40 px-2 py-2">

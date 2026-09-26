@@ -28,10 +28,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     console.log("Invoking selectFile");
     return ipcRenderer.invoke("select-file");
   },
-  selectDirectory: () => {
-    console.log("Invoking selectDirectory");
-    return ipcRenderer.invoke("select-directory");
-  },
+  selectDirectory: (options) =>
+    ipcRenderer.invoke("select-directory", options || {}),
   getVersion: () => ipcRenderer.invoke("get-version"),
   openSettings: () => ipcRenderer.invoke("open-settings"),
   openImporter: (source) => {
@@ -243,6 +241,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
   //     METHODS FOR MOVE-TO-LIBRARY FEATURE (already added)
   // ────────────────────────────────────────────────────────────────
   getDefaultGameFolder: () => ipcRenderer.invoke("get-default-game-folder"),
+  updateSettings: (section, values) =>
+    ipcRenderer.invoke("update-settings", { section, values }),
+  getAppInfo: () => ipcRenderer.invoke("get-app-info"),
+  inspectFolder: (targetPath, options) =>
+    ipcRenderer.invoke("inspect-folder", targetPath, options || {}),
+  suggestLibraryFolders: () => ipcRenderer.invoke("suggest-library-folders"),
+  detectGameFolders: () => ipcRenderer.invoke("detect-game-folders"),
+  relaunchApp: () => ipcRenderer.invoke("relaunch-app"),
+  onSettingsChanged: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("settings-changed", listener);
+    return () => ipcRenderer.removeListener("settings-changed", listener);
+  },
+  subscribeF95AuthChanged: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("f95-auth-changed", listener);
+    return () => ipcRenderer.removeListener("f95-auth-changed", listener);
+  },
   setDefaultGameFolder: (newPath) =>
     ipcRenderer.invoke("set-default-game-folder", newPath),
   moveFolderToLibrary: (args) =>

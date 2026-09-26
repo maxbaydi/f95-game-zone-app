@@ -31,6 +31,17 @@ const {
 } = require("./main/install/selectExecutable");
 const { getErrorMessage } = require("./main/errorMessage");
 const {
+  detectGameFolders,
+  inspectFolder,
+  inspectScanFolder,
+  suggestLibraryFolders,
+} = require("./main/folderInsights");
+const {
+  DEFAULT_ARCHIVE_EXTENSIONS,
+  DEFAULT_GAME_EXTENSIONS,
+  applySettingsPatch,
+} = require("./main/settingsPatch");
+const {
   clearF95Session,
   createF95BrowserWindow,
   createF95LoginWindow,
@@ -216,6 +227,7 @@ const f95BrowserHandoffs = createBrowserHandoffRegistry({
   },
 });
 let f95DownloadSequence = 0;
+let configExistedAtStartup = true;
 
 const MAIN_WINDOW_DEFAULT_WIDTH = 1600;
 const MAIN_WINDOW_DEFAULT_HEIGHT = 900;
@@ -2685,6 +2697,13 @@ const defaultConfig = {
     appUpdates: true,
     libraryUpdates: true,
   },
+  Onboarding: {
+    completed: false,
+    completedAt: "",
+  },
+  Appearance: {
+    bannerTemplate: "",
+  },
   F95Mirrors: {},
 };
 
@@ -3043,11 +3062,18 @@ ipcMain.handle("select-file", async () => {
   }
 });
 
-ipcMain.handle("select-directory", async () => {
-  const result = await dialog.showOpenDialog(importerWindow, {
-    properties: ["openDirectory"],
+ipcMain.handle("select-directory", async (event, options = {}) => {
+  const parentWindow =
+    BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined;
+  const defaultPath = String(options?.defaultPath || "").trim();
+  const result = await dialog.showOpenDialog(parentWindow, {
+    title: String(options?.title || "Choose a folder"),
+    buttonLabel: String(options?.buttonLabel || "Use this folder"),
+    defaultPath:
+      defaultPath && fs.existsSync(defaultPath) ? defaultPath : undefined,
+    properties: ["openDirectory", "createDirectory"],
   });
-  return result.filePaths[0] || null;
+  return result.canceled ? null : result.filePaths[0] || null;
 });
 
 ipcMain.handle("get-version", () => app.getVersion());
@@ -3065,6 +3091,113 @@ ipcMain.handle("get-unique-filter-options", async () => {
 
 ipcMain.handle("get-settings", async () => {
   return appConfig || defaultConfig;
+});
+
+function broadcastSettingsChanged() {
+  BrowserWindow.getAllWindows().forEach((windowInstance) => {
+    if (!windowInstance.isDestroyed()) {
+      windowInstance.webContents.send("settings-changed", appConfig);
+    }
+  });
+}
+
+ipcMain.handle("update-settings", async (event, payload) => {
+  try {
+    appConfig = applySettingsPatch(
+      appConfig || defaultConfig,
+      String(payload?.section || ""),
+      payload?.values || {},
+    );
+    saveConfig();
+    trayController.refresh();
+    broadcastSettingsChanged();
+    return { success: true, config: appConfig };
+  } catch (error) {
+    console.error("[settings] Failed to update settings:", error);
+    return { success: false, error: getErrorMessage(error, "Failed to save.") };
+  }
+});
+
+function getFolderInsightDeps() {
+  return {
+    appRoot: app.isPackaged ? path.dirname(app.getPath("exe")) : "",
+  };
+}
+
+ipcMain.handle("get-app-info", async () => ({
+  version: app.getVersion(),
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  isFreshInstall: !configExistedAtStartup,
+  paths: {
+    data: appPaths.data,
+    logs: appPaths.logs,
+    cache: appPaths.cache,
+    downloads: downloadsDir,
+    fallbackGames: appPaths.games,
+  },
+  defaults: {
+    gameExtensions: DEFAULT_GAME_EXTENSIONS,
+    extractionExtensions: DEFAULT_ARCHIVE_EXTENSIONS,
+  },
+}));
+
+ipcMain.handle("inspect-folder", async (event, targetPath, options) => {
+  try {
+    if (options?.purpose === "scan") {
+      return await inspectScanFolder(String(targetPath || ""));
+    }
+    return await inspectFolder(
+      String(targetPath || ""),
+      getFolderInsightDeps(),
+    );
+  } catch (error) {
+    console.error("[settings] Failed to inspect folder:", error);
+    return {
+      path: String(targetPath || ""),
+      status: "error",
+      warnings: [
+        {
+          code: "inspect_failed",
+          level: "error",
+          message: getErrorMessage(error, "This folder can't be checked."),
+        },
+      ],
+    };
+  }
+});
+
+ipcMain.handle("suggest-library-folders", async () => {
+  try {
+    return await suggestLibraryFolders({
+      ...getFolderInsightDeps(),
+      currentFolder: appConfig?.Library?.gameFolder || "",
+    });
+  } catch (error) {
+    console.error("[settings] Failed to suggest library folders:", error);
+    return [];
+  }
+});
+
+ipcMain.handle("detect-game-folders", async () => {
+  try {
+    const sourcesResult = await listScanSources(appPaths);
+    return await detectGameFolders({
+      extraRoots: [appConfig?.Library?.gameFolder || ""],
+      existingSources: (sourcesResult?.sources || []).map(
+        (source) => source.path,
+      ),
+    });
+  } catch (error) {
+    console.error("[settings] Failed to detect game folders:", error);
+    return [];
+  }
+});
+
+ipcMain.handle("relaunch-app", () => {
+  app.relaunch();
+  trayController.prepareForQuit();
+  app.quit();
 });
 
 ipcMain.handle("save-settings", async (event, settings) => {
@@ -3896,30 +4029,50 @@ ipcMain.handle("get-available-banner-templates", async () => {
   }
 });
 
-ipcMain.handle("get-selected-banner-template", async () => {
+function readLegacyBannerTemplate() {
   try {
     if (!fs.existsSync(configPath)) {
-      return "Default";
+      return "";
     }
-    const configData = fs.readFileSync(configPath, "utf-8");
-    const match = configData.match(/bannerTemplate=(.*)/);
-    return match ? match[1].trim() : "Default";
-  } catch (err) {
-    console.error("Error reading selected banner template:", err);
-    return "Default";
+    const match = fs
+      .readFileSync(configPath, "utf-8")
+      .match(/^bannerTemplate=(.*)$/m);
+    return match ? match[1].trim() : "";
+  } catch {
+    return "";
   }
+}
+
+ipcMain.handle("get-selected-banner-template", async () => {
+  return (
+    String(appConfig?.Appearance?.bannerTemplate || "").trim() ||
+    readLegacyBannerTemplate() ||
+    "Default"
+  );
 });
 
 ipcMain.handle("set-selected-banner-template", async (event, template) => {
   try {
-    let configData = fs.existsSync(configPath)
-      ? fs.readFileSync(configPath, "utf-8")
-      : "";
+    const requested = String(template || "").trim() || "Default";
+    const available = fs.existsSync(appPaths.bannerTemplates)
+      ? fs
+          .readdirSync(appPaths.bannerTemplates)
+          .filter((file) => file.endsWith(".js"))
+          .map((file) => path.basename(file, ".js"))
+      : [];
+    if (requested !== "Default" && !available.includes(requested)) {
+      return { success: false, error: "This banner template was not found." };
+    }
 
-    configData = configData.replace(/bannerTemplate=.*/g, "").trim();
-    configData += (configData ? "\n" : "") + `bannerTemplate=${template}`;
-
-    fs.writeFileSync(configPath, configData.trim());
+    appConfig = {
+      ...(appConfig || defaultConfig),
+      Appearance: {
+        ...(appConfig?.Appearance || {}),
+        bannerTemplate: requested,
+      },
+    };
+    saveConfig();
+    broadcastSettingsChanged();
     return { success: true };
   } catch (err) {
     console.error("Error saving selected banner template:", err);
@@ -3975,19 +4128,38 @@ ipcMain.handle("get-default-game-folder", async () => {
 });
 
 ipcMain.handle("set-default-game-folder", async (event, newPath) => {
-  if (!newPath || typeof newPath !== "string" || !fs.existsSync(newPath)) {
-    return { success: false, error: "Invalid or non-existing path" };
+  const requestedPath = String(newPath || "").trim();
+  if (!requestedPath || !path.isAbsolute(requestedPath)) {
+    return { success: false, error: "Choose a full folder path." };
   }
 
   try {
-    if (!appConfig.Library) appConfig.Library = {};
-    appConfig.Library.gameFolder = newPath;
+    const insight = await inspectFolder(requestedPath, getFolderInsightDeps());
+    if (insight.status === "error") {
+      return {
+        success: false,
+        error: insight.warnings[0]?.message || "This folder can't be used.",
+        insight,
+      };
+    }
 
-    fs.writeFileSync(configPath, ini.stringify(appConfig));
-    return { success: true, path: newPath };
+    await fs.promises.mkdir(insight.path, { recursive: true });
+    appConfig = applySettingsPatch(appConfig || defaultConfig, "Library", {
+      gameFolder: insight.path,
+    });
+    saveConfig();
+    broadcastSettingsChanged();
+    return {
+      success: true,
+      path: insight.path,
+      insight: { ...insight, exists: true },
+    };
   } catch (err) {
     console.error("Failed to save default game folder:", err);
-    return { success: false, error: err.message };
+    return {
+      success: false,
+      error: getErrorMessage(err, "Failed to save the games folder."),
+    };
   }
 });
 
@@ -5151,7 +5323,8 @@ const engineMap = {
 
 function loadConfig() {
   try {
-    if (fs.existsSync(configPath)) {
+    configExistedAtStartup = fs.existsSync(configPath);
+    if (configExistedAtStartup) {
       const configData = fs.readFileSync(configPath, "utf8");
       appConfig = ini.parse(configData);
     } else {
@@ -5185,6 +5358,14 @@ function loadConfig() {
       Notifications: {
         ...defaultConfig.Notifications,
         ...(appConfig?.Notifications || {}),
+      },
+      Onboarding: {
+        ...defaultConfig.Onboarding,
+        ...(appConfig?.Onboarding || {}),
+      },
+      Appearance: {
+        ...defaultConfig.Appearance,
+        ...(appConfig?.Appearance || {}),
       },
       F95Mirrors: {
         ...(defaultConfig.F95Mirrors || {}),

@@ -1,111 +1,58 @@
-const { useState, useEffect } = window.React;
+const StandaloneSettingsWindow = () => {
+  const [isMaximized, setIsMaximized] = React.useState(false);
 
-const Settings = () => {
-  const [selected, setSelected] = useState("Interface");
-  const [isMaximized, setIsMaximized] = useState(false);
-
-  useEffect(() => {
-    window.electronAPI.onWindowStateChanged((state) => {
+  React.useEffect(() => {
+    window.electronAPI.onWindowStateChanged?.((state) => {
       setIsMaximized(state === "maximized");
     });
   }, []);
 
-  const renderContent = () => {
-    switch (selected) {
-      case "Interface":
-        return <window.Interface />;
-      case "Library":
-        return <window.Library />;
-      case "Scan Sources":
-        return <window.ScanSources />;
-      case "Platforms":
-        return <window.Platforms />;
-      case "Emulators":
-        return <window.EmulatorLauncher />;
-      case "Appearance":
-        return <window.Appearance />;
-      case "Metadata":
-        return <window.Metadata />;
-      case "Cloud Saves":
-        return <window.CloudSync />;
-      case "Notifications":
-        return <window.Notifications />;
-      default:
-        return <div className="p-4 text-text">Select a settings category</div>;
-    }
-  };
-
   return (
-    <div className="flex h-screen font-sans text-[13px] bg-transparent -webkit-app-region-no-drag">
-      {/* Drag Header*/}
-      <div className="absolute left-0 top-0 w-full h-[50px] ml-[-90px] z-40 -webkit-app-region-drag" />
-      {/* Window Controls */}
-      <div className="flex absolute top-1 right-2 h-[70px]">
-        <button
-          onClick={() => window.electronAPI.minimizeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200 -webkit-app-region-no-drag"
-        >
-          <i className="fas fa-minus text-text"></i>
-        </button>
-        <button
-          onClick={() => window.electronAPI.maximizeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
-        >
-          <i
-            className={
-              isMaximized
-                ? "fas fa-window-restore text-text"
-                : "fas fa-window-maximize text-text"
-            }
-          ></i>
-        </button>
-        <button
-          onClick={() => window.electronAPI.closeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-200"
-        >
-          <i className="fas fa-times text-text"></i>
-        </button>
+    <div className="flex h-screen flex-col bg-canvas font-sans text-[13px] text-text">
+      <div className="flex h-10 shrink-0 items-center border-b border-border bg-primary [-webkit-app-region:drag]">
+        <div className="px-4 text-xs font-semibold uppercase tracking-[0.2em] text-accent">
+          F95Launcher Settings
+        </div>
+        <div className="ml-auto flex h-full [-webkit-app-region:no-drag]">
+          <button
+            type="button"
+            aria-label="Minimize window"
+            onClick={() => window.electronAPI.minimizeWindow()}
+            className="flex w-11 items-center justify-center hover:bg-white/10"
+          >
+            <span className="material-symbols-outlined text-[18px] leading-none">
+              remove
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label={isMaximized ? "Restore window" : "Maximize window"}
+            onClick={() => window.electronAPI.maximizeWindow()}
+            className="flex w-11 items-center justify-center hover:bg-white/10"
+          >
+            <span className="material-symbols-outlined text-[16px] leading-none">
+              {isMaximized ? "filter_none" : "crop_square"}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="Close window"
+            onClick={() => window.electronAPI.closeWindow()}
+            className="flex w-11 items-center justify-center hover:bg-red-900/80"
+          >
+            <span className="material-symbols-outlined text-[18px] leading-none">
+              close
+            </span>
+          </button>
+        </div>
       </div>
-      {/* Main Content */}
-      <div className="flex flex-1 border border-accent rounded-md overflow-hidden">
-        {/* Settings Sidebar */}
-        <div className="w-[180px] bg-primary h-full border-r border-border -webkit-app-region-no-drag">
-          <div className="text-center text-accent font-bold text-md mt-4 mb-4 antialiased -webkit-app-region-drag">
-            F95LAUNCHER
-          </div>
-          <ul>
-            {window.settingsIcons.map((item) => (
-              <>
-                <li
-                  key={item.name}
-                  className={`pt-2 pb-2 pl-4 pr-4 cursor-pointer hover:bg-highlight flex items-center text-text ${selected === item.name ? "bg-selected" : ""} ${item.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                  onClick={() => !item.disabled && setSelected(item.name)}
-                >
-                  <svg
-                    className="w-4 h-4 object-contain text-text mr-2"
-                    fill="currentColor"
-                    viewBox={item.viewBox}
-                  >
-                    <path d={item.path} />
-                  </svg>
-                  <span>{item.name}</span>
-                </li>
-                {item.name === "Emulators" && (
-                  <hr className="mx-2 my-2 border-border border-1" />
-                )}
-              </>
-            ))}
-          </ul>
-        </div>
-        {/* Settings Content */}
-        <div className="flex-1 bg-secondary p-4 overflow-y-auto">
-          <h2 className="text-2xl font-bold mb-4 text-text">{selected}</h2>
-          {renderContent()}
-        </div>
+      <div className="min-h-0 flex-1">
+        <window.SettingsPanel />
       </div>
     </div>
   );
 };
 
-const root = window.ReactDOM.createRoot(document.getElementById("root"));
-root.render(<Settings />);
+window.ReactDOM.createRoot(document.getElementById("root")).render(
+  <StandaloneSettingsWindow />,
+);
