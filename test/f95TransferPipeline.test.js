@@ -34,6 +34,7 @@ function withTempDir(run) {
   };
 }
 
+/** @returns {any} */
 function baseOptions(tempDir, overrides = {}) {
   return {
     url: "https://files.example.com/dl/game.zip",
@@ -236,7 +237,7 @@ test(
             },
           }),
         ),
-      (error) => {
+      (/** @type {any} */ error) => {
         assert.equal(error.code, "not_found");
         assert.match(error.message, /Pixeldrain says the file does not exist/);
         return true;
@@ -257,7 +258,7 @@ test(
             fetchImpl: async (url) => createMockResponse({ url, status: 429, body: "slow down" }),
           }),
         ),
-      (error) => error.code === "rate_limited",
+      (/** @type {any} */ error) => error.code === "rate_limited",
     );
     await assert.rejects(
       () =>
@@ -266,7 +267,7 @@ test(
             fetchImpl: async (url) => createMockResponse({ url, status: 509, body: "limit" }),
           }),
         ),
-      (error) => error.code === "bandwidth_exceeded",
+      (/** @type {any} */ error) => error.code === "bandwidth_exceeded",
     );
   }),
 );
@@ -293,7 +294,7 @@ test(
                 : null,
           }),
         ),
-      (error) =>
+      (/** @type {any} */ error) =>
         error instanceof MirrorActionRequiredError &&
         error.actionUrl === "https://pixeldrain.com/u/x",
     );
@@ -315,7 +316,7 @@ test(
               }),
           }),
         ),
-      (error) => error.code === "html_payload",
+      (/** @type {any} */ error) => error.code === "html_payload",
     );
     assert.deepEqual(fs.readdirSync(tempDir), []);
   }),
@@ -332,7 +333,7 @@ test(
               createMockResponse({ url, json: { error: "link expired" } }),
           }),
         ),
-      (error) => error.code === "html_payload" && /link expired/.test(error.message),
+      (/** @type {any} */ error) => error.code === "html_payload" && /link expired/.test(error.message),
     );
   }),
 );
@@ -393,7 +394,7 @@ test(
       }),
     );
 
-    await assert.rejects(() => promise, (error) => error instanceof DownloadCancelledError);
+    await assert.rejects(() => promise, (/** @type {any} */ error) => error instanceof DownloadCancelledError);
     assert.deepEqual(fs.readdirSync(tempDir), []);
   }),
 );
@@ -416,7 +417,7 @@ test(
             },
           }),
         ),
-      (error) => error.code === "disk_full",
+      (/** @type {any} */ error) => error.code === "disk_full",
     );
     assert.deepEqual(checks, [{ directory: tempDir, requiredBytes: PAYLOAD.length }]);
   }),
@@ -427,7 +428,7 @@ test("checkFreeDiskSpace rejects impossible sizes and accepts small ones", async
   if (typeof fs.promises.statfs === "function") {
     await assert.rejects(
       () => checkFreeDiskSpace(os.tmpdir(), Number.MAX_SAFE_INTEGER),
-      (error) => error.code === "disk_full" && /Not enough free disk space/.test(error.message),
+      (/** @type {any} */ error) => error.code === "disk_full" && /Not enough free disk space/.test(error.message),
     );
   }
 });
@@ -447,7 +448,7 @@ test(
             },
           }),
         ),
-      (error) => error.code === "network" && /Lost the connection/.test(error.message),
+      (/** @type {any} */ error) => error.code === "network" && /Lost the connection/.test(error.message),
     );
     assert.equal(calls, 3);
   }),

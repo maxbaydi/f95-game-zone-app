@@ -18,6 +18,8 @@ const sharp = require("sharp");
 const axios = require("axios");
 const ini = require("ini");
 const { initializeAppPaths } = require("./main/appPaths");
+const { attachWindowResilience } = require("./main/windowResilience");
+const { writeFileAtomicSync } = require("./main/atomicFile");
 const {
   createAppUpdateNotificationController,
 } = require("./main/appUpdateNotificationController");
@@ -333,6 +335,7 @@ function createWindow() {
     },
   });
 
+  attachWindowResilience(mainWindow, { name: "main", dialog });
   mainWindow.loadFile(path.join(__dirname, "index.html"));
   trayController.attachMainWindow(mainWindow);
   appUpdater.attachWindow(mainWindow);
@@ -369,6 +372,7 @@ function createSettingsWindow() {
     },
   });
 
+  attachWindowResilience(settingsWindow, { name: "settings", dialog });
   settingsWindow.loadFile(path.join(__dirname, "settings.html"));
 
   if (process.defaultApp || appConfig?.Interface?.showDebugConsole) {
@@ -407,6 +411,7 @@ function createImporterWindow() {
     },
   });
 
+  attachWindowResilience(importerWindow, { name: "importer", dialog });
   const filePath = path.join(__dirname, "core/ui/windows/importer.html");
   console.log("Loading importer file:", filePath);
   importerWindow
@@ -451,6 +456,7 @@ function createGameDetailsWindow(recordId) {
     },
   });
 
+  attachWindowResilience(gameDetailsWindow, { name: "game-details", dialog });
   gameDetailsWindow.loadFile(path.join(__dirname, "gamedetails.html"));
 
   gameDetailsWindow.webContents.on("did-finish-load", () => {
@@ -3342,7 +3348,7 @@ ipcMain.handle("get-settings", async () => {
 ipcMain.handle("save-settings", async (event, settings) => {
   try {
     appConfig = settings;
-    fs.writeFileSync(configPath, ini.stringify(settings));
+    writeFileAtomicSync(configPath, ini.stringify(settings));
     trayController.refresh();
     await broadcastCloudAuthState().catch((error) => {
       console.error(
@@ -4074,7 +4080,7 @@ ipcMain.handle("set-selected-banner-template", async (event, template) => {
     configData = configData.replace(/bannerTemplate=.*/g, "").trim();
     configData += (configData ? "\n" : "") + `bannerTemplate=${template}`;
 
-    fs.writeFileSync(configPath, configData.trim());
+    writeFileAtomicSync(configPath, configData.trim());
     return { success: true };
   } catch (err) {
     console.error("Error saving selected banner template:", err);
@@ -4138,7 +4144,7 @@ ipcMain.handle("set-default-game-folder", async (event, newPath) => {
     if (!appConfig.Library) appConfig.Library = {};
     appConfig.Library.gameFolder = newPath;
 
-    fs.writeFileSync(configPath, ini.stringify(appConfig));
+    writeFileAtomicSync(configPath, ini.stringify(appConfig));
     return { success: true, path: newPath };
   } catch (err) {
     console.error("Failed to save default game folder:", err);
@@ -5311,7 +5317,7 @@ function loadConfig() {
       appConfig = ini.parse(configData);
     } else {
       appConfig = defaultConfig;
-      fs.writeFileSync(configPath, ini.stringify(appConfig));
+      writeFileAtomicSync(configPath, ini.stringify(appConfig));
     }
 
     appConfig = {
@@ -5354,7 +5360,7 @@ function loadConfig() {
 }
 
 function saveConfig() {
-  fs.writeFileSync(configPath, ini.stringify(appConfig));
+  writeFileAtomicSync(configPath, ini.stringify(appConfig));
 }
 
 function getF95MirrorPreferenceKey(threadUrl) {
@@ -6102,7 +6108,39 @@ async function findSteamId(title, developer) {
 // APP LIFECYCLE
 // ────────────────────────────────────────────────
 
+// A second instance would open the same SQLite database and config.ini
+// concurrently; focus the running window instead.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (typeof trayController.showMainWindow === "function") {
+      trayController.showMainWindow();
+      return;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+process.on("uncaughtException", (error) => {
+  console.error("[main] Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[main] Unhandled promise rejection:", reason);
+});
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
   loadConfig();
   databaseConnection = await initializeDatabase(appPaths);
   cloudSaveService = createCloudSaveService({

@@ -343,7 +343,7 @@ test("MEGA API error codes become clear, typed errors", async () => {
         prepareF95DownloadUrl(session, `https://mega.nz/file/${FILE_HANDLE}#${fileKey}`, {
           sleep: noSleep,
         }),
-      (error) => {
+      (/** @type {any} */ error) => {
         assert.equal(error.code, scenario.code);
         assert.match(error.userMessage, scenario.pattern);
         return true;
@@ -392,7 +392,7 @@ test("MEGA password-protected links require the browser", async () => {
         createRoutedSession([]),
         "https://mega.nz/#P!AgBbCcDdEeFf",
       ),
-    (error) => error instanceof MirrorActionRequiredError,
+    (/** @type {any} */ error) => error instanceof MirrorActionRequiredError,
   );
 });
 
