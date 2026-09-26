@@ -130,6 +130,9 @@ function requestViaNet(session, url, init) {
       session,
       useSessionCookies: false,
       redirect: redirectMode,
+      // A raw "referer" header is blocked (net::ERR_BLOCKED_BY_CLIENT) unless
+      // the policy allows sending the full URL cross-origin.
+      referrerPolicy: "unsafe-url",
     });
     const headers = new Headers(init?.headers || {});
     headers.forEach((value, key) => {

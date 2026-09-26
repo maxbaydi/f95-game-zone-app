@@ -538,6 +538,20 @@ function testArchive(filePath, archiveType = "") {
     child.on("error", (error) => resolve({ ok: false, detail: error.message }));
     child.on("close", (code) => {
       const files = output.match(/Files:\s*(\d+)/);
+      const fileCount = files ? Number(files[1]) : -1;
+      // With "-p-" an archive whose headers are encrypted lists no entries
+      // (exit 0) or fails with "Wrong password"; the payload itself is fine.
+      if (
+        (code === 0 && fileCount === 0) ||
+        (code !== 0 && /wrong password|enter password|encrypted/i.test(output))
+      ) {
+        resolve({
+          ok: true,
+          encrypted: true,
+          detail: "encrypted archive (password required); no readable entries",
+        });
+        return;
+      }
       resolve({
         ok: code === 0,
         detail:
@@ -621,6 +635,9 @@ async function verifyDownloadedFile(row, result, options, log, resume) {
       }
       if (verdict.skipped) {
         row.archive = `${payload.archiveType}?`;
+      }
+      if (verdict.encrypted) {
+        row.archive = `${payload.archiveType} (pw)`;
       }
     }
   } catch (error) {

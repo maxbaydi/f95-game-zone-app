@@ -1,39 +1,62 @@
 # Результаты живой проверки зеркал
 
-**Дата проверки:** 2026-09-26 (промежуточная; продолжается)
-**Инструмент:** `npm run check:mirrors` — см. [check-mirrors.md](check-mirrors.md)
-**Тестовый файл:** `mirror-test.zip`, 1 499 865 байт, SHA-256 `712600fe5fce5a0139d97e22bb38fd17de34fdc03670b3dde1948aad739f841c` (случайные данные, загружен мной на хосты с анонимным API)
+**Дата проверки:** 2026-09-26
+**Инструменты:** `npm run check:mirrors` (Node) и `npm run check:mirrors:app` (Electron, сессия приложения, окно шага) — см. [check-mirrors.md](check-mirrors.md)
+**Источник ссылок:** ~450 тредов F95 (свежие + поиск по хостам под логином пользователя), публичные файлы, собственные тестовые загрузки (`mirror-test.zip`, 1 499 865 байт, SHA-256 `712600fe…f841c`)
 
-Легенда: **PASS** — файл скачан, SHA-256 и размер верны, архив цел; **ACTION_REQUIRED** — хост требует шаг в браузере (для хостов «через браузер» это ожидаемый результат); **FAIL** — ошибка; **—** — рабочей ссылки ещё нет.
+Легенда: **PASS** — файл скачан, SHA-256 посчитан, размер сверен с `Content-Length`/заявлением хоста, архив проверен `7z t` (для RAR — системным 7-Zip; `(pw)` — архив с паролем, заголовки целы); **PASS (browser)** — то же после шага в окне; **RESOLVED** — резолвер дал прямой URL, файл не качался (размер/лимит); **ACTION_REQUIRED** — нужен человек в окне (капча/Turnstile) — для «браузерных» хостов это норма; **FAIL** — ошибка.
 
 ## Автоматические хосты
 
-| Хост | Форма URL | Результат | Файл / размер | Примечание |
-| --- | --- | --- | --- | --- |
-| Generic (прямой файл) | https://www.7-zip.org/a/7za920.zip | PASS | 7za920.zip, 376 KB | докачка после обрыва на 100 000 байт: Range → 206 |
-| Litterbox | https://litter.catbox.moe/ov0f8v.zip | PASS | ov0f8v.zip, 1.4 MB | SHA совпал с исходником |
-| Dropbox | https://www.dropbox.com/scl/fi/…/AnarchiaGG-dzien-dziecka.zip?rlkey=…&dl=0 | PASS | 1.1 MB, zip (722 файла) | публичный пример с GitHub |
-| pomf (qu.ax) | https://qu.ax/AI98m (страница) | PASS | AI98m.zip, 1.4 MB | исправлено: разбор лендинга + Referer; докачка после обрыва на 300 000 байт: 206 |
-| Google Drive | https://drive.google.com/uc?id=0B9P1L--7Wd2vU3VUVlFnbTgtS2c | PASS (резолв+передача) | spam.txt, 5 B | резолвер работает; файл не игровой, поэтому `payload` FAIL ожидаем |
-| Google Drive | https://drive.google.com/file/d/0B9P1L--7Wd2vNm9zMTJWOGxobkU/view | ACTION_REQUIRED | — | Drive требует вход (HTTP 401) — верное поведение |
-| Gofile | https://gofile.io/d/2cmlCIGh | FAIL (сеть) | — | исправлен handshake (wt-соль, ротация токенов, переиспользование аккаунта); после серии тестов Gofile временно блокирует IP — повтор позже |
-| Buzzheavier | https://buzzheavier.com/2oi4sx9gseqg | ACTION_REQUIRED | — | Cloudflare-челлендж для Node-fetch; проверить в приложении (Chromium + шаг в окне) |
-| Pixeldrain | https://pixeldrain.com/u/PftuLkE9 | FAIL (404) | — | файл удалён; анонимная загрузка на Pixeldrain отключена — нужна ссылка |
-| MEGA | https://mega.nz/file/W0UAgJaK#… | FAIL (blocked) | — | ссылка заблокирована MEGA — нужна ссылка |
-| MediaFire | https://www.mediafire.com/folder/1end54mgactqx/Test_File | FAIL (пустая папка) | — | нужна ссылка на файл |
-| F95 masked / вложения | — | — | — | нужны cookies F95 |
-| Mixdrop, Uploadhaven, FuckingFast, Workupload, Files.fm, Krakenfiles, Qiwi, OneDrive, Яндекс.Диск, Sendspace, Catbox, FileDitch, XFileSharing-семейство | — | — | — | нужны ссылки (анонимные загрузки: Workupload — «Are you a human?», Krakenfiles — таймаут сервера загрузки, Catbox — «Invalid uploader») |
+| Хост | Форма URL | Node | Electron (приложение) | Файл / размер / SHA-256 | Примечание |
+| --- | --- | --- | --- | --- | --- |
+| F95 masked → Gofile | `f95zone.to/masked/gofile.io/…` | ACTION_REQUIRED (капча F95) | RESOLVED (browser) | TakeTheCrown-v0.5-pc.zip, 2.1 GB | капча F95 на masked-ссылке пройдена в окне автоматически (с cookies логина); файл пропущен по `--max-size` |
+| F95 masked → MEGA | `f95zone.to/masked/mega.nz/…` | RESOLVED / ACTION_REQUIRED | RESOLVED | girl by accident 0.8.7.zip, 629 MB | после серии masked-запросов F95 требует капчу — окно шага |
+| F95 masked → Google Drive | `f95zone.to/masked/drive.google.com/…` | RESOLVED | — | `drive.usercontent.google.com/download?id=…` | |
+| F95 masked → Pixeldrain / Workupload | masked | ACTION_REQUIRED (капча F95) | — | | то же окно шага |
+| Google Drive | `drive.google.com/file/d/<id>/view`, `uc?id=` | PASS (передача) | — | diminishing_returns.rar, 154 MB, `6a0fedd4…` | RAR с паролем — теперь `PASS (pw)`; файл, требующий входа → ACTION_REQUIRED |
+| MEGA | `mega.nz/folder/<id>#<key>` | PASS | — | 2BigToDateDemo-1.0-pc.7z, 125 MB, `a58bc0f7…` | расшифровка + докачка по `/offset-end` |
+| Gofile | `gofile.io/d/<code>` | PASS | — | mirror-test.zip, 1.4 MB, `712600fe…` (эталон) | новый website-token; докачка 206 |
+| Pixeldrain | `pixeldrain.com/u/<id>` | PASS | — | HaremGacha-0.1.0-pc.zip, 413 MB, `0c7c8d0d…` | докачка 206 |
+| MediaFire | `mediafire.com/file/<key>/<name>` | PASS ×2 | — | 3ddbrowser.zip 25 MB `c2d3fb75…`; LostParadise_v0.1.1_DEMO.zip 649 MB `9d446bc9…` | |
+| Dropbox | `/s/<id>/<name>?dl=0`, `/scl/fi/…` | PASS; удалённый → not_found | PASS | Rampage.zip, 5.3 MB, `2a40171e…` | зонд `?dl=1`; страница «File Deleted» распознаётся |
+| Яндекс.Диск | `disk.yandex.ru/d/<id>` | PASS | — | TFG - Giantess Girlfriend(demo) PC.zip, 202 MB, `fc7239c4…` | докачка 206 |
+| Buzzheavier | `bzzhr.to/<id>` | ACTION_REQUIRED (Cloudflare, TLS-отпечаток Node) | **PASS (browser)** | Open_Rooms-0.5.0_Public.rar, 413 MB, `e741d35a…` — совпадает с SHA-256 на странице хоста | Cloudflare пройден в окне без клика; докачка 206; RAR цел (190 файлов) |
+| DataNodes | `datanodes.to/<id>/<name>` | ACTION_REQUIRED (Turnstile в countdown) | ACTION_REQUIRED | | форма `download1` теперь POST-ится правильно; кнопка скачивания за Turnstile → окно, загрузка из окна усыновляется |
+| DailyUploads (XFS) | `dailyuploads.net/<id>` | RESOLVED | PASS (pw) | ESR-11985-v1.2.20.rar, 39 MB, `4a1f16fd…` | XFS: countdown 60 с, POST-редирект вручную, CDN с Referer; архив с паролем |
+| Files.fm | `files.fm/u/<id>` | ACTION_REQUIRED (Cloudflare) | PASS (передача) | видео 58 MB, `3bbf98c2…` | резолвер и передача работают; файл не игровой → `unsupported_payload` (корректно) |
+| Litterbox / Catbox | `litter.catbox.moe/<id>.zip`, `files.catbox.moe/…` | PASS | — | ov0f8v.zip, 1.4 MB, `712600fe…` | прямые файлы |
+| pomf (qu.ax) | `qu.ax/<id>` (страница) | PASS | — | AI98m.zip, 1.4 MB, `712600fe…` | лендинг → `/x/<id>.zip` + Referer; докачка 206 |
+| Прямой файл (generic) | любой URL файла | PASS | — | 7za920.zip, 376 KB, `2a3afe19…` | докачка 206 |
+| Mixdrop | `mixdrop.ag/f/<id>`, `mixdrop.top`, `mxdrop.top` | ACTION_REQUIRED | ACTION_REQUIRED | | кнопка DOWNLOAD за Cloudflare Turnstile (`data-cf-key`); packed-скрипта больше нет → только окно + усыновление загрузки |
+| Krakenfiles | `krakenfiles.com/view/<hash>/file.html` | ACTION_REQUIRED | ACTION_REQUIRED | | Turnstile в `#dl-form`, POST без токена → «captcha not valid» |
+| Uploadhaven | `uploadhaven.com/download/<id>` | ACTION_REQUIRED | ACTION_REQUIRED | | hCaptcha по дизайну хоста |
+| Workupload | `workupload.com/file/<id>` | ACTION_REQUIRED | — | | «Are you a human?» — пазл/капча |
+| Send.cm | `send.cm/<id>` | ACTION_REQUIRED | ACTION_REQUIRED (таймаут без человека) | | Turnstile |
+| UsersDrive, HexUpload, AnonFiles-клон, Uploady | XFS-ссылки | ACTION_REQUIRED | — | | Turnstile / hCaptcha / картиночная капча |
+| Up-load.io | `up-load.io/<id>` | FAIL (HTTP 526) | — | | SSL-ошибка Cloudflare на стороне хоста |
+| UploadRAR, Racaty, FileRio, Drop.download | | FAIL (404 / хост недоступен) | — | | ссылки мертвы или домены не отвечают на сетевом уровне |
+| OneDrive | `1drv.ms/u/s!…` | FAIL (not_found) / ACTION_REQUIRED | — | | все найденные ссылки удалены; анонимная загрузка Microsoft закрыта — окно |
+| Sendspace, FuckingFast, Qiwi, FileDitch, Nopy, File-Upload, UserUpload, Uploadev | — | — | — | | живых ссылок в тредах F95 не нашлось (упоминания без ссылок или удалённые файлы) |
 
 ## Хосты «через браузер»
 
 | Хост | Результат | Примечание |
 | --- | --- | --- |
-| 1fichier, TeraBox, FileCrypt, Rapidgator, Nitroflare, Katfile, DDownload, Turbobit, Hitfile, VikingFile, MultiUp, Mirrored.to, сокращатели, WeTransfer | — | ссылок ещё не было; ожидается ACTION_REQUIRED с рабочим `actionUrl` |
+| 1fichier, DDownload, FileCrypt, Rapidgator, Nitroflare, Katfile, Turbobit, Hitfile, VikingFile, MultiUp, Mirrored.to, сокращатели (ouo.io), WeTransfer, TeraBox | ACTION_REQUIRED с рабочим `actionUrl` | ожидаемо: приложение открывает окно шага, загрузка из окна усыновляется |
 
-## Что исправлено по итогам прогона
-- Gofile: сайт перестал отдавать `/dist/js/config.js`; токен теперь считается по актуальной формуле (`/js/wt.obf.js` → `generateWT`), ротация «расчётный → статический → новый гостевой аккаунт», гостевой аккаунт хранится в cookie на 30 дней.
-- Общий парсер лендингов: ссылка со страницы получает `Referer` страницы (qu.ax без него отвечает 302 на лендинг); pomf-клоны идут через парсер.
-- `fetchWithCookieJar`: редиректы по хопам с куками, запись `Set-Cookie` в jar.
+## Проверка докачки
+`--simulate-drop` (обрыв на 100 КБ–3 МБ): Range → 206 у generic, Gofile, Pixeldrain, Яндекс.Диска, qu.ax, Dropbox, Buzzheavier, DailyUploads, Files.fm; MEGA — докачка по пути `/offset-end`.
+
+## Что исправлено по итогам
+- **Сессия Electron** (главное): `session.fetch` из main-процесса не шлёт cookies, не сохраняет Set-Cookie, не даёт ручных редиректов и блокирует Referer. Все запросы загрузчика идут через `net.request` с явными cookies партиции (src/main/f95/electronSession.js). Без этого логин F95 и clearance Cloudflare из окна не доходили до загрузчика.
+- Cloudflare-стены распознаются централизованно → `captcha_required` → окно шага; после шага цель зондируется одним байтом (`probeTarget`).
+- Gofile (website-token, аккаунт в cookie), Dropbox («File Deleted», зонд `?dl=1`), qu.ax (Referer), формы в HTML-комментариях (DataNodes), Turnstile у Mixdrop/Krakenfiles/DataNodes, XFS POST-редиректы, Buzzheavier (hx-redirect на себя), «голые» домены в тредах.
+
+## Что осталось
+- Хосты с Turnstile/капчей на кнопке скачивания (Mixdrop, Krakenfiles, DataNodes, Send.cm, UsersDrive, Uploadhaven, Workupload, HexUpload) проверяются только с человеком: окно шага открывается, загрузка из окна усыновляется — нужна ручная проверка в приложении.
+- Полные загрузки masked-ссылок (2.1 ГБ Gofile, 629 МБ MEGA) не выполнялись из-за лимита размера в прогоне; резолверы и передача тех же хостов проверены на файлах меньшего размера.
 
 ## История изменений
 - 2026-09-26 — первый прогон на публичных файлах и собственных тестовых загрузках.
+- 2026-09-26 — прогон по ~450 тредам F95 (Node) и Electron-прогон с окном шага; таблица выше.

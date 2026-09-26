@@ -24,29 +24,29 @@ Last updated: 2026-09-26
 ### 2026-09-26 — Живая проверка зеркал, Gofile, шаг в браузере с автопродолжением
 
 - Status: in_progress
-- Progress: 55%
-- ТЗ coverage: закрывает «загрузка через зеркала F95» на реальных серверах; UX капчи/Cloudflare
+- Progress: 80%
+- ТЗ coverage: закрывает «загрузка через зеркала F95» на реальных серверах; UX капчи/Cloudflare; сессия Electron для загрузчика
 
 What was done:
 
-- `scripts/check-mirrors.js` (`npm run check:mirrors`): реальные ссылки через код приложения (resolver → downloadToFile → inspectDownloadedPackage), SHA-256, размер, `7za t`, `--simulate-drop` (докачка по Range), `--capture` (фикстуры), `--thread` (зеркала стартового поста F95), `--jar`.
-- Общий модуль опций передачи `src/main/f95/transferOptions.js` — main.js и скрипт строят опции `downloadToFile` одинаково; передача использует UA сессии.
-- `src/main/f95/cookieJar.js` — Node-сессия с cookie-jar; `fetchWithCookieJar` следует редиректам с куками и пишет Set-Cookie.
-- Gofile: новая формула website-token, ротация токенов, переиспользование гостевого аккаунта из cookie; фикстуры в `test/fixtures/hosts/gofile`.
-- Общий парсер лендингов: Referer страницы у финальной цели; pomf-клоны (qu.ax) через парсер; фикстура `test/fixtures/hosts/pomf`.
-- `src/main/f95/mirrorActionFlow.js` + main.js: капча/Cloudflare открываются в окне, после прохождения загрузка стартует сама; загрузка, начатая в окне, усыновляется; статус `action` в сторе и панели.
+- `scripts/check-mirrors.js` (`npm run check:mirrors`): реальные ссылки через код приложения (resolver → downloadToFile → inspectDownloadedPackage), SHA-256, размер, `7z t`, `--simulate-drop` (докачка по Range/MEGA-path), `--capture` (фикстуры), `--thread` (зеркала стартового поста F95), `--jar`, `--resolve-only`, `--max-size`, `--cookie-domains`.
+- `scripts/check-mirrors-electron.js` (`npm run check:mirrors:app`): те же проверки через сессию приложения (партиция `persist:f95-auth`, Chromium) и настоящий поток «шаг в браузере» с усыновлением загрузок из окна.
+- Общий модуль опций передачи `src/main/f95/transferOptions.js`; `src/main/f95/cookieJar.js` — Node-сессия; `fetchWithCookieJar` с редиректами и Set-Cookie.
+- Резолверы по реальным ответам: Gofile (новый website-token, ротация, аккаунт в cookie), Dropbox (страница «File Deleted» → not_found, зонд `?dl=1`), qu.ax/pomf (лендинг + Referer), формы в HTML-комментариях и незакрытые формы (DataNodes), Turnstile у Mixdrop/Krakenfiles/DataNodes/UsersDrive → `captcha_required`, Cloudflare-стены централизованно в `ctx.fetch`, XFS POST-редиректы вручную, «голые» домены не считаются зеркалами.
+- `src/main/f95/mirrorActionFlow.js` + main.js: капча/Cloudflare открываются в окне, после прохождения загрузка стартует сама (зонд цели `probeTarget`); статус `action` в сторе и панели.
+- `src/main/f95/electronSession.js`: выяснено на Electron 37, что `session.fetch` из main не шлёт cookies, не сохраняет Set-Cookie, не даёт ручные редиректы и блокирует Referer — все запросы загрузчика теперь идут через `net.request` с явными cookies партиции, `referrerPolicy: unsafe-url` и записью Set-Cookie.
+- Попутно: импорт метаданных Atlas падал на новой колонке `external_ids`; `db` в main.js брался до инициализации — исправлено с тестами.
 - Документация: `docs/check-mirrors.md`, `docs/mirror-browser-step.md`, `docs/mirror-verification.md`, индекс `docs/README.md`.
-- Попутно (найдено при smoke-запуске Electron): импорт метаданных Atlas падал uncaught exception из-за новой колонки `external_ids` — `insertJsonData` теперь отбрасывает неизвестные колонки и отдаёт ошибки через promise; `db` в main.js брался до инициализации (undefined) — заменён на `getDb()`. Тест: `test/databaseInsertJsonData.test.js`.
 
 How:
 
-- Живой прогон на публичных файлах и собственных тестовых загрузках (Gofile, Litterbox, Buzzheavier, qu.ax, Dropbox); ответы серверов сохранены обезличенно как фикстуры; регрессионные тесты офлайн.
+- Живые прогоны: публичные файлы, собственные тестовые загрузки, ~450 тредов F95 (поиск по хостам с cookies пользователя) → 31+ хостов; ответы серверов сохранены обезличенно как фикстуры (`test/fixtures/hosts/*`), регрессионные тесты офлайн (353 теста).
 
 What is left:
 
-- Ссылки/cookies от пользователя: F95 masked, MEGA, Pixeldrain, MediaFire, Mixdrop, Uploadhaven, XFileSharing-семейство и остальные хосты из списка; проверка Cloudflare-хостов в приложении.
-- Ручная проверка в приложении: статусы, отмена/повтор, окно шага в браузере, отсутствие `.part`.
-- Итоговая таблица в `docs/mirror-verification.md`.
+- Финальный Electron-прогон с новым транспортом (Buzzheavier, DailyUploads, masked-ссылки) и итоговая таблица в `docs/mirror-verification.md`.
+- Хосты с Turnstile на кнопке (Mixdrop, Krakenfiles, DataNodes, Send.cm, UsersDrive, Uploadhaven, HexUpload) — только с человеком в окне; проверка в приложении с пользователем.
+- Ручная проверка UI приложения (статусы, отмена/повтор, `.part`) с пользователем.
 
 ### 2026-04-13 — Desktop shell UX: tray minimization plus native update notifications
 
