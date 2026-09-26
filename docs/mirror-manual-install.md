@@ -45,6 +45,7 @@
 2. Выбрать `.txt` или `.crdownload` — тост с подсказкой, карточка не изменилась.
 3. Отменить диалог — без изменений. **Cancel** в режиме «Waiting for your file» — запись Cancelled.
 4. Автотесты: `test/manualInstall.test.js` (фильтр расширений, перенос/копия, уникальное имя, отказ по типу/пустому/отсутствующему файлу без побочных эффектов, тексты ошибок), `test/downloadsStoreAction.test.js` (режим `file`, сброс при `installing`/`fail`/`resolving`).
+5. Прогон 2026-09-27 в приложении (`npm run dev`, логин пользователя): тред Shattered Grace → зеркало DataNodes → окно шага закрыто → Failed с блоком «Stuck on this page?» → **Open in my browser** (страница открылась в Chrome, карточка «Your turn / Waiting for your file») → **Pick downloaded file** с `notes.txt` — тост об ошибке, карточка без изменений → повторный выбор `ShatteredGrace-0.1.11.1-win.zip` (222 МБ, скачан заранее с MediaFire) → Installing → Installed, «Show in library», игра в библиотеке (63 → 64), оригинал архива на месте, папка загрузок приложения пуста (копия удалена после установки, `.part` нет).
 
 ## История изменений
-- 2026-09-27 — первая версия: обход зеркал, которые нельзя пройти во встроенном окне (Turnstile 600010, Adscore).
+- 2026-09-27 — первая версия: обход зеркал, которые нельзя пройти во встроенном окне (Turnstile 600010, Adscore). Сквозная проверка в приложении на DataNodes/Shattered Grace пройдена.
