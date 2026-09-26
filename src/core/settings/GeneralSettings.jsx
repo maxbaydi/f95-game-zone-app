@@ -79,8 +79,68 @@ const NotificationSettings = ({ settings }) => {
   );
 };
 
+const MOTION_OPTIONS = [
+  {
+    value: "auto",
+    label: "System",
+    hint: "Follows the Windows animation setting",
+  },
+  { value: "full", label: "Full", hint: "Smooth transitions everywhere" },
+  { value: "reduced", label: "Reduced", hint: "Short, subtle transitions" },
+  { value: "off", label: "Off", hint: "No animations" },
+];
+
+// Segmented control with a highlight that slides to the active option.
+const MotionSegmented = ({ value, onChange }) => {
+  const activeIndex = Math.max(
+    0,
+    MOTION_OPTIONS.findIndex((option) => option.value === value),
+  );
+  const count = MOTION_OPTIONS.length;
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Interface animations"
+      className="relative grid border border-border bg-black/30 p-0.5"
+      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+    >
+      <span
+        aria-hidden
+        className="absolute bottom-0.5 top-0.5 bg-accent/85 shadow-glow-accent transition-[left] duration-600 ease-spring"
+        style={{
+          width: `calc((100% - 4px) / ${count})`,
+          left: `calc(2px + (100% - 4px) / ${count} * ${activeIndex})`,
+        }}
+      />
+      {MOTION_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          title={option.hint}
+          onClick={() => onChange(option.value)}
+          className={`relative z-10 px-3 py-1 text-xs font-semibold transition-colors duration-500 ${
+            option.value === value
+              ? "text-onAccent"
+              : "text-text/75 hover:text-text"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 const AppearanceSettings = ({ settings }) => {
   const interfaceSettings = settings.config?.Interface || {};
+  const motion =
+    interfaceSettings.motion ||
+    document.documentElement.getAttribute("data-motion") ||
+    "auto";
+  const motionHint =
+    MOTION_OPTIONS.find((option) => option.value === motion)?.hint || "";
   const [templates, setTemplates] = React.useState([]);
   const [selectedTemplate, setSelectedTemplate] = React.useState("Default");
   const [templateChanged, setTemplateChanged] = React.useState(false);
@@ -111,48 +171,67 @@ const AppearanceSettings = ({ settings }) => {
     }
   };
 
+  const chooseMotion = (value) => {
+    window.AtlasUI?.motion.apply(value);
+    settings.update("Interface", { motion: value });
+  };
+
   return (
-    <window.SettingsCard
-      icon="dashboard"
-      title="Library layout"
-      description="How your games are shown."
-    >
-      <window.SettingRow
-        title="Titles list"
-        description="A compact list of game titles next to the cover grid. You can also toggle it with Hide titles in the library."
+    <div className="space-y-5">
+      <window.SettingsCard
+        icon="animation"
+        title="Animations"
+        description="Transitions between screens, dialogs and lists."
       >
-        <window.ToggleSwitch
-          label="Show the titles list"
-          checked={interfaceSettings.showGameList !== false}
-          onChange={(checked) =>
-            settings.update("Interface", { showGameList: checked })
-          }
-        />
-      </window.SettingRow>
-      {templates.length > 0 && (
         <window.SettingRow
-          title="Game card style"
-          description="Custom card templates from the app's templates folder."
-          badge={
-            templateChanged && (
-              <window.RestartRequiredBadge onRestart={settings.onRestart} />
-            )
-          }
+          title="Interface animations"
+          description={`${motionHint}. Applies instantly to every window.`}
         >
-          <select
-            value={selectedTemplate}
-            onChange={(event) => chooseTemplate(event.target.value)}
-            className="min-w-[180px] border border-border bg-black/30 px-2 py-1.5 text-sm text-text outline-none focus:border-accent/60"
-          >
-            {["Default", ...templates].map((template) => (
-              <option key={template} value={template} className="bg-primary">
-                {template}
-              </option>
-            ))}
-          </select>
+          <MotionSegmented value={motion} onChange={chooseMotion} />
         </window.SettingRow>
-      )}
-    </window.SettingsCard>
+      </window.SettingsCard>
+      <window.SettingsCard
+        icon="dashboard"
+        title="Library layout"
+        description="How your games are shown."
+      >
+        <window.SettingRow
+          title="Titles list"
+          description="A compact list of game titles next to the cover grid. You can also toggle it with Hide titles in the library."
+        >
+          <window.ToggleSwitch
+            label="Show the titles list"
+            checked={interfaceSettings.showGameList !== false}
+            onChange={(checked) =>
+              settings.update("Interface", { showGameList: checked })
+            }
+          />
+        </window.SettingRow>
+        {templates.length > 0 && (
+          <window.SettingRow
+            title="Game card style"
+            description="Custom card templates from the app's templates folder."
+            badge={
+              templateChanged && (
+                <window.RestartRequiredBadge onRestart={settings.onRestart} />
+              )
+            }
+          >
+            <select
+              value={selectedTemplate}
+              onChange={(event) => chooseTemplate(event.target.value)}
+              className="min-w-[180px] border border-border bg-black/30 px-2 py-1.5 text-sm text-text outline-none focus:border-accent/60"
+            >
+              {["Default", ...templates].map((template) => (
+                <option key={template} value={template} className="bg-primary">
+                  {template}
+                </option>
+              ))}
+            </select>
+          </window.SettingRow>
+        )}
+      </window.SettingsCard>
+    </div>
   );
 };
 

@@ -58,3 +58,14 @@ test("normalizeExtensionList cleans dots, case, separators and duplicates", () =
   assert.equal(normalizeExtensionList("../../evil, ok", "zip"), "ok");
   assert.equal(normalizeExtensionList(null, "zip"), "zip");
 });
+
+test("applySettingsPatch only accepts known animation levels", () => {
+  assert.equal(
+    applySettingsPatch({}, "Interface", { motion: "Reduced" }).Interface.motion,
+    "reduced",
+  );
+  assert.equal(
+    applySettingsPatch({}, "Interface", { motion: "wild" }).Interface.motion,
+    "auto",
+  );
+});

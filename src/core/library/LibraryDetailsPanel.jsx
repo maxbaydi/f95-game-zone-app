@@ -114,7 +114,23 @@ const DetailRow = ({ label, value }) => (
   </div>
 );
 
+const DetailsImage = ({ src, alt, className, fallback }) =>
+  window.AtlasImage ? (
+    <window.AtlasImage
+      src={src}
+      alt={alt}
+      className={className}
+      fallback={fallback}
+      draggable={false}
+    />
+  ) : src ? (
+    <img src={src} alt={alt} className={className} />
+  ) : (
+    fallback
+  );
+
 const LibraryDetailsPanel = ({
+  presenceState = "open",
   game,
   previews,
   isLoading,
@@ -155,7 +171,23 @@ const LibraryDetailsPanel = ({
     readStoredLibraryDetailsPanelWidthPx,
   );
   const [isResizing, setIsResizing] = useState(false);
+  const [launchingVersionKey, setLaunchingVersionKey] = useState("");
   const resizeDragRef = useRef(null);
+  const favoriteIconRef = window.AtlasMotion?.useFlashClass
+    ? window.AtlasMotion.useFlashClass(isFavorite, "atlas-pop")
+    : null;
+
+  const handlePlayVersion = async (version, versionKey) => {
+    if (launchingVersionKey) {
+      return;
+    }
+    setLaunchingVersionKey(versionKey);
+    try {
+      await onPlayGame?.(version, game);
+    } finally {
+      setLaunchingVersionKey("");
+    }
+  };
 
   useEffect(() => {
     const clamp = () => {
@@ -279,12 +311,17 @@ const LibraryDetailsPanel = ({
 
   return (
     <aside
-      className="atlas-glass-panel relative h-full min-h-0 shrink-0 border-l border-border shadow-glass"
+      className="atlas-glass-panel atlas-panel-right relative h-full min-h-0 shrink-0 border-l border-border shadow-glass"
+      data-state={presenceState}
+      aria-label="Game details"
       style={{ width: panelWidthPx }}
     >
       <button
         type="button"
-        className="absolute left-0 top-0 z-30 h-full w-3 -translate-x-1/2 cursor-ew-resize border-0 bg-transparent p-0 hover:bg-accent/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent"
+        data-no-ripple
+        className={`absolute left-0 top-0 z-30 h-full w-3 -translate-x-1/2 cursor-ew-resize border-0 p-0 transition-colors duration-500 hover:bg-accent/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent ${
+          isResizing ? "bg-accent/35" : "bg-transparent"
+        }`}
         aria-label="Resize details panel"
         title="Drag to resize"
         aria-orientation="vertical"
@@ -308,22 +345,34 @@ const LibraryDetailsPanel = ({
       />
       <div className="flex h-full min-w-0 flex-col">
         <div className="relative z-10 flex min-h-[5rem] items-center justify-between gap-3 border-b border-border bg-black/15 px-4 py-2.5 backdrop-blur-sm">
-          <div className="min-w-0">
-            <div className="truncate text-lg font-semibold leading-tight text-text">
-              {isLoading ? "Loading..." : displayTitle}
-            </div>
-            <div className="truncate text-sm leading-snug opacity-70">
-              {isLoading ? "Fetching metadata..." : displayCreator}
-            </div>
+          <div
+            key={isLoading ? "loading" : game?.record_id || "empty"}
+            className="atlas-list-enter min-w-0"
+          >
+            {isLoading ? (
+              <div className="space-y-2 py-1">
+                <div className="atlas-skeleton h-5 w-52" />
+                <div className="atlas-skeleton h-3.5 w-28" />
+              </div>
+            ) : (
+              <>
+                <div className="truncate text-lg font-semibold leading-tight text-text">
+                  {displayTitle}
+                </div>
+                <div className="truncate text-sm leading-snug opacity-70">
+                  {displayCreator}
+                </div>
+              </>
+            )}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 border border-border bg-white/5 p-1.5 text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            aria-label="Close"
-            title="Close"
+            className="group shrink-0 border border-border bg-white/5 p-1.5 text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            aria-label="Close details"
+            title="Close (Esc)"
           >
-            <span className="material-symbols-outlined block text-[20px] leading-none">
+            <span className="material-symbols-outlined block text-[20px] leading-none transition-transform duration-500 group-hover:rotate-90">
               close
             </span>
           </button>
@@ -337,25 +386,32 @@ const LibraryDetailsPanel = ({
         ) : (
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {isLoading ? (
-              <div className="space-y-3">
-                <div className="h-[200px] animate-pulse rounded-xl bg-secondary/50" />
-                <div className="h-16 animate-pulse rounded-xl bg-secondary/40" />
-                <div className="h-40 animate-pulse rounded-xl bg-secondary/30" />
+              <div className="atlas-fade-enter space-y-3">
+                <div className="atlas-skeleton h-[200px]" />
+                <div className="atlas-skeleton h-16" />
+                <div className="atlas-skeleton h-40" />
               </div>
             ) : (
-              <div className="space-y-5">
+              <div
+                key={game?.record_id || "details"}
+                className="atlas-view-enter space-y-5"
+              >
                 <section className="overflow-hidden rounded-2xl border border-border bg-secondary/20">
-                  {game.banner_url ? (
-                    <img
+                  <div className="h-[220px] overflow-hidden bg-secondary/40">
+                    <DetailsImage
                       src={game.banner_url}
                       alt={displayTitle}
-                      className="h-[220px] w-full object-cover"
+                      className="h-[220px] w-full object-cover transition-transform duration-700 hover:scale-[1.03]"
+                      fallback={
+                        <div className="flex h-[220px] flex-col items-center justify-center gap-2 bg-secondary/40 text-sm opacity-60">
+                          <span className="material-symbols-outlined text-[32px]" aria-hidden>
+                            image_not_supported
+                          </span>
+                          No banner cached yet
+                        </div>
+                      }
                     />
-                  ) : (
-                    <div className="flex h-[220px] items-center justify-center bg-secondary/40 text-sm opacity-60">
-                      No banner cached yet
-                    </div>
-                  )}
+                  </div>
                   <div className="space-y-3 px-4 py-4">
                     <div className="flex flex-wrap gap-2">
                       <DetailPill tone="accent">
@@ -421,9 +477,13 @@ const LibraryDetailsPanel = ({
                         <button
                           type="button"
                           onClick={() => onUpdateGame?.(game)}
-                          className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-40"
+                          className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-40"
                           disabled={!game.siteUrl}
+                          title={game.siteUrl ? undefined : "This entry has no F95 thread linked"}
                         >
+                          <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                            {hasInstalledVersions ? "upgrade" : "download"}
+                          </span>
                           {hasInstalledVersions
                             ? game.latestVersion
                               ? `Update to ${game.latestVersion}`
@@ -440,10 +500,14 @@ const LibraryDetailsPanel = ({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {versionList.map((version) => (
+                      {versionList.map((version, versionIndex) => {
+                        const versionKey = `${version.version}-${version.game_path}`;
+                        const isLaunching = launchingVersionKey === versionKey;
+                        return (
                         <div
-                          key={`${version.version}-${version.game_path}`}
-                          className="border border-border/70 bg-canvas/40 p-3"
+                          key={versionKey}
+                          className="atlas-list-enter border border-border/70 bg-canvas/40 p-3 transition-colors duration-500 hover:border-accent/35"
+                          style={{ "--atlas-index": versionIndex }}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
@@ -463,17 +527,29 @@ const LibraryDetailsPanel = ({
                             <div className="flex shrink-0 items-start gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => onPlayGame?.(version, game)}
-                                className="bg-accent px-2 py-0.5 text-xs text-onAccent hover:brightness-110 disabled:opacity-60"
-                                disabled={!version.exec_path}
+                                onClick={() => handlePlayVersion(version, versionKey)}
+                                className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-60"
+                                disabled={!version.exec_path || Boolean(launchingVersionKey)}
+                                title={version.exec_path ? `Play ${version.version || ""}`.trim() : "No executable selected for this version"}
                               >
-                                Play
+                                {isLaunching ? (
+                                  <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+                                ) : (
+                                  <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                                    play_arrow
+                                  </span>
+                                )}
+                                {isLaunching ? "Starting" : "Play"}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => onOpenFolder(version.game_path)}
-                                className="bg-secondary px-2 py-0.5 text-xs hover:bg-selected"
+                                className="inline-flex items-center gap-1 bg-secondary px-2 py-0.5 text-xs transition hover:bg-selected"
+                                title="Open install folder"
                               >
+                                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                                  folder_open
+                                </span>
                                 Open
                               </button>
                             </div>
@@ -488,7 +564,8 @@ const LibraryDetailsPanel = ({
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -513,6 +590,7 @@ const LibraryDetailsPanel = ({
                       }
                     >
                       <span
+                        ref={favoriteIconRef}
                         className="material-symbols-outlined text-[20px] leading-none"
                         style={
                           isFavorite
@@ -565,7 +643,7 @@ const LibraryDetailsPanel = ({
                     <details className="tags-spoiler pt-3">
                       <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] uppercase tracking-[0.18em] opacity-55 [&::-webkit-details-marker]:hidden">
                         <span
-                          className="tag-chevron material-symbols-outlined text-[16px] transition-transform duration-200"
+                          className="tag-chevron material-symbols-outlined text-[16px] transition-transform duration-450"
                           aria-hidden
                         >
                           expand_more
@@ -628,12 +706,19 @@ const LibraryDetailsPanel = ({
                             key={`${previewUrl}-${index}`}
                             type="button"
                             onClick={() => onPreviewSelect(index)}
-                            className="overflow-hidden rounded-xl border border-border bg-canvas/40 transition-transform hover:scale-[1.01]"
+                            className="atlas-card-enter group overflow-hidden rounded-xl border border-border bg-canvas/40 transition-[border-color,box-shadow] duration-500 hover:border-accent/50 hover:shadow-glow-accent"
+                            style={{ "--atlas-index": Math.min(index, 12) }}
+                            aria-label={`Open screenshot ${index + 1}`}
                           >
-                            <img
+                            <DetailsImage
                               src={previewUrl}
                               alt={`${displayTitle} screenshot ${index + 1}`}
-                              className="h-[120px] w-full object-cover"
+                              className="h-[120px] w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                              fallback={
+                                <div className="flex h-[120px] items-center justify-center text-xs opacity-50">
+                                  Image unavailable
+                                </div>
+                              }
                             />
                           </button>
                         ))}

@@ -68,6 +68,8 @@ const SettingsPanel = ({
   const settings = window.settingsKit.useAppSettings();
   const appInfo = window.settingsKit.useAppInfo();
   const contentRef = React.useRef(null);
+  const navRef = React.useRef(null);
+  const [indicator, setIndicator] = React.useState({ top: 0, height: 0 });
 
   React.useEffect(() => {
     if (SETTINGS_PAGES.some((page) => page.id === initialPage)) {
@@ -81,12 +83,20 @@ const SettingsPanel = ({
 
   const page =
     SETTINGS_PAGES.find((entry) => entry.id === selected) || SETTINGS_PAGES[0];
+
+  // The selection bar slides between categories instead of jumping.
+  React.useLayoutEffect(() => {
+    const active = navRef.current?.querySelector('[aria-current="page"]');
+    if (active) {
+      setIndicator({ top: active.offsetTop, height: active.offsetHeight });
+    }
+  }, [page.id]);
   const pageSettings = {
     ...settings,
     onRestart: () => window.electronAPI.relaunchApp?.(),
   };
 
-  const renderPage = () => {
+  const renderPageContent = () => {
     if (!settings.config) {
       return (
         <div className="space-y-3">
@@ -130,7 +140,21 @@ const SettingsPanel = ({
     }
   };
 
-  const renderNavItem = (item) => {
+  const renderPage = () => {
+    const Safe = window.AtlasSafe;
+    return Safe ? (
+      <Safe
+        name={`settings:${page.id}`}
+        title={`${page.label} settings failed to load`}
+      >
+        {renderPageContent()}
+      </Safe>
+    ) : (
+      renderPageContent()
+    );
+  };
+
+  const renderNavItem = (item, index) => {
     const isActive = item.id === page.id;
     const attention = getSettingsPageAttention(item.id, settings.config);
     return (
@@ -140,15 +164,18 @@ const SettingsPanel = ({
           onClick={() => setSelected(item.id)}
           aria-current={isActive ? "page" : undefined}
           title={attention || item.label}
-          className={`flex w-full items-center gap-3 border-l-2 px-4 py-2.5 text-left text-[13px] transition-colors ${
+          className={`atlas-list-enter group relative flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13px] outline-none transition-colors duration-500 focus-visible:bg-white/5 ${
             isActive
-              ? "border-l-accent bg-selected text-text"
-              : "border-l-transparent text-text/75 hover:bg-white/5 hover:text-text"
+              ? "text-text"
+              : "text-text/75 hover:bg-white/5 hover:text-text"
           }`}
+          style={{ "--atlas-index": index }}
         >
           <span
-            className={`material-symbols-outlined text-[20px] leading-none ${
-              isActive ? "text-accent" : "text-text/55"
+            className={`material-symbols-outlined text-[20px] leading-none transition-[color,transform] duration-500 ${
+              isActive
+                ? "scale-110 text-accent"
+                : "text-text/55 group-hover:translate-x-0.5"
             }`}
           >
             {item.icon}
@@ -168,18 +195,28 @@ const SettingsPanel = ({
         <div className="px-4 pb-3 pt-5 text-[11px] uppercase tracking-[0.18em] text-text/55">
           Settings
         </div>
-        <ul>
-          {SETTINGS_PAGES.filter((item) => !item.group).map(renderNavItem)}
-        </ul>
-        <div className="mx-4 my-3 h-px bg-border/70" />
-        <ul>
-          {SETTINGS_PAGES.filter((item) => item.group === "more").map(
-            renderNavItem,
-          )}
-        </ul>
+        <div ref={navRef} className="relative">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-0 w-full border-l-2 border-l-accent bg-selected transition-[top,height] duration-600 ease-spring"
+            style={{ top: indicator.top, height: indicator.height }}
+          />
+          <ul>
+            {SETTINGS_PAGES.filter((item) => !item.group).map(renderNavItem)}
+          </ul>
+          <div className="mx-4 my-3 h-px bg-border/70" />
+          <ul>
+            {SETTINGS_PAGES.filter((item) => item.group === "more").map(
+              (item, index) => renderNavItem(item, index + 5),
+            )}
+          </ul>
+        </div>
       </nav>
       <div ref={contentRef} className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-4xl px-6 pb-10 pt-6">
+        <div
+          key={page.id}
+          className="atlas-view-enter mx-auto w-full max-w-4xl px-6 pb-10 pt-6"
+        >
           <header className="mb-5 flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="text-2xl font-semibold text-text">{page.label}</h2>

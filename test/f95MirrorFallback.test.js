@@ -161,3 +161,20 @@ test("resolveMirrorWithFallback keeps the first browser check when nothing resol
   assert.equal(result.actionFailure.candidate.host, "mixdrop.co");
   assert.equal(result.lastError.message, "https://datanodes.to/file is down");
 });
+
+test("resolveMirrorWithFallback stops the chain when the download is cancelled", async () => {
+  const prepared = [];
+  const cancelled = new Error("cancelled");
+  const result = await resolveMirrorWithFallback({
+    candidates: [candidate("gofile.io"), candidate("pixeldrain.com")],
+    prepare: async (url) => {
+      prepared.push(url);
+      throw cancelled;
+    },
+    shouldStop: (error) => error === cancelled,
+  });
+
+  assert.equal(result.stopped, true);
+  assert.equal(result.lastError, cancelled);
+  assert.deepEqual(prepared, ["https://gofile.io/file"]);
+});

@@ -19,74 +19,46 @@ const link = (host, order, extra = {}) => ({
   ...extra,
 });
 
-test("describeMirrorLink classifies hosts by how automatable they are", () => {
-  assert.equal(
-    describeMirrorLink(link("pixeldrain.com", 0)).tier,
-    MIRROR_TIERS.AUTO,
-  );
-  assert.equal(
-    describeMirrorLink(link("gofile.io", 0)).tier,
-    MIRROR_TIERS.AUTO,
-  );
-  assert.equal(
-    describeMirrorLink(link("datanodes.to", 0)).tier,
-    MIRROR_TIERS.AUTO,
-  );
-  assert.equal(
-    describeMirrorLink(link("buzzheavier.com", 0)).tier,
-    MIRROR_TIERS.AUTO,
-  );
-  assert.equal(
-    describeMirrorLink(link("drive.google.com", 0)).tier,
-    MIRROR_TIERS.AUTO,
-  );
-  assert.equal(
-    describeMirrorLink(link("mixdrop.co", 0)).tier,
-    MIRROR_TIERS.ASSISTED,
-  );
-  assert.equal(
-    describeMirrorLink(link("uploadhaven.com", 0)).tier,
-    MIRROR_TIERS.ASSISTED,
-  );
-  assert.equal(
-    describeMirrorLink(link("mega.nz", 0)).tier,
-    MIRROR_TIERS.MANUAL,
-  );
-  assert.equal(
-    describeMirrorLink(link("filecrypt.cc", 0)).tier,
-    MIRROR_TIERS.MANUAL,
-  );
-  assert.equal(
-    describeMirrorLink(link("some-new-host.example", 0)).tier,
-    MIRROR_TIERS.ASSISTED,
-  );
+test("describeMirrorLink classifies hosts by the live mirror check", () => {
+  const tierOf = (host) => describeMirrorLink(link(host, 0)).tier;
+
+  for (const host of [
+    "pixeldrain.com",
+    "gofile.io",
+    "drive.google.com",
+    "mega.nz",
+    "mediafire.com",
+    "dropbox.com",
+  ]) {
+    assert.equal(tierOf(host), MIRROR_TIERS.AUTO, host);
+  }
+  for (const host of ["buzzheavier.com", "bzzhr.to", "files.fm"]) {
+    assert.equal(tierOf(host), MIRROR_TIERS.ASSISTED, host);
+  }
+  for (const host of [
+    "datanodes.to",
+    "mixdrop.ag",
+    "krakenfiles.com",
+    "uploadhaven.com",
+    "workupload.com",
+    "send.cm",
+    "filecrypt.cc",
+  ]) {
+    assert.equal(tierOf(host), MIRROR_TIERS.MANUAL, host);
+  }
+  assert.equal(tierOf("some-new-host.example"), MIRROR_TIERS.ASSISTED);
 });
 
-test("describeMirrorLink flags link containers that download from other hosts", () => {
-  assert.equal(
-    describeMirrorLink(link("filecrypt.cc", 0)).redirectsToOtherHosts,
-    true,
-  );
-  assert.equal(
-    describeMirrorLink(link("mega.nz", 0)).redirectsToOtherHosts,
-    false,
-  );
-});
+test("describeMirrorLink follows the host registry for each link", () => {
+  const driveFolder = link("drive.google.com", 0, { support: "browser" });
+  const registryHost = link("fuckingfast.co", 0, { support: "auto" });
+  const unknownHost = link("fuckingslow.example", 0);
 
-test("describeMirrorLink treats direct Pixeldrain lists as browser-only", () => {
-  const listLink = {
-    url: "https://pixeldrain.com/l/abc123",
-    host: "pixeldrain.com",
-    label: "PIXELDRAIN",
-  };
-  const fileLink = {
-    url: "https://pixeldrain.com/u/abc123",
-    host: "pixeldrain.com",
-    label: "PIXELDRAIN",
-  };
-
-  assert.equal(describeMirrorLink(listLink).tier, MIRROR_TIERS.MANUAL);
-  assert.equal(describeMirrorLink(fileLink).tier, MIRROR_TIERS.AUTO);
+  assert.equal(describeMirrorLink(driveFolder).tier, MIRROR_TIERS.MANUAL);
+  assert.equal(describeMirrorLink(registryHost).tier, MIRROR_TIERS.ASSISTED);
+  assert.ok(
+    describeMirrorLink(registryHost).rank < describeMirrorLink(unknownHost).rank,
+  );
 });
 
 test("sortMirrorLinks puts automatic hosts first and browser-only hosts last", () => {
@@ -103,9 +75,9 @@ test("sortMirrorLinks puts automatic hosts first and browser-only hosts last", (
     [
       "pixeldrain.com",
       "gofile.io",
-      "mixdrop.co",
-      "unknown-host.example",
       "mega.nz",
+      "unknown-host.example",
+      "mixdrop.co",
     ],
   );
 });
@@ -134,6 +106,10 @@ test("getMirrorDisplayName uses known labels and falls back to the host token", 
     "HOST.EXAMPLE",
   );
   assert.equal(getMirrorDisplayName({}), "MIRROR");
+  assert.equal(
+    getMirrorDisplayName({ host: "fuckingfast.co", hostLabel: "FuckingFast" }),
+    "FUCKINGFAST",
+  );
 });
 
 test("getVariantPlatformId reads release and compressed variant ids", () => {
@@ -235,14 +211,14 @@ test("pickRecommendedMirror switches to the compressed build when only it is aut
       id: "windows-linux",
       label: "Windows / Linux",
       firstOrder: 0,
-      links: [link("mega.nz", 0)],
+      links: [link("datanodes.to", 0)],
     },
     {
       id: "compressed-windows-linux",
       label: "Compressed Windows / Linux",
       releaseLabel: "Compressed",
       firstOrder: 1,
-      links: [link("mega.nz", 1), link("pixeldrain.com", 2)],
+      links: [link("datanodes.to", 1), link("pixeldrain.com", 2)],
     },
   ];
 
@@ -259,7 +235,7 @@ test("pickRecommendedMirror stays on the first release instead of jumping to ano
       label: "Chapter 1 · Windows",
       releaseLabel: "Chapter 1",
       firstOrder: 0,
-      links: [link("mega.nz", 0)],
+      links: [link("datanodes.to", 0)],
     },
     {
       id: "release-chapter-2-windows",
@@ -273,13 +249,13 @@ test("pickRecommendedMirror stays on the first release instead of jumping to ano
   const recommendation = pickRecommendedMirror({ variants, platform: "win32" });
 
   assert.equal(recommendation.variant.id, "release-chapter-1-windows");
-  assert.equal(recommendation.link.host, "mega.nz");
+  assert.equal(recommendation.link.host, "datanodes.to");
   assert.equal(recommendation.reason, "browser-only");
 });
 
 test("pickRecommendedMirror respects the remembered mirror unless it is browser-only", () => {
   const gofile = link("gofile.io", 1);
-  const mega = link("mega.nz", 2);
+  const mega = link("datanodes.to", 2);
   const variants = [
     {
       id: "windows",
@@ -307,7 +283,7 @@ test("pickRecommendedMirror respects the remembered mirror unless it is browser-
 });
 
 test("pickRecommendedMirror works from a flat link list and handles empty input", () => {
-  const links = [link("mega.nz", 0), link("buzzheavier.com", 1)];
+  const links = [link("datanodes.to", 0), link("buzzheavier.com", 1)];
 
   assert.equal(pickRecommendedMirror({ links }).link.host, "buzzheavier.com");
   assert.equal(pickRecommendedMirror({ variants: [], links: [] }), null);
@@ -335,7 +311,7 @@ test("buildMirrorFallbackChain returns other automatable mirrors of the same bui
 
   assert.deepEqual(
     chain.map((entry) => entry.host),
-    ["gofile.io", "datanodes.to", "mixdrop.co"],
+    ["gofile.io", "mega.nz"],
   );
   assert.deepEqual(
     buildMirrorFallbackChain({ variants, link: primary, limit: 1 }).map(

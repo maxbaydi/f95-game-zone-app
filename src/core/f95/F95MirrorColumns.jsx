@@ -320,7 +320,7 @@ const F95MirrorColumns = ({
         return (
           <section key={releaseGroup.key} className="min-w-0">
             {releaseGroup.releaseLabel && (
-              <div className="mb-3 text-sm font-semibold text-text/90">
+              <div className="atlas-list-enter mb-3 text-sm font-semibold text-text/90">
                 {releaseGroup.releaseLabel}
               </div>
             )}
@@ -331,7 +331,7 @@ const F95MirrorColumns = ({
                   gridTemplateColumns: `repeat(${columnCount}, minmax(8.5rem, 1fr))`,
                 }}
               >
-                {releaseGroup.variants.map((variant) => {
+                {releaseGroup.variants.map((variant, variantIndex) => {
                   const quickLinks = variant.links.filter(
                     (link) => !isBrowserOnlyMirror(link),
                   );
@@ -340,7 +340,10 @@ const F95MirrorColumns = ({
                   return (
                     <section
                       key={`${variant.id}-${variant.label}`}
-                      className="min-w-0 px-3 sm:px-4"
+                      className="atlas-rise-enter min-w-0 px-3 sm:px-4"
+                      style={{
+                        animationDelay: `${Math.min(variantIndex, 8) * 60}ms`,
+                      }}
                     >
                       <div className="border-b border-border/70 pb-2 text-[11px] uppercase tracking-[0.18em] text-text/50">
                         {variant.platformLabel || variant.label}

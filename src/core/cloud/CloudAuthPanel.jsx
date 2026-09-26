@@ -738,14 +738,24 @@ const CloudAuthPanelContent = ({ onClose }) => {
   );
 };
 
+const useCloudAuthModalLayer = (isOpen, props, options) =>
+  window.AtlasMotion?.useModalLayer
+    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+    : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
+
 const CloudAuthPanel = ({
   layout = "panel",
   isOpen = true,
   onClose = null,
 }) => {
   const isModal = layout === "modal";
+  const layer = useCloudAuthModalLayer(isModal && isOpen, null, {
+    onClose: () => onClose?.(),
+    closeOnEscape: isModal,
+    manageFocus: isModal,
+  });
 
-  if (isModal && !isOpen) {
+  if (isModal && !layer.isMounted) {
     return null;
   }
 
@@ -754,13 +764,20 @@ const CloudAuthPanel = ({
   if (isModal) {
     return (
       <div
-        className="fixed inset-0 z-[1750] flex items-center justify-center bg-black/80 p-4"
-        onClick={() => onClose?.()}
+        className="atlas-overlay fixed inset-0 z-[1750] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+        data-state={layer.state}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            onClose?.();
+          }
+        }}
         role="presentation"
       >
         <div
-          className="relative flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-y-auto border border-[#32353c] bg-[#1a1d24] shadow-2xl"
-          onClick={(event) => event.stopPropagation()}
+          ref={layer.dialogRef}
+          tabIndex={-1}
+          className="atlas-dialog relative flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-y-auto border border-[#32353c] bg-[#1a1d24] shadow-2xl outline-none"
+          data-state={layer.state}
           role="dialog"
           aria-modal="true"
           aria-label="Cloud saves"

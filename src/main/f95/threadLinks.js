@@ -1,3 +1,4 @@
+const { getMirrorHostInfo } = require("./hosts");
 const { sortMirrorLinks } = require("../../shared/f95MirrorAutomation");
 
 const SOCIAL_HOST_PATTERNS = [
@@ -41,6 +42,25 @@ const FILE_HOST_PATTERNS = [
   /(^|\.)anonfiles\.com$/i,
   /(^|\.)filecrypt\.cc$/i,
   /(^|\.)files\.fm$/i,
+  /(^|\.)mega\.co\.nz$/i,
+  /(^|\.)mega\.app$/i,
+  /(^|\.)pixeldrain\.(net|dev)$/i,
+  /(^|\.)pixeldra\.in$/i,
+  /(^|\.)(bzzhr\.(co|to)|flashbang\.sh|trashbytes\.net)$/i,
+  /(^|\.)(mixdrp|m1xdrop|mixdropjmk)\./i,
+  /(^|\.)dropboxusercontent\.com$/i,
+  /(^|\.)sharepoint\.com$/i,
+  /(^|\.)(disk\.yandex\.[a-z.]+|disk\.360\.yandex\.ru|yadi\.sk)$/i,
+  /(^|\.)(litter\.)?catbox\.moe$/i,
+  /(^|\.)fileditch(files|stuff)?\.(com|me)$/i,
+  /(^|\.)fuckingfast\.(co|net)$/i,
+  /(^|\.)(racaty\.(io|net|com)|send\.cm|send\.now|hexload\.com|hexupload\.net|usersdrive\.com|drop\.download|dropapk\.to)$/i,
+  /(^|\.)(file-upload\.(org|com)|uploadrar\.com|uploady\.io|dailyuploads\.net|up-load\.io|userupload\.(net|in)|uploadev\.org|filerio\.in)$/i,
+  /(^|\.)(1fichier\.com|alterupload\.com|cjoint\.net|desfichiers\.com|dfichiers\.com|megadl\.fr|mesfichiers\.org|piecejointe\.net|pjointe\.com|tenvoi\.com|dl4free\.com)$/i,
+  /(^|\.)(terabox\.(com|app)|teraboxapp\.com|1024tera(box)?\.com|4funbox\.(com|co)|mirrobox\.com|nephobox\.com|freeterabox\.com|teraboxlink\.com|terasharelink\.com|terafileshare\.com)$/i,
+  /(^|\.)filecrypt\.co$/i,
+  /(^|\.)(rapidgator\.net|rg\.to|nitroflare\.com|nitro\.download|katfile\.com|ddownload\.com|ddl\.to|turbobit\.net|hitfile\.net)$/i,
+  /(^|\.)(multiup\.(io|org|eu)|mirrored\.to|wetransfer\.com|we\.tl)$/i,
 ];
 
 const FILE_HOST_HINT_PATTERNS = [
@@ -62,6 +82,22 @@ const FILE_HOST_HINT_PATTERNS = [
   { pattern: /\bsendspace\b/i, host: "sendspace.com" },
   { pattern: /\bfilecrypt\b/i, host: "filecrypt.cc" },
   { pattern: /\bfiles\.?fm\b/i, host: "files.fm" },
+  { pattern: /\bqiwi\b/i, host: "qiwi.gg" },
+  { pattern: /\b1fichier\b/i, host: "1fichier.com" },
+  { pattern: /\byandex(?:\s*disk)?\b/i, host: "disk.yandex.ru" },
+  { pattern: /\bterabox\b/i, host: "terabox.com" },
+  { pattern: /\bracaty\b/i, host: "racaty.io" },
+  { pattern: /\bnopy\b/i, host: "nopy.to" },
+  { pattern: /\bsend\.?cm\b/i, host: "send.cm" },
+  { pattern: /\bfileditch\b/i, host: "fileditch.com" },
+  { pattern: /\blitterbox\b/i, host: "litter.catbox.moe" },
+  { pattern: /\bfuckingfast\b/i, host: "fuckingfast.co" },
+  { pattern: /\brapidgator\b/i, host: "rapidgator.net" },
+  { pattern: /\bnitroflare\b/i, host: "nitroflare.com" },
+  { pattern: /\bkatfile\b/i, host: "katfile.com" },
+  { pattern: /\bddownload\b/i, host: "ddownload.com" },
+  { pattern: /\bhexupload\b|\bhexload\b/i, host: "hexload.com" },
+  { pattern: /\bone\s+drive\b/i, host: "onedrive.live.com" },
 ];
 
 const NON_DOWNLOAD_SECTION_PATTERNS = [
@@ -333,6 +369,42 @@ function buildVariantSlug(value) {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Friendly host label + support level for a thread link. Masked F95 links are
+ * described by the host they point to (from the masked path or the label).
+ */
+function describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint) {
+  const isF95Attachment =
+    isAllowedF95Mirror && parsedUrl.pathname.includes("/attachments/");
+  if (isF95Attachment) {
+    return getMirrorHostInfo(parsedUrl.href);
+  }
+
+  if (isAllowedF95Mirror) {
+    const maskedInfo = getMirrorHostInfo(parsedUrl.href);
+    if (maskedInfo.masked && maskedInfo.hostId !== "f95-masked") {
+      return maskedInfo;
+    }
+    if (inferredHostHint) {
+      return getMirrorHostInfo(inferredHostHint);
+    }
+    return maskedInfo;
+  }
+
+  return getMirrorHostInfo(parsedUrl.href);
+}
+
+/**
+ * "uploaded to catbox.moe" links point at a host home page, not a file.
+ * @param {URL} parsedUrl
+ */
+function isBareHostUrl(parsedUrl) {
+  const pathname = String(parsedUrl.pathname || "/").replace(/\/+$/, "");
+  const search = String(parsedUrl.search || "").replace(/^\?$/, "");
+  const hash = String(parsedUrl.hash || "").replace(/^#$/, "");
+  return !pathname && !search && !hash;
+}
+
 function classifyThreadDownloadLink(rawLink) {
   const url = cleanText(rawLink?.url);
   if (!url) {
@@ -347,6 +419,9 @@ function classifyThreadDownloadLink(rawLink) {
   }
 
   const hostname = parsedUrl.hostname;
+  if (!/(^|\.)f95zone\.to$/i.test(hostname) && isBareHostUrl(parsedUrl)) {
+    return null;
+  }
   const label = cleanText(rawLink?.label || hostname);
   const lineText = cleanText(rawLink?.lineText || "");
   const contextText = cleanText(rawLink?.contextText || "");
@@ -421,10 +496,14 @@ function classifyThreadDownloadLink(rawLink) {
     return null;
   }
 
+  const hostInfo = describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint);
+
   return {
     url: parsedUrl.href,
     label,
     host: normalizedHost,
+    hostLabel: hostInfo.label || normalizedHost,
+    support: hostInfo.supported,
     lineLabel: variantLabel,
     variantId,
     variantLabel: variantLabel,
