@@ -1,4 +1,18 @@
 const { useState, useEffect } = window.React;
+
+// Non-blocking replacements for window.alert/confirm (core/ui/atlas-ui.js).
+const detailsNotice = (message, type = "info", title = "Game details") =>
+  window.AtlasToast
+    ? window.AtlasToast.show({ type, title, message })
+    : window.alert(message);
+const detailsConfirm = (options) =>
+  window.AtlasUI
+    ? window.AtlasUI.confirm(options)
+    : Promise.resolve(window.confirm(`${options.title}\n\n${options.message}`));
+const detailsAlert = (options) =>
+  window.AtlasUI
+    ? window.AtlasUI.alert(options)
+    : Promise.resolve(window.alert(options.message));
 const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
 
@@ -439,22 +453,34 @@ const GameDetailWindow = () => {
         return;
       }
 
+      const removedTitle = game.title || "This game";
       if (result.warnings?.length) {
-        alert(result.warnings.join("\n"));
+        await detailsAlert({
+          title: `${removedTitle} removed with warnings`,
+          message: result.warnings.join("\n"),
+        });
       } else if (
         deleteModalState.mode === DELETE_GAME_MODES.LIBRARY_ONLY
       ) {
-        alert(
-          "The game was removed from your library. Nothing on this PC was deleted.",
-        );
+        await detailsAlert({
+          title: `${removedTitle} removed`,
+          message:
+            "The game was removed from your library. Nothing on this PC was deleted.",
+        });
       } else if (
         deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
       ) {
-        alert("The game files were removed. Your progress was kept.");
+        await detailsAlert({
+          title: `${removedTitle} deleted`,
+          message: "The game files were removed. Your progress was kept.",
+        });
       } else if (
         deleteModalState.mode === DELETE_GAME_MODES.DELETE_FILES_AND_SAVES
       ) {
-        alert("The game files and saves were removed.");
+        await detailsAlert({
+          title: `${removedTitle} deleted`,
+          message: "The game files and saves were removed.",
+        });
       }
 
       window.electronAPI.closeWindow();
@@ -471,7 +497,7 @@ const GameDetailWindow = () => {
 
   const handleRemoveVersion = async () => {
     if (!selectedVersion) {
-      alert("No version selected.");
+      detailsNotice("Select a version first.", "warning");
       return;
     }
 
@@ -482,10 +508,14 @@ const GameDetailWindow = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Delete version "${versionLabel}" of "${game.title}"?\n\n` +
+    const confirmed = await detailsConfirm({
+      title: `Delete version "${versionLabel}"?`,
+      message:
+        `This removes "${versionLabel}" of "${game.title}". ` +
         `The game entry will remain with ${currentCount - 1} other version(s).`,
-    );
+      confirmLabel: "Delete version",
+      tone: "danger",
+    });
 
     if (!confirmed) {
       return;
@@ -510,13 +540,13 @@ const GameDetailWindow = () => {
           setVersionData({});
         }
 
-        alert(`Version "${versionLabel}" deleted.`);
+        detailsNotice(`Version "${versionLabel}" deleted.`, "success");
       } else {
-        alert("Failed to delete version.");
+        detailsNotice(result?.error || "Failed to delete version.", "error");
       }
     } catch (err) {
       console.error("Error during version/game deletion:", err);
-      alert("An error occurred: " + err.message);
+      detailsNotice(err?.message || "The version could not be deleted.", "error");
     }
   };
 
@@ -665,14 +695,14 @@ const GameDetailWindow = () => {
             <div className="flex absolute top-1 right-2 h-[70px] -webkit-app-region-no-drag">
               <button
                 onClick={minimize}
-                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
                 style={{ pointerEvents: "auto", zIndex: 1000 }}
               >
                 <i className="fas fa-minus fa-xs text-text"></i>
               </button>
               <button
                 onClick={maximize}
-                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
                 style={{ pointerEvents: "auto", zIndex: 1000 }}
               >
                 <i
@@ -685,7 +715,7 @@ const GameDetailWindow = () => {
               </button>
               <button
                 onClick={close}
-                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-200"
+                className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-450"
                 style={{ pointerEvents: "auto", zIndex: 1000 }}
               >
                 <i className="fas fa-times fa-xs text-text"></i>
@@ -708,14 +738,14 @@ const GameDetailWindow = () => {
           <div className="flex absolute top-1 right-2 h-[70px] -webkit-app-region-no-drag">
             <button
               onClick={minimize}
-              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
               style={{ pointerEvents: "auto", zIndex: 1000 }}
             >
               <i className="fas fa-minus fa-xs text-text"></i>
             </button>
             <button
               onClick={maximize}
-              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
               style={{ pointerEvents: "auto", zIndex: 1000 }}
             >
               <i
@@ -728,7 +758,7 @@ const GameDetailWindow = () => {
             </button>
             <button
               onClick={close}
-              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-200"
+              className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-450"
               style={{ pointerEvents: "auto", zIndex: 1000 }}
             >
               <i className="fas fa-times fa-xs text-text"></i>
@@ -1338,4 +1368,13 @@ const root = createRoot(document.getElementById("root")) || {
   render: (component) =>
     ReactDOM.render(component, document.getElementById("root")),
 };
-root.render(<GameDetailWindow />);
+const WindowRootBoundary = window.AtlasErrorBoundary;
+root.render(
+  WindowRootBoundary ? (
+    <WindowRootBoundary name="game-details-window" variant="screen">
+      <GameDetailWindow />
+    </WindowRootBoundary>
+  ) : (
+    <GameDetailWindow />
+  ),
+);

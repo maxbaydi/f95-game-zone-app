@@ -23,22 +23,22 @@ const Appearance = () => {
   }, []);
 
   const handleLoadTheme = () => {
-    alert("Theme loaded. Changes saved.");
+    window.AtlasToast?.success("Theme applied and saved.", { title: "Appearance" });
   };
 
   const handleLoadBanner = async () => {
     try {
       await window.electronAPI.setSelectedBannerTemplate(banner);
-      alert("Banner layout loaded.");
+      window.AtlasToast?.success("Banner layout saved. It applies the next time the library window loads.", { title: "Appearance" });
     } catch (err) {
       console.error("Error loading banner template:", err);
       window.electronAPI.log(`Error loading banner template: ${err.message}`);
-      alert("Failed to load banner template.");
+      window.AtlasToast?.error(err?.message || "The banner template could not be loaded.", { title: "Appearance" });
     }
   };
 
   const handleOpenXamlEditor = () => {
-    alert("XAML Editor is not implemented in this version.");
+    window.AtlasToast?.info("The XAML editor is not available in this version yet.", { title: "Appearance" });
   };
 
   return (

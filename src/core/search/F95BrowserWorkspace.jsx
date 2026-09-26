@@ -111,6 +111,10 @@ const F95BrowserWorkspace = () => {
   const [installError, setInstallError] = useState("");
   const [isInspectingThread, setIsInspectingThread] = useState(false);
   const [isStartingInstall, setIsStartingInstall] = useState(false);
+  const useWorkspaceEscape = window.AtlasMotion?.useEscape || (() => {});
+  useWorkspaceEscape(Boolean(threadInfo) && !isStartingInstall, () =>
+    setThreadInfo(null),
+  );
   const [downloadState, setDownloadState] = useState(null);
   const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
   const [threadInstallState, setThreadInstallState] = useState({
@@ -906,31 +910,86 @@ const F95BrowserWorkspace = () => {
       )}
 
       {installError && (
-        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
-          {installError}
+        <div
+          key={installError}
+          role="alert"
+          className="atlas-shake relative z-10 flex items-center gap-2 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden>
+            error
+          </span>
+          <span className="min-w-0 flex-1">{installError}</span>
         </div>
       )}
 
       {browserError && (
-        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
-          {browserError}
+        <div
+          key={browserError}
+          role="alert"
+          className="atlas-rise-enter relative z-10 flex flex-wrap items-center gap-3 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden>
+            wifi_off
+          </span>
+          <span className="min-w-0 flex-1">{browserError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setBrowserError("");
+              withWebview((webview) => {
+                try {
+                  webview.reload();
+                } catch (error) {
+                  webview.loadURL(F95_SEARCH_URL);
+                }
+              });
+            }}
+            className="inline-flex items-center gap-1 border border-red-200/30 bg-white/5 px-3 py-1 text-xs font-medium text-red-50 transition hover:bg-white/10"
+          >
+            <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+              refresh
+            </span>
+            Reload page
+          </button>
         </div>
       )}
+
+      <div
+        className={`h-[2px] w-full ${
+          browserState.loading ? "atlas-progress-indeterminate atlas-keep-motion" : ""
+        }`}
+        aria-hidden
+      />
 
       <div className="relative flex-1">
         <div ref={hostRef} className="h-full w-full bg-black" />
 
         {!browserError && browserState.loading && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
-            <div className="rounded-xl border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
+          <div className="atlas-fade-enter pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
+            <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
+              <span className="atlas-spinner atlas-keep-motion text-accent" aria-hidden />
               Loading F95...
             </div>
           </div>
         )}
 
         {threadInfo && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6">
-            <div className="max-h-[80vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
+          <div
+            className="atlas-overlay absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 backdrop-blur-sm"
+            data-state="open"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !isStartingInstall) {
+                setThreadInfo(null);
+              }
+            }}
+          >
+            <div
+              className="atlas-dialog max-h-[80vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl"
+              data-state="open"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Thread install"
+            >
               <div className="border-b border-border px-6 py-4">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
                   Thread Install
@@ -957,9 +1016,18 @@ const F95BrowserWorkspace = () => {
               </div>
 
               <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+                {isStartingInstall && (
+                  <div className="atlas-fade-enter mr-auto flex items-center gap-2 text-sm text-text/70">
+                    <span className="atlas-spinner atlas-keep-motion text-accent" aria-hidden />
+                    Resolving the selected mirror…
+                  </div>
+                )}
                 <button
+                  type="button"
                   onClick={() => setThreadInfo(null)}
-                  className="rounded border border-border bg-secondary px-4 py-2 text-sm hover:bg-selected"
+                  disabled={isStartingInstall}
+                  title="Cancel (Esc)"
+                  className="rounded border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-50"
                 >
                   Cancel
                 </button>

@@ -5,35 +5,14 @@ const Settings = () => {
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
+    if (typeof window.electronAPI?.onWindowStateChanged !== "function") {
+      return undefined;
+    }
     window.electronAPI.onWindowStateChanged((state) => {
       setIsMaximized(state === "maximized");
     });
+    return () => window.electronAPI.removeAllListeners?.("window-state-changed");
   }, []);
-
-  const renderContent = () => {
-    switch (selected) {
-      case "Interface":
-        return <window.Interface />;
-      case "Library":
-        return <window.Library />;
-      case "Scan Sources":
-        return <window.ScanSources />;
-      case "Platforms":
-        return <window.Platforms />;
-      case "Emulators":
-        return <window.EmulatorLauncher />;
-      case "Appearance":
-        return <window.Appearance />;
-      case "Metadata":
-        return <window.Metadata />;
-      case "Cloud Saves":
-        return <window.CloudSync />;
-      case "Notifications":
-        return <window.Notifications />;
-      default:
-        return <div className="p-4 text-text">Select a settings category</div>;
-    }
-  };
 
   return (
     <div className="flex h-screen font-sans text-[13px] bg-transparent -webkit-app-region-no-drag">
@@ -43,13 +22,13 @@ const Settings = () => {
       <div className="flex absolute top-1 right-2 h-[70px]">
         <button
           onClick={() => window.electronAPI.minimizeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200 -webkit-app-region-no-drag"
+          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450 -webkit-app-region-no-drag"
         >
           <i className="fas fa-minus text-text"></i>
         </button>
         <button
           onClick={() => window.electronAPI.maximizeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
         >
           <i
             className={
@@ -61,7 +40,7 @@ const Settings = () => {
         </button>
         <button
           onClick={() => window.electronAPI.closeWindow()}
-          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-200"
+          className="w-7 h-7 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-450"
         >
           <i className="fas fa-times text-text"></i>
         </button>
@@ -73,34 +52,18 @@ const Settings = () => {
           <div className="text-center text-accent font-bold text-md mt-4 mb-4 antialiased -webkit-app-region-drag">
             F95LAUNCHER
           </div>
-          <ul>
-            {window.settingsIcons.map((item) => (
-              <>
-                <li
-                  key={item.name}
-                  className={`pt-2 pb-2 pl-4 pr-4 cursor-pointer hover:bg-highlight flex items-center text-text ${selected === item.name ? "bg-selected" : ""} ${item.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                  onClick={() => !item.disabled && setSelected(item.name)}
-                >
-                  <svg
-                    className="w-4 h-4 object-contain text-text mr-2"
-                    fill="currentColor"
-                    viewBox={item.viewBox}
-                  >
-                    <path d={item.path} />
-                  </svg>
-                  <span>{item.name}</span>
-                </li>
-                {item.name === "Emulators" && (
-                  <hr className="mx-2 my-2 border-border border-1" />
-                )}
-              </>
-            ))}
-          </ul>
+          {window.SettingsNav ? (
+            <window.SettingsNav selected={selected} onSelect={setSelected} />
+          ) : null}
         </div>
         {/* Settings Content */}
         <div className="flex-1 bg-secondary p-4 overflow-y-auto">
-          <h2 className="text-2xl font-bold mb-4 text-text">{selected}</h2>
-          {renderContent()}
+          <div key={selected} className="atlas-view-enter">
+            <h2 className="text-2xl font-bold mb-4 text-text">{selected}</h2>
+            {window.SettingsSectionContent ? (
+              <window.SettingsSectionContent name={selected} />
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
@@ -108,4 +71,13 @@ const Settings = () => {
 };
 
 const root = window.ReactDOM.createRoot(document.getElementById("root"));
-root.render(<Settings />);
+const SettingsRootBoundary = window.AtlasErrorBoundary;
+root.render(
+  SettingsRootBoundary ? (
+    <SettingsRootBoundary name="settings-window" variant="screen">
+      <Settings />
+    </SettingsRootBoundary>
+  ) : (
+    <Settings />
+  ),
+);

@@ -9,51 +9,125 @@ const ATLAS_BANNER_IMAGE_H = Math.round(
 const ATLAS_BANNER_FOOTER_H = 100;
 const ATLAS_BANNER_HEIGHT = ATLAS_BANNER_IMAGE_H + ATLAS_BANNER_FOOTER_H;
 
-const bannerStyles = `
-  .banner-root {
-    perspective: 1000px;
-    transform-style: preserve-3d;
-    transform: skewX(0.001deg);
-    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.38s ease;
+// Card hover/entrance styles live in assets/css/main.css (.banner-root).
+
+const recentGameLaunches = new Map();
+const GAME_LAUNCH_DEDUPE_MS = 4000;
+
+// Shared launcher used by cards, the details panel and context menus: it
+// ignores accidental double clicks and reports failures as toasts.
+const launchAtlasGame = async ({ execPath, recordId, title }) => {
+  const normalizedPath = String(execPath || "").trim();
+  const toast = window.AtlasUI?.toast;
+  const label = title || "the game";
+
+  if (!normalizedPath) {
+    toast?.error("This version has no executable selected.", {
+      title: `Can't start ${label}`,
+    });
+    return { success: false };
   }
-  .banner-root:hover {
-    transform: rotateX(5deg) translateY(-6px) scale(1.02);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px #3d4450, 0 0 20px rgba(102, 192, 244, 0.12);
+
+  const lastLaunchAt = recentGameLaunches.get(normalizedPath) || 0;
+  if (Date.now() - lastLaunchAt < GAME_LAUNCH_DEDUPE_MS) {
+    return { success: true, deduped: true };
   }
-  .banner-root::before {
-    content: '';
-    position: absolute;
-    z-index: -1;
-    top: 5%;
-    left: 5%;
-    width: 90%;
-    height: 90%;
-    background: rgba(0,0,0,0.45);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.45);
-    transform-origin: top center;
-    transform: skewX(0.001deg);
-    transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.08s, opacity 0.45s ease 0.08s;
-    border-radius: 0;
-  }
-  .banner-root:hover::before {
-    opacity: 0.55;
-    transform: rotateX(5deg) translateY(-6px) scale(1.02);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .banner-root,
-    .banner-root::before {
-      transition: none;
+  recentGameLaunches.set(normalizedPath, Date.now());
+
+  const toastId = toast?.loading(`Starting ${label}…`);
+  try {
+    const result = await window.electronAPI.launchGame({
+      execPath: normalizedPath,
+      extension: normalizedPath.split(".").pop().toLowerCase() || "",
+      recordId: recordId ?? null,
+    });
+
+    if (!result?.success) {
+      recentGameLaunches.delete(normalizedPath);
+      toast?.update(toastId, {
+        type: "error",
+        title: `Can't start ${label}`,
+        message:
+          result?.error ||
+          "Could not start this game. Check the installed files and try again.",
+      });
+      return result || { success: false };
     }
-    .banner-root:hover {
-      transform: none;
-      box-shadow: none;
-    }
-    .banner-root:hover::before {
-      transform: none;
-      opacity: 0.5;
-    }
+
+    toast?.update(toastId, {
+      type: "success",
+      title: `${label} is starting`,
+      message: "Have fun!",
+      duration: 2500,
+    });
+    return result;
+  } catch (error) {
+    recentGameLaunches.delete(normalizedPath);
+    toast?.update(toastId, {
+      type: "error",
+      title: `Can't start ${label}`,
+      message: window.AtlasUI?.errorMessage(error) || String(error),
+    });
+    return { success: false, error };
   }
-`;
+};
+
+window.launchAtlasGame = launchAtlasGame;
+
+let bannerTemplateCache = { status: "idle", component: null, promise: null };
+
+const loadBannerTemplate = () => {
+  if (bannerTemplateCache.promise) {
+    return bannerTemplateCache.promise;
+  }
+
+  bannerTemplateCache.status = "loading";
+  bannerTemplateCache.promise = (async () => {
+    try {
+      const selectedTemplate =
+        await window.electronAPI.getSelectedBannerTemplate?.();
+      if (selectedTemplate && selectedTemplate !== "Default") {
+        const templateModule = await import(
+          `./data/templates/banner/${selectedTemplate}.js`
+        );
+        bannerTemplateCache.component = templateModule.default || null;
+      }
+    } catch (error) {
+      console.error("Failed to load banner template:", error);
+      window.electronAPI?.log?.(
+        `Failed to load banner template: ${error?.message || error}`,
+      );
+      bannerTemplateCache.component = null;
+    }
+    bannerTemplateCache.status = "ready";
+    return bannerTemplateCache.component;
+  })();
+
+  return bannerTemplateCache.promise;
+};
+
+const useBannerTemplate = () => {
+  const [component, setComponent] = useState(() =>
+    bannerTemplateCache.status === "ready" ? bannerTemplateCache.component : null,
+  );
+
+  useEffect(() => {
+    if (bannerTemplateCache.status === "ready") {
+      return undefined;
+    }
+    let active = true;
+    loadBannerTemplate().then((loaded) => {
+      if (active && loaded) {
+        setComponent(() => loaded);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return component;
+};
 
 const getEngineBackgroundColor = (engine) => {
   const engineColors = {
@@ -146,14 +220,15 @@ function AtlasF95BannerCard({
     ? "Remove from Favorites"
     : "Add to Favorites";
 
+  const [isFavoritePulse, setIsFavoritePulse] = useState(false);
+
   const handlePrimaryAction = (e) => {
     e.stopPropagation();
     if (canPlay && launchable?.exec_path) {
-      const ext = launchable.exec_path.split(".").pop().toLowerCase() || "";
-      window.electronAPI.launchGame({
+      void launchAtlasGame({
         execPath: launchable.exec_path,
-        extension: ext,
         recordId: game.record_id,
+        title: displayTitle,
       });
       return;
     }
@@ -165,11 +240,47 @@ function AtlasF95BannerCard({
 
   const handleFavoriteAction = (e) => {
     e.stopPropagation();
+    setIsFavoritePulse(true);
     onToggleFavorite?.(game);
   };
 
+  const handleCardKeyDown = (e) => {
+    if (e.target !== e.currentTarget) {
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelect?.();
+    }
+  };
+
   const thumbChildren = [];
-  if (game.banner_url) {
+  const bannerPlaceholder = React.createElement(
+    "div",
+    {
+      key: "ph",
+      className:
+        "flex h-full w-full items-center justify-center bg-gradient-to-br from-tertiary/60 to-primary text-text/35",
+    },
+    React.createElement(
+      "span",
+      { className: "material-symbols-outlined text-[34px]", "aria-hidden": true },
+      "sports_esports",
+    ),
+  );
+  if (game.banner_url && window.AtlasImage) {
+    thumbChildren.push(
+      React.createElement(window.AtlasImage, {
+        key: "img",
+        src: game.banner_url,
+        alt: displayTitle,
+        loading: "lazy",
+        draggable: false,
+        className: "banner-thumb-img h-full w-full object-cover",
+        fallback: bannerPlaceholder,
+      }),
+    );
+  } else if (game.banner_url) {
     thumbChildren.push(
       React.createElement("img", {
         key: "img",
@@ -179,12 +290,7 @@ function AtlasF95BannerCard({
       }),
     );
   } else {
-    thumbChildren.push(
-      React.createElement("div", {
-        key: "ph",
-        className: "w-full h-full bg-primary",
-      }),
-    );
+    thumbChildren.push(bannerPlaceholder);
   }
   if (game.isUpdateAvailable) {
     thumbChildren.push(
@@ -194,7 +300,7 @@ function AtlasF95BannerCard({
           key: "upd",
           type: "button",
           className:
-            "absolute top-2 right-2 z-30 px-2 py-0.5 border border-yellow-400/90 text-yellow-300 text-[10px] pointer-events-auto bg-black/45 backdrop-blur-sm",
+            "atlas-badge-enter absolute top-2 right-2 z-30 px-2 py-0.5 border border-yellow-400/90 text-yellow-300 text-[10px] pointer-events-auto bg-black/45 backdrop-blur-sm transition-colors hover:bg-yellow-400/20 hover:text-yellow-100",
           onClick: (e) => {
             e.stopPropagation();
             onUpdateGame?.(game);
@@ -210,9 +316,9 @@ function AtlasF95BannerCard({
     {
       key: "play",
       type: "button",
-      className: `inline-flex shrink-0 items-center justify-center border px-1.5 py-0.5 text-[10px] font-semibold pointer-events-auto transition-colors ${
+      className: `inline-flex shrink-0 items-center justify-center gap-1 border px-1.5 py-0.5 text-[10px] font-semibold pointer-events-auto transition-[background-color,box-shadow,color] ${
         canPlay || canInstall
-          ? "border-accent/70 bg-accent/85 text-onAccent hover:bg-accent"
+          ? "border-accent/70 bg-accent/85 text-onAccent hover:bg-accent hover:shadow-glow-accent"
           : "cursor-not-allowed border-border/60 bg-surfaceMuted text-white/55"
       }`,
       disabled: !canPlay && !canInstall,
@@ -220,6 +326,14 @@ function AtlasF95BannerCard({
       "aria-label": primaryActionLabel,
       title: primaryActionLabel,
     },
+    React.createElement(
+      "span",
+      {
+        className: "material-symbols-outlined text-[13px] leading-none",
+        "aria-hidden": true,
+      },
+      canPlay ? "play_arrow" : canInstall ? "download" : "block",
+    ),
     primaryActionLabel,
   );
 
@@ -317,16 +431,19 @@ function AtlasF95BannerCard({
     "div",
     {
       className:
-        "relative flex flex-col cursor-pointer overflow-hidden banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border",
+        "relative flex flex-col cursor-pointer overflow-hidden banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-accent",
       style: {
         width: ATLAS_BANNER_WIDTH,
         height: ATLAS_BANNER_HEIGHT,
       },
+      role: "button",
+      tabIndex: 0,
+      "aria-label": `${displayTitle}${game.isUpdateAvailable ? " (update available)" : ""}`,
       onClick: onSelect,
+      onKeyDown: handleCardKeyDown,
       onContextMenu: onContextMenu,
     },
     [
-      React.createElement("style", { key: "banner-styles" }, bannerStyles),
       React.createElement(
         "div",
         {
@@ -352,8 +469,6 @@ function AtlasF95BannerCard({
 window.AtlasF95BannerCard = AtlasF95BannerCard;
 
 const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
-  const [template, setTemplate] = useState(null);
-
   const handleContextMenu = (e) => {
     e.preventDefault();
     if (!game) {
@@ -489,50 +604,13 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
     window.electronAPI.showContextMenu(menuTemplate);
   };
 
-  const DefaultBannerTemplate = (props) =>
-    React.createElement(AtlasF95BannerCard, {
-      ...props,
-      onContextMenu: handleContextMenu,
-    });
+  const CustomTemplate = useBannerTemplate();
 
-  useEffect(() => {
-    const loadTemplate = async () => {
-      try {
-        const selectedTemplate =
-          await window.electronAPI.getSelectedBannerTemplate();
-        if (selectedTemplate && selectedTemplate !== "Default") {
-          try {
-            const templateModule = await import(
-              `./data/templates/banner/${selectedTemplate}.js`
-            );
-            setTemplate(() => templateModule.default);
-          } catch (importErr) {
-            console.error(
-              `Failed to import template ${selectedTemplate}:`,
-              importErr,
-            );
-            window.electronAPI.log(
-              `Failed to import template ${selectedTemplate}: ${importErr.message}`,
-            );
-            setTemplate(() => DefaultBannerTemplate);
-          }
-        } else {
-          setTemplate(() => DefaultBannerTemplate);
-        }
-      } catch (err) {
-        console.error("Error loading banner template:", err);
-        window.electronAPI.log(`Error loading banner template: ${err.message}`);
-        setTemplate(() => DefaultBannerTemplate);
-      }
-    };
-    loadTemplate();
-  }, [game.banner_url]);
-
-  if (!template) {
-    return React.createElement("div", null, "Loading template...");
+  if (!game) {
+    return null;
   }
 
-  return React.createElement(template, {
+  return React.createElement(CustomTemplate || AtlasF95BannerCard, {
     game,
     onSelect,
     onUpdateGame,

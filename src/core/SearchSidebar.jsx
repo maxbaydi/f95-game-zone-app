@@ -69,7 +69,7 @@ const SearchSidebar = ({
         newVals = newVals.filter((v) => v !== value);
       } else {
         if (group === "tags" && newVals.length >= 10) {
-          alert("Max 10 tags allowed.");
+          window.AtlasToast?.warning("You can filter by up to 10 tags at once.", { title: "Tag filter" });
           return prev;
         }
         newVals.push(value);
