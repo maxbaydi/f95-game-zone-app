@@ -693,7 +693,7 @@ const Importer = () => {
       <div className="flex-1 p-4 bg-secondary overflow-y-auto">
         {view === "source" && (
           <div className="flex items-center justify-center h-full">
-            <div className="flex flex-col space-y-4 max-w-3xl w-full">
+            <div className="atlas-view-enter flex flex-col space-y-4 max-w-3xl w-full">
               <h2 className="text-2xl text-center font-semibold">
                 Choose How To Add Games
               </h2>
@@ -709,11 +709,12 @@ const Importer = () => {
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                   }
-                  className={`text-left rounded border border-border p-4 transition-colors ${
+                  style={{ "--atlas-index": 0 }}
+                  className={`atlas-card-enter text-left rounded border border-border p-4 transition-[background-color,border-color,box-shadow,transform] duration-500 ${
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                       ? "bg-primary/40 opacity-50 cursor-not-allowed"
-                      : "bg-primary hover:bg-selected"
+                      : "bg-primary hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                   }`}
                 >
                   <div className="text-lg font-semibold mb-2">
@@ -734,7 +735,8 @@ const Importer = () => {
 
                 <button
                   onClick={openFolderImportSettings}
-                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                  style={{ "--atlas-index": 1 }}
+                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import From Folder
@@ -750,7 +752,8 @@ const Importer = () => {
 
                 <button
                   onClick={startSteamImport}
-                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                  style={{ "--atlas-index": 2 }}
+                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import Steam Games

@@ -21,8 +21,8 @@ const SettingsToggle = ({ checked, onChange, label, disabled = false }) => (
     }`}
   >
     <span
-      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 bg-white shadow transition-[left,background-color] duration-500 ease-spring ${
-        checked ? "left-[22px]" : "left-[3px] bg-text/70"
+      className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 shadow transition-[left,background-color] duration-500 ease-spring ${
+        checked ? "left-[22px] bg-white" : "left-[3px] bg-text/60"
       }`}
     />
   </button>
