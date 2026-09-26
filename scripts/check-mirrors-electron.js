@@ -245,15 +245,16 @@ async function main() {
     console.log(`imported ${await importCookies(session, cookies)} cookie(s) into ${F95_AUTH_PARTITION}`);
     options.cookies = "";
   }
-  const f95Cookies = await session.cookies.get({ url: "https://f95zone.to/" });
+  // Cookies attached explicitly, manual redirects via net.request — the
+  // same wrapper the app uses (see src/main/f95/electronSession.js).
+  const resolverSession = createElectronResolverSession(session);
+  const f95Cookies = await resolverSession.cookies.get({ url: "https://f95zone.to/" });
   console.log(
     `session: ${F95_AUTH_PARTITION} in ${app.getPath("userData")} (${f95Cookies.length} F95 cookies, logged in: ${f95Cookies.some((cookie) => cookie.name === "xf_user")}), user agent: ${session.getUserAgent()}`,
   );
 
   const code = await core.run(options, {
-    // Cookies attached explicitly, manual redirects via net.request — the
-    // same wrapper the app uses (see src/main/f95/electronSession.js).
-    session: createElectronResolverSession(session),
+    session: resolverSession,
     userAgent: session.getUserAgent(),
     hooks: noBrowserStep.value
       ? {}

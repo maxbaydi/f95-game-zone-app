@@ -492,12 +492,36 @@ function sevenZipPath() {
 }
 
 /**
- * `7za t` on zip/7z/rar; resolves with {ok, detail}.
+ * The bundled 7za has no RAR codec (the app extracts RAR through `unrar`).
+ * Use a full 7-Zip or WinRAR's UnRAR when the machine has one.
  */
-function testArchive(filePath) {
-  const binary = sevenZipPath();
+function rarTesterPath() {
+  const candidates = [
+    process.env.SEVEN_ZIP_PATH,
+    "C:/Program Files/7-Zip/7z.exe",
+    "C:/Program Files (x86)/7-Zip/7z.exe",
+    "/usr/bin/7z",
+    "/usr/local/bin/7z",
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
+}
+
+/**
+ * `7z t` on zip/7z/rar; resolves with {ok, detail, skipped}.
+ * @param {string} filePath
+ * @param {string} archiveType
+ */
+function testArchive(filePath, archiveType = "") {
+  const binary = archiveType === "rar" ? rarTesterPath() : sevenZipPath();
   if (!binary || !fs.existsSync(binary)) {
-    return Promise.resolve({ ok: false, detail: "7-Zip binary unavailable" });
+    return Promise.resolve({
+      ok: true,
+      skipped: true,
+      detail:
+        archiveType === "rar"
+          ? "not tested: no RAR-capable 7-Zip/UnRAR on this machine"
+          : "not tested: 7-Zip binary unavailable",
+    });
   }
   return new Promise((resolve) => {
     const child = cp.spawn(binary, ["t", "-y", "-p-", filePath], {
@@ -590,10 +614,13 @@ async function verifyDownloadedFile(row, result, options, log, resume) {
     });
     row.archive = payload.installKind === "archive" ? payload.archiveType : `file:${payload.normalizedExtension}`;
     if (payload.installKind === "archive" && ["zip", "7z", "rar"].includes(payload.archiveType)) {
-      const verdict = await testArchive(result.targetPath);
+      const verdict = await testArchive(result.targetPath, payload.archiveType);
       log(`archive test (${payload.archiveType}): ${verdict.detail}`);
       if (!verdict.ok) {
         problems.push(`archive: ${verdict.detail}`);
+      }
+      if (verdict.skipped) {
+        row.archive = `${payload.archiveType}?`;
       }
     }
   } catch (error) {
