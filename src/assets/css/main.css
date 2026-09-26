@@ -356,7 +356,7 @@ details[open]::details-content {
 /* ---- Presence states (driven by AtlasMotion.usePresence) ---------------- */
 
 .atlas-overlay[data-state="open"] {
-  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-overlay[data-state="closed"] {
@@ -365,7 +365,7 @@ details[open]::details-content {
 }
 
 .atlas-dialog[data-state="open"] {
-  animation: atlas-dialog-in var(--atlas-dur-slow) var(--atlas-ease-out) both;
+  animation: atlas-dialog-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
 }
 
 .atlas-dialog[data-state="closed"] {
@@ -374,7 +374,7 @@ details[open]::details-content {
 }
 
 .atlas-drawer-right[data-state="open"] {
-  animation: atlas-drawer-in-right var(--atlas-dur-slow) var(--atlas-ease-out) both;
+  animation: atlas-drawer-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
 }
 
 .atlas-drawer-right[data-state="closed"] {
@@ -383,7 +383,7 @@ details[open]::details-content {
 }
 
 .atlas-panel-right[data-state="open"] {
-  animation: atlas-panel-in-right var(--atlas-dur-slow) var(--atlas-ease-out) both;
+  animation: atlas-panel-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
 }
 
 .atlas-panel-right[data-state="closed"] {
@@ -393,7 +393,7 @@ details[open]::details-content {
 
 .atlas-popover[data-state="open"] {
   transform-origin: bottom right;
-  animation: atlas-popover-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-popover-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-popover[data-state="closed"] {
@@ -403,7 +403,7 @@ details[open]::details-content {
 }
 
 .atlas-dock[data-state="open"] {
-  animation: atlas-dock-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-dock-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-dock[data-state="closed"] {
@@ -414,24 +414,24 @@ details[open]::details-content {
 /* ---- One-shot entrance helpers ------------------------------------------ */
 
 .atlas-view-enter {
-  animation: atlas-view-in var(--atlas-dur-slow) var(--atlas-ease-out) both;
+  animation: atlas-view-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
 }
 
 .atlas-fade-enter {
-  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-rise-enter {
-  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-card-enter {
-  animation: atlas-card-in var(--atlas-dur-slow) var(--atlas-ease-out) both;
+  animation: atlas-card-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
   animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
 }
 
 .atlas-list-enter {
-  animation: atlas-slide-in-left var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-slide-in-left var(--atlas-dur-base) var(--atlas-ease-out) backwards;
   animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
 }
 
@@ -444,7 +444,7 @@ details[open]::details-content {
 }
 
 .atlas-badge-enter {
-  animation: atlas-badge-in var(--atlas-dur-base) var(--atlas-ease-spring) both;
+  animation: atlas-badge-in var(--atlas-dur-base) var(--atlas-ease-spring) backwards;
 }
 
 .atlas-attention {
@@ -523,7 +523,7 @@ details[open]::details-content {
 
 /* Generic rise/sink presence used by status docks and inline notices. */
 .atlas-rise[data-state="open"] {
-  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
 }
 
 .atlas-rise[data-state="closed"] {
