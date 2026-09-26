@@ -28,6 +28,7 @@ const { createMirrorActionFlow } = require(path.join(ROOT, "src/main/f95/mirrorA
 const { F95_AUTH_PARTITION } = require(path.join(ROOT, "src/main/f95/session"));
 const { MirrorActionRequiredError } = require(path.join(ROOT, "src/main/f95/hosts/common"));
 const { sanitizeDownloadFileName } = require(path.join(ROOT, "src/main/f95/transferOptions"));
+const { createElectronResolverSession } = require(path.join(ROOT, "src/main/f95/electronSession"));
 
 function takeOption(argv, name, fallback) {
   const index = argv.indexOf(name);
@@ -250,7 +251,9 @@ async function main() {
   );
 
   const code = await core.run(options, {
-    session,
+    // Cookies attached explicitly, manual redirects via net.request — the
+    // same wrapper the app uses (see src/main/f95/electronSession.js).
+    session: createElectronResolverSession(session),
     userAgent: session.getUserAgent(),
     hooks: noBrowserStep.value
       ? {}
