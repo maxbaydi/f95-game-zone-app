@@ -23,8 +23,8 @@ Last updated: 2026-09-26
 
 ### 2026-09-27 — Установка из файла, скачанного в своём браузере (обход Turnstile/Adscore)
 
-- Status: in_progress
-- Progress: 90%
+- Status: done
+- Progress: 100%
 - ТЗ coverage: закрывает установку/обновление игр из интерфейса для зеркал, которые не проходятся во встроенном окне
 
 What was done:
@@ -41,9 +41,15 @@ How:
 - Копия вместо переноса: файл выбирал пользователь, а обработанный пакет после установки удаляется — перенос уничтожил бы пользовательскую копию. Проверка файла выполняется до смены статуса, чтобы неверный выбор не ломал карточку.
 - Тесты: `test/manualInstall.test.js` (9), `test/downloadsStoreAction.test.js` (+2); `npm run lint`, `npm run typecheck`, `npm test` (370) — зелёные; JSX панели проверен Babel (react+env).
 
+Проверка в приложении (2026-09-27, `npm run dev`, логин пользователя, клики через Orca):
+
+- Shattered Grace → DataNodes → окно шага закрыто → Failed с блоком «Stuck on this page?» → Open in my browser (Chrome открыл страницу, карточка «Your turn / Waiting for your file») → Pick downloaded file с `notes.txt` → тост «Pick the game archive or installer…», карточка без изменений → выбор `ShatteredGrace-0.1.11.1-win.zip` (222 МБ) → Installing → Installed, Show in library, библиотека 63 → 64, оригинал не тронут, папка загрузок приложения пуста.
+- Попутно: устаревшая строка «needs a quick step in the browser window…» в F95-обозревателе теперь снимается, как только прогресс переходит в downloading/installing/completed/error/cancelled.
+
 What is left:
 
-- Ручная проверка в приложении: Mixdrop/DataNodes → Open in my browser → скачать → Pick downloaded file → Installed; ошибки выбора (`.txt`, `.crdownload`); Cancel в режиме ожидания файла.
+- Cancel в режиме «Waiting for your file» и «Open the link again» проверены только кодом/тестами стора, не кликами.
+- Mixdrop в приложении: тот же путь (Adscore не даёт скачать во встроенном окне), живой клик не повторялся.
 
 ### 2026-09-26 — Живая проверка зеркал, Gofile, шаг в браузере с автопродолжением
 

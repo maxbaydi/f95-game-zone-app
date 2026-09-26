@@ -172,6 +172,16 @@ const F95BrowserWorkspace = () => {
 
     window.electronAPI.onF95DownloadProgress((progressState) => {
       setDownloadState(progressState || null);
+      // The "queued" / "your turn in the browser window" note is superseded
+      // as soon as the progress line reports the transfer itself, otherwise
+      // it lingers under a finished or failed download.
+      if (
+        ["downloading", "installing", "completed", "error", "cancelled"].includes(
+          progressState?.phase,
+        )
+      ) {
+        setStatusMessage("");
+      }
     });
 
     return () => {
