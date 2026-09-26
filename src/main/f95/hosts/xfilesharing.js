@@ -7,6 +7,7 @@ const {
   MirrorError,
   buildAbsoluteUrl,
   cancelResponseBody,
+  getHeader,
   createActionRequiredError,
   createHttpError,
   detectCaptchaKind,
@@ -435,15 +436,33 @@ async function submitXfsForm(ctx, form, html, pageUrl, hostLabel) {
     });
   }
 
-  return ctx.fetch(form.action, {
+  // Redirects after the POST are handled by hand: Chromium's fetch (Electron
+  // session.fetch) fails a cross-origin redirect of a POST with
+  // net::ERR_FAILED, and the Location is all we need anyway.
+  const postResponse = await ctx.fetch(form.action, {
     method: "POST",
-    redirect: "follow",
+    redirect: "manual",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       origin: new URL(pageUrl).origin,
       referer: pageUrl,
     },
     body,
+  });
+  const status = Number(postResponse.status) || 0;
+  const location = status >= 300 && status < 400 ? getHeader(postResponse, "location") : "";
+  if (!location) {
+    return postResponse;
+  }
+  await cancelResponseBody(postResponse);
+  const nextUrl = buildAbsoluteUrl(pageUrl, location);
+  if (!nextUrl) {
+    return postResponse;
+  }
+  return ctx.fetch(nextUrl, {
+    method: "GET",
+    redirect: "follow",
+    headers: { referer: pageUrl, range: "bytes=0-0" },
   });
 }
 
@@ -699,7 +718,8 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
 
     if (isFileResponse(response)) {
       await cancelResponseBody(response);
-      return ctx.continueOrFinal(pageUrl);
+      // A file reached through a form/redirect keeps the page as referer.
+      return finalizeFromPage(pageUrl, currentUrl === rawUrl && pageUrl === rawUrl ? pageUrl : currentUrl);
     }
 
     const html = await readResponseText(response);

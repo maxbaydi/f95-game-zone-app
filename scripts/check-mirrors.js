@@ -656,6 +656,7 @@ async function tryBrowserStep(error, entry, host, options, session, adapters, lo
         platformHint: options.platform,
         requestTimeoutMs: options.timeout,
         retry: { attempts: 1 },
+        probeTarget: true,
         onStatus: (text) => log(text),
       }),
   });

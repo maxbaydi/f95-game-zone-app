@@ -1813,6 +1813,9 @@ function startF95MirrorActionFlow(context, actionUrl) {
         platformHint: context.request.platformHint,
         retry: { attempts: 1 },
         requestTimeoutMs: 20000,
+        // Only end the step once the file itself is served (Cloudflare needs
+        // a few seconds in the window before its clearance cookie exists).
+        probeTarget: true,
       }),
     onStatus: (text) => {
       if (context.actionFlow !== flow) {
@@ -4629,7 +4632,7 @@ ipcMain.handle("find-steam-id", async (event, title, developer) => {
 });
 
 ipcMain.handle("start-steam-scan", async (event, params) => {
-  return await startSteamScan(db, params, event);
+  return await startSteamScan(getDb(), params, event);
 });
 
 ipcMain.handle("select-steam-directory", async () => {

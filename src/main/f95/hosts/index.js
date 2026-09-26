@@ -15,10 +15,13 @@ const {
   DownloadCancelledError,
   MirrorActionRequiredError,
   MirrorError,
+  cancelResponseBody,
   createActionRequiredError,
+  createHttpError,
   createResolverContext,
   detectCaptchaKind,
   hostMatchesDomain,
+  isFileResponse,
   looksLikeCloudflareChallenge,
   normalizeHostname,
   safeParseUrl,
@@ -765,10 +768,63 @@ function interpretMirrorTransferError(prepared, info) {
 }
 
 /**
+ * Fetch one byte of a resolved direct target. Used by the browser-step flow:
+ * a resolver may answer without touching the network (or before Cloudflare
+ * finished its check), so the step must only end once the file is really
+ * served. Walls become action-required errors pointing at the mirror link.
+ * @param {ReturnType<typeof createResolverContext>} ctx
+ * @param {ReturnType<typeof buildPreparedDownload>} prepared
+ */
+async function probePreparedTarget(ctx, prepared) {
+  const actionUrl = prepared.requestedUrl || prepared.resolvedUrl;
+  let response;
+  try {
+    response = await ctx.fetch(prepared.resolvedUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: { ...(prepared.headers || {}), range: "bytes=0-0" },
+    });
+  } catch (error) {
+    if (error instanceof MirrorActionRequiredError && error.fromChallenge) {
+      throw createActionRequiredError(
+        prepared.hostLabel,
+        actionUrl,
+        "asks for a browser check (captcha / Cloudflare) before downloading.",
+        "captcha_required",
+      );
+    }
+    throw error;
+  }
+
+  const status = Number(response.status) || 0;
+  await cancelResponseBody(response);
+  if (status === 404 || status === 410) {
+    throw new MirrorError(
+      `${prepared.hostLabel || "The mirror"} says the file does not exist (HTTP ${status}). Pick another mirror.`,
+      { code: "not_found", status },
+    );
+  }
+  if (status === 416) {
+    return;
+  }
+  if (!response.ok) {
+    throw createHttpError(response, prepared.hostLabel);
+  }
+  if (!isFileResponse(response)) {
+    throw createActionRequiredError(
+      prepared.hostLabel,
+      actionUrl,
+      "answers with a web page instead of the file. Finish the step in the browser window.",
+      "captcha_required",
+    );
+  }
+}
+
+/**
  * Resolve `rawUrl` into a prepared download.
  * @param {any} session Electron session (or a stub with `fetch`)
  * @param {string} rawUrl
- * @param {{signal?: AbortSignal, onStatus?: (text: string) => void, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>, platformHint?: string, hostOptions?: Record<string, any>, retry?: {attempts?: number, baseDelayMs?: number, maxDelayMs?: number}, requestTimeoutMs?: number}} [options]
+ * @param {{signal?: AbortSignal, onStatus?: (text: string) => void, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>, platformHint?: string, hostOptions?: Record<string, any>, retry?: {attempts?: number, baseDelayMs?: number, maxDelayMs?: number}, requestTimeoutMs?: number, probeTarget?: boolean}} [options]
  */
 async function prepareMirrorDownload(session, rawUrl, options = {}) {
   const ctx = createResolverContext({
@@ -780,7 +836,11 @@ async function prepareMirrorDownload(session, rawUrl, options = {}) {
     options: options.hostOptions || {},
     requestTimeoutMs: options.requestTimeoutMs,
   });
-  return resolveMirrorTarget(ctx, rawUrl, options.retry || {});
+  const prepared = await resolveMirrorTarget(ctx, rawUrl, options.retry || {});
+  if (options.probeTarget && prepared.transfer === "direct") {
+    await probePreparedTarget(ctx, prepared);
+  }
+  return prepared;
 }
 
 module.exports = {
@@ -793,5 +853,6 @@ module.exports = {
   interpretMirrorTransferError,
   isKnownMirrorHost,
   prepareMirrorDownload,
+  probePreparedTarget,
   resolveMirrorTarget,
 };
