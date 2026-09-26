@@ -1781,6 +1781,7 @@ module.exports = {
   parseCountdownLandingConfig,
   parseF95ThreadTitle,
   prepareF95DownloadUrl,
+  resolveMaskedF95Url,
   resolveCountdownLandingDownloadUrl,
   resolveGofileUrl,
   resolveGoogleDriveUrl,

@@ -159,6 +159,12 @@
       success: false,
       error: "Desktop only",
     }),
+    startF95BrowserHandoff: p({
+      success: false,
+      error: "Desktop only",
+    }),
+    cancelF95BrowserHandoff: p({ success: false, error: "Desktop only" }),
+    onF95InstallAttempt: listenUnsub,
     addAtlasMapping: p({}),
     findF95Id: () => Promise.resolve(null),
     getAtlasData: () => Promise.resolve(null),

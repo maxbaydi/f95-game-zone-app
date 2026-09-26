@@ -4528,3 +4528,40 @@ Impact on overall progress:
 
 - publishes pending mirror compatibility work with regression coverage and explicit verification limits
 - preserves existing local-library and save-sync behavior
+
+## 2026-09-26 — Mirror picker: automation tiers, one-click recommendation, auto-fallback and browser handoff
+
+What was done:
+
+- classified every known file host by how far F95Launcher can automate it:
+  - `auto` — Pixeldrain, Buzzheavier, Gofile, Datanodes, Google Drive, Catbox;
+  - `assisted` (`Auto*`) — Mixdrop, Uploadhaven, Mediafire, Workupload, Krakenfiles, Vikingfile, Dropbox, OneDrive and unknown hosts;
+  - `manual` (`Browser`) — MEGA, Filecrypt and Pixeldrain lists
+- mirrors inside each build column are now ordered auto → assisted → manual; browser-only hosts sit below an `In browser` divider with a muted style and a badge
+- the install/update dialogs open with a `Recommended` card: the build for the current OS from the first release in the thread, on the best automatable host (or the mirror the user installed from last time), with a one-click `Install via HOST` button, the steps that will happen and the backup mirrors
+- the full mirror grid moved behind `Choose another build or mirror`, with a tier legend
+- installs automatically fall back to up to three other automatable mirrors of the same build; live attempt progress is streamed to the dialog, and a switch is reported to the user
+- browser-only mirrors (and hosts that ask for a check) arm a "browser handoff": the mirror page opens, the user presses Download, and the file is caught in the F95 session and installed like an automatic download; the Downloads panel shows a `your turn` entry with `Stop waiting`
+- remembered mirror preferences now store the displayed mirror host and build (`variantId`) instead of the resolved CDN host
+
+How it was implemented:
+
+- `src/shared/f95MirrorAutomation.js` (main + renderer): host profiles, tiers, sorting, platform-aware recommendation and fallback chain
+- `src/main/f95/mirrorFallback.js`: ordered mirror candidates and the resolve loop; an F95 masked-link captcha stops the chain, host-specific checks do not
+- `src/main/f95/browserHandoffs.js`: waiting handoffs per thread with a 60 minute expiry; a browser download is attributed only to a handoff of the same host brand (link containers accept any host)
+- `src/main.js`: recommendation in `inspect-f95-thread`, fallback loop plus `f95-install-attempt` events in `install-f95-thread`, new `start-f95-browser-handoff` / `cancel-f95-browser-handoff` IPC, download progress events carry the download id
+- `src/main/f95/downloadsStore.js`: `waiting` status and `remove()`
+- renderer: `F95MirrorColumns.jsx` (badges, picker, recommended card, attempt log), `F95UpdateModal.jsx`, `F95BrowserWorkspace.jsx`, `DownloadsPanel.jsx`, `App.jsx`
+
+Checks:
+
+- `npm run lint`, `npm run typecheck`
+- `npm test`: 235 pass; the 5 failures are environment-only and also fail on the base commit in this Linux container (Windows path resolution, missing 7-Zip binary, Windows-path library fixtures)
+- rendered the update dialog (recommended, expanded, live attempts, browser handoff, all-mirrors-failed) and the Downloads panel in Chromium with the built Tailwind CSS; no console errors
+
+What remains / manual verification steps:
+
+- in Electron on Windows: install a thread whose recommended host is Pixeldrain/Gofile and confirm one-click install
+- force a failing first mirror and confirm the dialog shows the switch and the install continues from the backup mirror
+- pick a MEGA mirror, press Download on the MEGA page and confirm the file is installed; also confirm `Stop waiting` removes the entry
+- live provider behavior was not exercised; the tier list reflects the resolvers that exist in `downloadSupport.js`

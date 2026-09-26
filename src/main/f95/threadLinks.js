@@ -1,3 +1,5 @@
+const { sortMirrorLinks } = require("../../shared/f95MirrorAutomation");
+
 const SOCIAL_HOST_PATTERNS = [
   /(^|\.)twitter\.com$/i,
   /(^|\.)x\.com$/i,
@@ -474,8 +476,10 @@ function normalizeThreadDownloadLinks(rawLinks) {
   const variants = [...variantMap.values()]
     .map((variant) => ({
       ...variant,
-      links: dedupeLinksByHost(
-        [...variant.links].sort((left, right) => left.order - right.order),
+      links: sortMirrorLinks(
+        dedupeLinksByHost(
+          [...variant.links].sort((left, right) => left.order - right.order),
+        ),
       ),
     }))
     .sort((left, right) => {

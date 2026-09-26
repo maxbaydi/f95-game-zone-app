@@ -30,10 +30,20 @@ const createDefaultF95UpdateModalState = () => ({
   isInstalling: false,
   error: "",
   captchaUrl: "",
+  actionKind: "",
+  handoff: null,
   game: null,
   thread: null,
   selectedLinkUrl: "",
 });
+
+const useF95InstallAttemptsHook =
+  window.useF95InstallAttempts ||
+  (() => ({
+    attemptEvents: [],
+    beginAttempts: () => {},
+    resetAttempts: () => {},
+  }));
 
 const DELETE_GAME_MODES = window.DeleteGameModes || {
   LIBRARY_ONLY: "library_only",
@@ -288,6 +298,11 @@ const App = () => {
   const [f95UpdateModal, setF95UpdateModal] = useState(
     createDefaultF95UpdateModalState,
   );
+  const {
+    attemptEvents: f95UpdateAttemptEvents,
+    beginAttempts: beginF95UpdateAttempts,
+    resetAttempts: resetF95UpdateAttempts,
+  } = useF95InstallAttemptsHook();
   const [deleteGameModal, setDeleteGameModal] = useState(
     createDefaultDeleteGameModalState,
   );
@@ -415,6 +430,21 @@ const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handoffId = f95UpdateModal.handoff?.id;
+    if (!f95UpdateModal.isOpen || !handoffId) {
+      return;
+    }
+
+    const handoffItem = f95Downloads.items.find(
+      (item) => item.id === handoffId,
+    );
+    if (handoffItem && handoffItem.status !== "waiting") {
+      setDownloadsPanelOpen(true);
+      closeF95UpdateModal();
+    }
+  }, [f95Downloads.items, f95UpdateModal.isOpen, f95UpdateModal.handoff]);
+
   const handleSiteFilterChange = (filters) => {
     setSiteSearchFilters(filters);
   };
@@ -448,6 +478,7 @@ const App = () => {
   };
 
   const closeF95UpdateModal = () => {
+    resetF95UpdateAttempts();
     setF95UpdateModal(createDefaultF95UpdateModalState());
   };
 
@@ -560,6 +591,8 @@ const App = () => {
   };
 
   const handleGameUpdate = async (game) => {
+    resetF95UpdateAttempts();
+
     if (!game?.siteUrl) {
       setF95UpdateModal({
         ...createDefaultF95UpdateModalState(),
@@ -571,14 +604,10 @@ const App = () => {
     }
 
     setF95UpdateModal({
+      ...createDefaultF95UpdateModalState(),
       isOpen: true,
       isLoading: true,
-      isInstalling: false,
-      error: "",
-      captchaUrl: "",
       game,
-      thread: null,
-      selectedLinkUrl: "",
     });
 
     try {
@@ -588,52 +617,141 @@ const App = () => {
 
       if (!payload?.success) {
         setF95UpdateModal({
+          ...createDefaultF95UpdateModalState(),
           isOpen: true,
-          isLoading: false,
-          isInstalling: false,
           error: payload?.error || "Failed to inspect the live F95 thread.",
-          captchaUrl: "",
           game,
-          thread: null,
-          selectedLinkUrl: "",
         });
         return;
       }
 
-      const selectedLinkUrl =
-        payload.preferredLinkUrl || payload.links?.[0]?.url || "";
-
       setF95UpdateModal({
+        ...createDefaultF95UpdateModalState(),
         isOpen: true,
-        isLoading: false,
-        isInstalling: false,
-        error: "",
-        captchaUrl: "",
         game,
         thread: payload,
-        selectedLinkUrl,
+        selectedLinkUrl:
+          payload.preferredLinkUrl || payload.links?.[0]?.url || "",
       });
     } catch (error) {
       console.error("Failed to prepare F95 update:", error);
       setF95UpdateModal({
+        ...createDefaultF95UpdateModalState(),
         isOpen: true,
-        isLoading: false,
-        isInstalling: false,
         error: error.message || "Failed to prepare the update.",
-        captchaUrl: "",
         game,
-        thread: null,
-        selectedLinkUrl: "",
       });
+    }
+  };
+
+  const getSelectedF95UpdateLink = (modalState) =>
+    modalState.thread?.links?.find(
+      (link) => link.url === modalState.selectedLinkUrl,
+    ) || null;
+
+  const buildF95UpdateInstallPayload = (modalState, link) => {
+    const variant = window.f95MirrorUi?.findVariant?.(
+      modalState.thread?.variants,
+      modalState.thread?.links,
+      link.url,
+    );
+    return {
+      threadUrl: modalState.thread.threadUrl,
+      title:
+        modalState.thread.title ||
+        modalState.game.displayTitle ||
+        modalState.game.title,
+      creator:
+        modalState.thread.creator ||
+        modalState.game.displayCreator ||
+        modalState.game.creator,
+      version:
+        modalState.thread.version || modalState.game.latestVersion || "",
+      downloadLabel: link.label,
+      downloadUrl: link.url,
+      mirrorHost: link.host || "",
+      variantId: link.variantId || variant?.id || "",
+    };
+  };
+
+  const openF95BrowserHandoffWindow = async (hostName, actionUrl) => {
+    const result = await window.electronAPI.openF95BrowserUrl({
+      url: actionUrl,
+      title: `${hostName} download`,
+    });
+
+    if (!result?.success) {
+      setF95UpdateModal((previous) => ({
+        ...previous,
+        error:
+          result?.error || "F95Launcher could not open the mirror page.",
+      }));
+    }
+  };
+
+  const startF95UpdateBrowserHandoff = async () => {
+    const modalState = f95UpdateModalRef.current;
+    const selectedLink = getSelectedF95UpdateLink(modalState);
+    if (!selectedLink || !modalState.thread || !modalState.game) {
+      return;
+    }
+
+    const hostName =
+      window.getF95MirrorDisplayName?.(selectedLink) || "the mirror";
+    setF95UpdateModal((previous) => ({
+      ...previous,
+      isInstalling: true,
+      error: "",
+      captchaUrl: "",
+      actionKind: "",
+    }));
+
+    try {
+      const result = await window.electronAPI.startF95BrowserHandoff(
+        buildF95UpdateInstallPayload(modalState, selectedLink),
+      );
+      if (!result?.success) {
+        setF95UpdateModal((previous) => ({
+          ...previous,
+          isInstalling: false,
+          error: result?.error || "Failed to open the mirror page.",
+        }));
+        return;
+      }
+
+      setF95UpdateModal((previous) => ({
+        ...previous,
+        isInstalling: false,
+        handoff: {
+          id: result.handoffId,
+          hostName,
+          actionUrl: result.actionUrl || selectedLink.url,
+        },
+      }));
+      await openF95BrowserHandoffWindow(
+        hostName,
+        result.actionUrl || selectedLink.url,
+      );
+    } catch (error) {
+      console.error("Failed to start browser download:", error);
+      setF95UpdateModal((previous) => ({
+        ...previous,
+        isInstalling: false,
+        error: error.message || "Failed to open the mirror page.",
+      }));
+    }
+  };
+
+  const reopenF95UpdateHandoff = () => {
+    const handoff = f95UpdateModalRef.current.handoff;
+    if (handoff?.actionUrl) {
+      void openF95BrowserHandoffWindow(handoff.hostName, handoff.actionUrl);
     }
   };
 
   const queueF95UpdateInstall = async (downloadUrlOverride = "") => {
     const modalState = f95UpdateModalRef.current;
-    const selectedLink =
-      modalState.thread?.links?.find(
-        (link) => link.url === modalState.selectedLinkUrl,
-      ) || null;
+    const selectedLink = getSelectedF95UpdateLink(modalState);
 
     if (!selectedLink || !modalState.thread || !modalState.game) {
       setF95UpdateModal((previous) => ({
@@ -643,32 +761,40 @@ const App = () => {
       return;
     }
 
+    if (
+      !downloadUrlOverride &&
+      window.f95MirrorUi?.isBrowserOnly?.(selectedLink)
+    ) {
+      await startF95UpdateBrowserHandoff();
+      return;
+    }
+
     setF95UpdateModal((previous) => ({
       ...previous,
       isInstalling: true,
       error: "",
       captchaUrl: "",
+      actionKind: "",
+      handoff: null,
     }));
+    beginF95UpdateAttempts(modalState.thread.threadUrl);
 
     try {
       const result = await window.electronAPI.installF95Thread({
-        threadUrl: modalState.thread.threadUrl,
-        title:
-          modalState.thread.title ||
-          modalState.game.displayTitle ||
-          modalState.game.title,
-        creator:
-          modalState.thread.creator ||
-          modalState.game.displayCreator ||
-          modalState.game.creator,
-        version:
-          modalState.thread.version || modalState.game.latestVersion || "",
-        downloadLabel: selectedLink.label,
+        ...buildF95UpdateInstallPayload(modalState, selectedLink),
         downloadUrl: downloadUrlOverride || selectedLink.url,
+        fallbackLinks:
+          window.f95MirrorUi?.buildFallbackLinks?.(
+            modalState.thread,
+            selectedLink,
+          ) || [],
       });
 
       if (!result?.success) {
         if (result?.code === "captcha_required") {
+          const actionHostName = window.getF95MirrorDisplayName?.({
+            host: result?.actionHost || selectedLink.host,
+          });
           setF95UpdateModal((previous) => ({
             ...previous,
             isInstalling: false,
@@ -676,6 +802,15 @@ const App = () => {
               result?.error ||
               "This mirror needs captcha confirmation before F95Launcher can continue.",
             captchaUrl: result?.actionUrl || selectedLink.url,
+            actionKind: result?.actionKind || "captcha",
+            handoff: result?.handoffId
+              ? {
+                  id: result.handoffId,
+                  hostName: actionHostName || "the mirror",
+                  actionUrl: result?.actionUrl || selectedLink.url,
+                  passive: true,
+                }
+              : null,
           }));
           return;
         }
@@ -689,6 +824,19 @@ const App = () => {
       }
 
       setDownloadsPanelOpen(true);
+      if (result.fellBack) {
+        // Keep the attempt log visible for a moment so the switch is visible.
+        setF95UpdateModal((previous) => ({
+          ...previous,
+          isInstalling: false,
+        }));
+        window.setTimeout(() => {
+          if (f95UpdateModalRef.current.thread === modalState.thread) {
+            closeF95UpdateModal();
+          }
+        }, 1600);
+        return;
+      }
       closeF95UpdateModal();
     } catch (error) {
       console.error("Failed to queue game update:", error);
@@ -854,7 +1002,7 @@ const App = () => {
 
     const result = await window.electronAPI.openF95BrowserUrl({
       url: targetUrl,
-      title: "F95 Mirror Verification",
+      title: "Mirror verification",
     });
 
     if (!result?.success) {
@@ -2560,6 +2708,13 @@ const App = () => {
         items={f95Downloads.items}
         activeCount={f95Downloads.activeCount}
         onClose={() => setDownloadsPanelOpen(false)}
+        onCancelWaiting={(item) =>
+          window.electronAPI
+            .cancelF95BrowserHandoff({ id: item.id })
+            .catch((error) =>
+              console.error("Failed to stop waiting for download:", error),
+            )
+        }
       />
 
       <window.F95UpdateModal
@@ -2570,6 +2725,11 @@ const App = () => {
         isInstalling={f95UpdateModal.isInstalling}
         error={f95UpdateModal.error}
         captchaUrl={f95UpdateModal.captchaUrl}
+        actionKind={f95UpdateModal.actionKind}
+        handoff={
+          f95UpdateModal.handoff?.passive ? null : f95UpdateModal.handoff
+        }
+        attemptEvents={f95UpdateAttemptEvents}
         selectedLinkUrl={f95UpdateModal.selectedLinkUrl}
         onSelectLink={(selectedLinkUrl) =>
           setF95UpdateModal((previous) => ({
@@ -2578,6 +2738,8 @@ const App = () => {
           }))
         }
         onSolveCaptcha={openF95CaptchaWindow}
+        onOpenInBrowser={startF95UpdateBrowserHandoff}
+        onReopenHandoff={reopenF95UpdateHandoff}
         onConfirm={confirmF95Update}
         onClose={closeF95UpdateModal}
       />
