@@ -54,6 +54,14 @@ It is still safety-first, not a blind merge engine. If local and cloud copies di
 
 When a mirror requires captcha confirmation, the app now keeps that flow resumable instead of dumping the user into a dead end.
 
+## Interface runtime
+
+- Every renderer window loads React, Babel, fonts and icons from `src/assets/vendor`, so the app starts without network access (see `src/assets/vendor/README.md` for versions).
+- `src/core/ui/atlas-ui.js` is the framework-free layer loaded first in each window: boot splash with a recoverable error screen, global error capture (logged to the main process), toasts, confirm/alert dialogs, an Escape-key stack, ripple/press feedback and the offline notice.
+- `src/core/ui/atlas-react.js` adds the React helpers: `usePresence`/`useModalLayer` for enter/exit animations, `useEscape`, `useBusyAction` and error boundaries (`AtlasErrorBoundary`, `AtlasSafe`) that keep a failing panel from blanking the window.
+- Motion tokens live in `src/assets/css/main.css` (400–700 ms, expo-out easing). Settings → Interface → *Interface animations* switches between System, Full, Reduced and Off; the choice applies instantly to every window.
+- The main process reloads crashed renderers and offers a recovery dialog for hung windows (`src/main/windowResilience.js`); `config.ini` is written atomically (`src/main/atomicFile.js`).
+
 ## Development
 
 ```powershell
