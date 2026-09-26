@@ -5,7 +5,6 @@ const {
   MirrorError,
   assertNotSplitArchive,
   cancelResponseBody,
-  createActionRequiredError,
   createHttpError,
   normalizeHostname,
   normalizeText,
@@ -20,9 +19,22 @@ const HOST_LABEL = "Gofile";
 const GOFILE_CLIENT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const GOFILE_CLIENT_LANGUAGE = "en-US";
+/**
+ * Legacy website token from the pre-2025 frontend. Kept as a cheap second
+ * attempt; the real token is computed with GOFILE_WT_SALT (see below).
+ */
 const GOFILE_STATIC_WEBSITE_TOKEN = "4fd6sg89d7s6";
+/**
+ * Salt of the current handshake: the frontend ships an obfuscated
+ * `/js/wt.obf.js` whose `generateWT(accountToken)` returns
+ * sha256(`${userAgent}::${language}::${accountToken}::${floor(now/14400)}::${salt}`).
+ * Verified against the live script on 2026-09-26 (see
+ * test/fixtures/hosts/gofile/README.md).
+ */
+const GOFILE_WT_SALT = "12af056dacea0b";
 const GOFILE_WT_WINDOW_SECONDS = 14400;
 const GOFILE_ACCOUNT_TTL_MS = 6 * 60 * 60 * 1000;
+const GOFILE_ACCOUNT_COOKIE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const GOFILE_RATE_LIMIT_RETRY_MS = 15000;
 
 /** @type {WeakMap<object, {token: string, createdAt: number}>} */
@@ -176,12 +188,15 @@ async function syncGofileGuestAccount(ctx, token) {
 
   if (!response.ok) {
     await cancelResponseBody(response);
+    if (response.status === 429) {
+      throw createGofileRateLimitError(response);
+    }
     throw new MirrorError(
       `Gofile account sync failed with HTTP ${response.status}.`,
       {
         code: "http_error",
         status: response.status,
-        retryable: response.status === 429 || response.status >= 500,
+        retryable: response.status >= 500,
       },
     );
   }
@@ -197,37 +212,44 @@ async function syncGofileGuestAccount(ctx, token) {
   return payload.data;
 }
 
-async function fetchGofileWebsiteToken(ctx) {
+/**
+ * A guest account previously stored in the session jar (survives app
+ * restarts). Gofile rate-limits account creation per IP, so reusing one
+ * matters for users who install several games in a row.
+ * @param {any} ctx
+ */
+async function readStoredGofileAccountToken(ctx) {
+  if (!ctx?.session?.cookies?.get) {
+    return "";
+  }
   try {
-    const response = await ctx.fetch("https://gofile.io/dist/js/config.js", {
-      method: "GET",
-      headers: { "user-agent": GOFILE_CLIENT_USER_AGENT },
+    const cookies = await ctx.session.cookies.get({
+      url: "https://gofile.io/",
+      name: "accountToken",
     });
+    const cookie = (cookies || []).find((entry) => String(entry?.value || "").trim());
+    return cookie ? String(cookie.value).trim() : "";
+  } catch {
+    return "";
+  }
+}
 
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
-    }
-
-    const js = await response.text();
-    const wtMatch = js.match(
-      /\bwebsiteToken\s*[:=]\s*["']([a-zA-Z0-9_-]+)["']/,
-    );
-    if (wtMatch) {
-      return { token: wtMatch[1], salt: "" };
-    }
-
-    const saltMatch = js.match(/\bsalt\s*[:=]\s*["']([a-zA-Z0-9_-]+)["']/);
-    if (saltMatch) {
-      return { token: "", salt: saltMatch[1] };
-    }
-
-    return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
-  } catch (error) {
-    if (error?.code === "cancelled") {
-      throw error;
-    }
-    return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
+async function storeGofileAccountToken(ctx, token) {
+  if (!ctx?.session?.cookies?.set) {
+    return;
+  }
+  try {
+    await ctx.session.cookies.set({
+      url: "https://gofile.io",
+      name: "accountToken",
+      value: token,
+      domain: ".gofile.io",
+      path: "/",
+      secure: true,
+      expirationDate: Math.floor(Date.now() / 1000) + GOFILE_ACCOUNT_COOKIE_TTL_SECONDS,
+    });
+  } catch {
+    // Best-effort cookie injection for CDN downloads.
   }
 }
 
@@ -242,36 +264,43 @@ async function getGofileAccountToken(ctx, options = {}) {
     return cached.token;
   }
 
-  const guestToken = await createGofileGuestToken(ctx);
-  const account = await syncGofileGuestAccount(ctx, guestToken);
+  let account = null;
+  const storedToken = options.forceRefresh ? "" : await readStoredGofileAccountToken(ctx);
+  if (storedToken) {
+    try {
+      account = await syncGofileGuestAccount(ctx, storedToken);
+    } catch (error) {
+      if (error?.code === "cancelled" || error?.code === "rate_limited") {
+        throw error;
+      }
+      account = null;
+    }
+  }
+  if (!account) {
+    const guestToken = await createGofileGuestToken(ctx);
+    account = await syncGofileGuestAccount(ctx, guestToken);
+  }
+
   gofileAccountCache.set(cacheKey, {
     token: account.token,
     createdAt: Date.now(),
   });
-
-  if (ctx.session?.cookies?.set) {
-    try {
-      await ctx.session.cookies.set({
-        url: "https://gofile.io",
-        name: "accountToken",
-        value: account.token,
-        domain: ".gofile.io",
-      });
-    } catch {
-      // Best-effort cookie injection for CDN downloads.
-    }
-  }
-
+  await storeGofileAccountToken(ctx, account.token);
   return account.token;
 }
 
-function computeWebsiteToken(wtInfo, accountToken) {
-  return wtInfo.token
-    ? wtInfo.token
-    : generateGofileWebsiteToken(accountToken, wtInfo.salt, {
-        userAgent: GOFILE_CLIENT_USER_AGENT,
-        language: GOFILE_CLIENT_LANGUAGE,
-      });
+/**
+ * Website token for the content API. A caller may pin the salt through
+ * `ctx.options.gofileWebsiteTokenSalt` when Gofile rotates it.
+ * @param {any} ctx
+ * @param {string} accountToken
+ */
+function computeWebsiteToken(ctx, accountToken) {
+  const salt = String(ctx?.options?.gofileWebsiteTokenSalt || GOFILE_WT_SALT);
+  return generateGofileWebsiteToken(accountToken, salt, {
+    userAgent: GOFILE_CLIENT_USER_AGENT,
+    language: GOFILE_CLIENT_LANGUAGE,
+  });
 }
 
 async function fetchGofileContents(ctx, contentId, accountToken, websiteToken) {
@@ -385,12 +414,31 @@ async function resolveGofileTarget(ctx, rawUrl) {
   }
 
   let accountToken = await getGofileAccountToken(ctx);
-  let wtInfo = await fetchGofileWebsiteToken(ctx);
-  let websiteToken = computeWebsiteToken(wtInfo, accountToken);
+  let websiteToken = computeWebsiteToken(ctx, accountToken);
   let refreshed = false;
   let triedStaticToken = false;
   let lastFailure = "";
   let payload = null;
+
+  /**
+   * Token rejected: try the legacy static token first (no extra API calls),
+   * then a fresh guest account. Creating accounts is rate-limited by Gofile,
+   * so it is the last resort.
+   */
+  const rotateCredentials = async () => {
+    if (!triedStaticToken && websiteToken !== GOFILE_STATIC_WEBSITE_TOKEN) {
+      triedStaticToken = true;
+      websiteToken = GOFILE_STATIC_WEBSITE_TOKEN;
+      return true;
+    }
+    if (!refreshed) {
+      refreshed = true;
+      accountToken = await getGofileAccountToken(ctx, { forceRefresh: true });
+      websiteToken = computeWebsiteToken(ctx, accountToken);
+      return true;
+    }
+    return false;
+  };
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const response = await fetchGofileContents(
@@ -407,18 +455,24 @@ async function resolveGofileTarget(ctx, rawUrl) {
     }
 
     if (status === 401 || status === 403) {
-      await cancelResponseBody(response);
-      lastFailure = "auth";
-      if (!triedStaticToken && websiteToken !== GOFILE_STATIC_WEBSITE_TOKEN) {
-        triedStaticToken = true;
-        websiteToken = GOFILE_STATIC_WEBSITE_TOKEN;
-        continue;
+      // Gofile answers 401 with a JSON body ("error-notPremium") when the
+      // website token is wrong; inspect it before rotating credentials.
+      const errorPayload = await readResponseJson(response);
+      const errorStatus = String(errorPayload?.status || "");
+      if (errorStatus === "error-notFound") {
+        throw new MirrorError("This Gofile mirror no longer exists.", {
+          code: "not_found",
+          status,
+        });
       }
-      if (!refreshed) {
-        refreshed = true;
-        accountToken = await getGofileAccountToken(ctx, { forceRefresh: true });
-        wtInfo = await fetchGofileWebsiteToken(ctx);
-        websiteToken = computeWebsiteToken(wtInfo, accountToken);
+      if (/password/i.test(errorStatus)) {
+        throw new MirrorError(
+          "This Gofile mirror is password-protected, which F95Launcher cannot install automatically. Pick another mirror.",
+          { code: "password_required" },
+        );
+      }
+      lastFailure = errorStatus === "error-notPremium" ? "notPremium" : "auth";
+      if (await rotateCredentials()) {
         continue;
       }
       break;
@@ -445,16 +499,7 @@ async function resolveGofileTarget(ctx, rawUrl) {
 
     if (payloadStatus === "error-notPremium") {
       lastFailure = "notPremium";
-      if (!refreshed) {
-        refreshed = true;
-        accountToken = await getGofileAccountToken(ctx, { forceRefresh: true });
-        wtInfo = await fetchGofileWebsiteToken(ctx);
-        websiteToken = computeWebsiteToken(wtInfo, accountToken);
-        continue;
-      }
-      if (!triedStaticToken && websiteToken !== GOFILE_STATIC_WEBSITE_TOKEN) {
-        triedStaticToken = true;
-        websiteToken = GOFILE_STATIC_WEBSITE_TOKEN;
+      if (await rotateCredentials()) {
         continue;
       }
       break;
@@ -497,10 +542,9 @@ async function resolveGofileTarget(ctx, rawUrl) {
   }
 
   if (lastFailure === "notPremium") {
-    throw createActionRequiredError(
-      HOST_LABEL,
-      rawUrl,
-      "only allows this mirror from its website right now (premium-only API response).",
+    throw new MirrorError(
+      "Gofile rejected the download handshake (error-notPremium): the website token formula probably changed. Update F95Launcher or download from the Gofile page in the browser.",
+      { code: "access_denied", retryable: false, actionUrl: rawUrl },
     );
   }
 
@@ -535,6 +579,7 @@ async function resolveGofileTarget(ctx, rawUrl) {
 module.exports = {
   GOFILE_CLIENT_USER_AGENT,
   GOFILE_STATIC_WEBSITE_TOKEN,
+  GOFILE_WT_SALT,
   HOST_LABEL,
   collectGofileFiles,
   extractGofileContentId,

@@ -447,7 +447,10 @@ const MIRROR_HOSTS = [
     label: "Direct file host",
     support: "auto",
     domains: ["uguu.se", "qu.ax", "0x0.st", "pomf2.lain.la", "pomf.lain.la"],
-    resolve: null,
+    // qu.ax serves a landing page (`/<id>`) with the real file at `/x/<id>.ext`;
+    // the generic landing parser handles both that and plain direct files.
+    resolve: (ctx, url) =>
+      resolveGenericLandingTarget(ctx, url, { hostLabel: "Direct file host" }),
   },
   ...XFILESHARING_HOSTS.map((host) => ({
     ...host,

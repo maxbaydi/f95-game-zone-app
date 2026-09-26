@@ -16,7 +16,13 @@
  *
  * Options:
  *   --file <path>           links, one per line (# comments, "url  # note")
+ *   --thread <url>          F95 thread: check every mirror of its starter post
+ *                           (repeatable; needs --cookies for masked links)
+ *   --all-variants          with --thread: check every platform variant, not
+ *                           only the one matching --platform
  *   --cookies <path>        Netscape cookies.txt (F95 login for masked links)
+ *   --jar <path>            JSON cookie jar persisted between runs (keeps the
+ *                           Gofile guest account, Cloudflare clearances, ...)
  *   --out <dir>             download directory (default: <tmp>/f95-check-mirrors)
  *   --keep                  keep downloaded files (default: delete after checks)
  *   --only <hostId[,id2]>   only check links of these host ids (see --list-hosts)
@@ -27,6 +33,9 @@
  *   --timeout <ms>          per-request timeout (default 30000)
  *   --user-agent <ua>       override the browser identity (match cf_clearance)
  *   --list-hosts            print the host registry and exit
+ *   --dry-run               list the links that would be checked and exit
+ *   --accept-any            PASS non-game payloads too (public test files);
+ *                           HTML/empty payloads still FAIL
  *
  * Exit code: 0 when every link is PASS or an expected ACTION_REQUIRED
  * (browser-only host), 1 when any link FAILs or an automatic host asks for a
@@ -57,8 +66,14 @@ const { createCookieJarSession, parseNetscapeCookies } = require(
   path.join(ROOT, "src/main/f95/cookieJar"),
 );
 const { MIRROR_HOSTS } = require(path.join(ROOT, "src/main/f95/hosts"));
-const { isHtmlLikeContentType } = require(
-  path.join(ROOT, "src/main/f95/hosts/common"),
+const {
+  extractAnchors,
+  isHtmlLikeContentType,
+  looksLikeCloudflareChallenge,
+  stripHtmlTags,
+} = require(path.join(ROOT, "src/main/f95/hosts/common"));
+const { normalizeThreadDownloadLinks } = require(
+  path.join(ROOT, "src/main/f95/threadLinks"),
 );
 
 // Defaults of the app's Library settings (importDownloadedF95Package).
@@ -89,7 +104,10 @@ function parseArgs(argv) {
   const options = {
     urls: [],
     file: "",
+    threads: [],
+    allVariants: false,
     cookies: "",
+    jar: "",
     out: "",
     keep: false,
     only: [],
@@ -100,6 +118,8 @@ function parseArgs(argv) {
     timeout: 30000,
     userAgent: "",
     listHosts: false,
+    dryRun: false,
+    acceptAny: false,
     help: false,
   };
 
@@ -118,8 +138,19 @@ function parseArgs(argv) {
         options.file = takeValue(index, argument);
         index += 1;
         break;
+      case "--thread":
+        options.threads.push(takeValue(index, argument));
+        index += 1;
+        break;
+      case "--all-variants":
+        options.allVariants = true;
+        break;
       case "--cookies":
         options.cookies = takeValue(index, argument);
+        index += 1;
+        break;
+      case "--jar":
+        options.jar = takeValue(index, argument);
         index += 1;
         break;
       case "--out":
@@ -168,6 +199,12 @@ function parseArgs(argv) {
       case "--list-hosts":
         options.listHosts = true;
         break;
+      case "--dry-run":
+        options.dryRun = true;
+        break;
+      case "--accept-any":
+        options.acceptAny = true;
+        break;
       case "--help":
       case "-h":
         options.help = true;
@@ -209,6 +246,101 @@ function readLinksFile(filePath) {
     entries.push({ url, note: notePart.join(" #").trim(), expect });
   }
   return entries;
+}
+
+const THREAD_BLOCK_TAG_PATTERN =
+  /<\/?(?:div|p|li|ul|ol|table|tbody|tr|td|th|blockquote|section|article|hr|h[1-6])\b[^>]*>/gi;
+
+/**
+ * Fetch an F95 thread and collect the starter post's mirror links with the
+ * same classifier the app uses (threadLinks.js). Lines are split on block
+ * tags and <br> so "Win: MEGA - GOFILE" labels stay attached to their links.
+ */
+async function expandThread(session, threadUrl, options) {
+  const response = await session.fetch(threadUrl, {
+    method: "GET",
+    headers: { accept: "text/html,application/xhtml+xml" },
+  });
+  const html = await response.text();
+  if (!response.ok) {
+    if (looksLikeCloudflareChallenge(html)) {
+      throw new Error(
+        "F95zone answered with a Cloudflare challenge; export fresh cookies (cf_clearance) and pass --user-agent of that browser.",
+      );
+    }
+    throw new Error(`F95zone answered HTTP ${response.status}`);
+  }
+  if (!/data-logged-in="true"/i.test(html)) {
+    console.log("    (not logged in: masked links will need --cookies)");
+  }
+
+  let start = html.indexOf("message-threadStarterPost");
+  if (start < 0) {
+    start = 0;
+  }
+  const wrapperIndex = html.indexOf('class="bbWrapper"', start);
+  if (wrapperIndex < 0) {
+    throw new Error("Could not find the starter post on this page.");
+  }
+  const end = html.indexOf("</article>", wrapperIndex);
+  const postHtml = html.slice(wrapperIndex, end > 0 ? end : undefined);
+  const titleMatch = html.match(/<h1[^>]*class="p-title-value"[^>]*>([\s\S]*?)<\/h1>/i);
+  const title = titleMatch ? stripHtmlTags(titleMatch[1]) : threadUrl;
+
+  const rawLinks = [];
+  const fragments = postHtml
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(THREAD_BLOCK_TAG_PATTERN, "\n$&")
+    .split("\n");
+  for (const fragment of fragments) {
+    const lineText = stripHtmlTags(fragment);
+    for (const anchor of extractAnchors(fragment, threadUrl)) {
+      const parsed = new URL(anchor.url);
+      const isF95 = /(^|\.)f95zone\.to$/i.test(parsed.hostname);
+      if (isF95 && !/\/(masked|attachments)\//i.test(parsed.pathname)) {
+        continue;
+      }
+      rawLinks.push({
+        url: anchor.url,
+        label: anchor.text || parsed.hostname,
+        host: parsed.hostname,
+        lineText,
+        contextText: lineText,
+        order: rawLinks.length,
+      });
+    }
+  }
+
+  const { variants } = normalizeThreadDownloadLinks(rawLinks);
+  const wantedPlatform = String(options.platform || "").toLowerCase();
+  const selected = [];
+  console.log(`\n≡ ${title}`);
+  for (const variant of variants) {
+    const variantId = String(variant.id || "").toLowerCase();
+    const matches =
+      options.allVariants ||
+      variantId === wantedPlatform ||
+      (variantId === "general" && variants.length === 1) ||
+      (wantedPlatform === "windows" && /^(win|windows|pc)/.test(variantId));
+    console.log(
+      `  ${matches ? "●" : "○"} ${variant.label}: ${variant.links.map((link) => link.hostLabel).join(", ")}`,
+    );
+    if (!matches) {
+      continue;
+    }
+    for (const link of variant.links) {
+      selected.push({
+        url: link.url,
+        note: `${title} · ${variant.label} · ${link.hostLabel}`,
+        expect: "",
+        thread: threadUrl,
+      });
+    }
+  }
+  if (selected.length === 0 && variants.length > 0 && !options.allVariants) {
+    console.log("  (no variant matched --platform; use --all-variants)");
+  }
+  return selected;
 }
 
 function loadCookies(filePath) {
@@ -572,7 +704,12 @@ async function checkLink(entry, options, session, state) {
     }
   } catch (error) {
     row.archive = error instanceof DownloadValidationError ? error.code : "";
-    problems.push(`payload: ${errorSummary(error)}`);
+    if (options.acceptAny && error?.code === "unsupported_payload") {
+      row.archive = `other:${path.extname(result.fileName).replace(/^\./, "") || "?"}`;
+      log(`payload is not a game package (accepted by --accept-any)`);
+    } else {
+      problems.push(`payload: ${errorSummary(error)}`);
+    }
   }
 
   if (!options.keep) {
@@ -643,9 +780,46 @@ async function main() {
     }
     entries = entries.concat(readLinksFile(options.file));
   }
-  if (entries.length === 0) {
+  if (entries.length === 0 && options.threads.length === 0) {
     usageError("no links given");
   }
+  options.out = path.resolve(options.out || path.join(os.tmpdir(), "f95-check-mirrors"));
+  fs.mkdirSync(options.out, { recursive: true });
+  if (options.capture) {
+    options.capture = path.resolve(options.capture);
+    fs.mkdirSync(options.capture, { recursive: true });
+  }
+
+  const state = { currentHost: { id: "", label: "" } };
+  const persistedCookies =
+    options.jar && fs.existsSync(options.jar)
+      ? JSON.parse(fs.readFileSync(options.jar, "utf8"))
+      : [];
+  const session = createCookieJarSession({
+    cookies: [
+      ...(Array.isArray(persistedCookies) ? persistedCookies : []),
+      ...(options.cookies ? loadCookies(options.cookies) : []),
+    ],
+    userAgent: options.userAgent || undefined,
+    onResponse: options.capture
+      ? createCaptureObserver(options.capture, () => state.currentHost)
+      : undefined,
+  });
+
+  for (const threadUrl of options.threads) {
+    state.currentHost = { id: "f95-thread", label: "F95zone thread" };
+    try {
+      entries = entries.concat(await expandThread(session, threadUrl, options));
+    } catch (error) {
+      console.error(`thread ${threadUrl}: ${errorSummary(error)}`);
+      process.exitCode = 1;
+    }
+  }
+  if (entries.length === 0) {
+    console.error("no mirror links to check");
+    return 1;
+  }
+
   if (options.only.length > 0) {
     const wanted = new Set(options.only.map((id) => id.toLowerCase()));
     const before = entries.length;
@@ -656,21 +830,13 @@ async function main() {
     }
   }
 
-  options.out = path.resolve(options.out || path.join(os.tmpdir(), "f95-check-mirrors"));
-  fs.mkdirSync(options.out, { recursive: true });
-  if (options.capture) {
-    options.capture = path.resolve(options.capture);
-    fs.mkdirSync(options.capture, { recursive: true });
+  if (options.dryRun) {
+    for (const entry of entries) {
+      const host = hostInfoFor(entry.url);
+      console.log(`${host.id.padEnd(16)} ${host.supported.padEnd(8)} ${entry.url}${entry.note ? `  # ${entry.note}` : ""}`);
+    }
+    return 0;
   }
-
-  const state = { currentHost: { id: "", label: "" } };
-  const session = createCookieJarSession({
-    cookies: options.cookies ? loadCookies(options.cookies) : [],
-    userAgent: options.userAgent || undefined,
-    onResponse: options.capture
-      ? createCaptureObserver(options.capture, () => state.currentHost)
-      : undefined,
-  });
 
   console.log(
     `check-mirrors: ${entries.length} link(s), out=${options.out}${options.cookies ? ", cookies loaded" : ""}${options.simulateDrop ? `, drop after ${options.simulateDrop} bytes` : ""}${options.capture ? `, capture=${options.capture}` : ""}`,
@@ -684,6 +850,10 @@ async function main() {
       row.status = "FAIL";
     }
     rows.push(row);
+  }
+
+  if (options.jar) {
+    fs.writeFileSync(options.jar, JSON.stringify(session.cookies.list(), null, 2));
   }
 
   console.log(`\n${renderTable(rows)}\n`);

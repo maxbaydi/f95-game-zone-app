@@ -27,6 +27,10 @@ const {
   resolveUploadhavenUrl,
   unpackDeanEdwardsPackedJs,
 } = require("../src/main/f95/downloadSupport");
+const {
+  GOFILE_CLIENT_USER_AGENT,
+  GOFILE_WT_SALT,
+} = require("../src/main/f95/hosts/gofile");
 
 test("resolveKnownFileHostUrl rewrites Pixeldrain viewer links to direct download API", () => {
   const resolvedUrl = resolveKnownFileHostUrl(
@@ -525,15 +529,6 @@ test("resolveGofileUrl uses guest account bootstrap and content API to find the 
         method: options.method || "GET",
       });
 
-      if (url === "https://gofile.io/dist/js/config.js") {
-        return {
-          ok: true,
-          async text() {
-            return 'var websiteToken = "static-wt-test";';
-          },
-        };
-      }
-
       if (url === "https://api.gofile.io/accounts") {
         return {
           ok: true,
@@ -566,7 +561,15 @@ test("resolveGofileUrl uses guest account bootstrap and content API to find the 
 
       if (url === "https://api.gofile.io/contents/MovsLG") {
         assert.equal(options.headers.authorization, "Bearer guest-token-123");
-        assert.equal(options.headers["x-website-token"], "static-wt-test");
+        // The token is computed locally (sha256 handshake with the current
+        // salt); the frontend no longer serves /dist/js/config.js.
+        assert.equal(
+          options.headers["x-website-token"],
+          generateGofileWebsiteToken("guest-token-123", GOFILE_WT_SALT, {
+            userAgent: GOFILE_CLIENT_USER_AGENT,
+            language: "en-US",
+          }),
+        );
         assert.equal(options.headers["x-bl"], "en-US");
         return {
           ok: true,
@@ -602,7 +605,6 @@ test("resolveGofileUrl uses guest account bootstrap and content API to find the 
   assert.deepEqual(calls, [
     { url: "https://api.gofile.io/accounts", method: "POST" },
     { url: "https://api.gofile.io/accounts/website", method: "GET" },
-    { url: "https://gofile.io/dist/js/config.js", method: "GET" },
     { url: "https://api.gofile.io/contents/MovsLG", method: "GET" },
   ]);
 });
@@ -613,15 +615,6 @@ test("resolveGofileUrl prefers child file links over noisy folder downloadPage v
       async set() {},
     },
     async fetch(url) {
-      if (url === "https://gofile.io/dist/js/config.js") {
-        return {
-          ok: true,
-          async text() {
-            return 'var websiteToken = "4fd6sg89d7s6";';
-          },
-        };
-      }
-
       if (url === "https://api.gofile.io/accounts") {
         return {
           ok: true,
