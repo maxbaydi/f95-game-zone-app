@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("install-f95-thread", payload),
   cancelF95Download: (id) => ipcRenderer.invoke("cancel-f95-download", id),
   retryF95Download: (id) => ipcRenderer.invoke("retry-f95-download", id),
+  openF95DownloadAction: (id) =>
+    ipcRenderer.invoke("open-f95-download-action", id),
   clearF95DownloadHistory: () =>
     ipcRenderer.invoke("clear-f95-download-history"),
   showF95DownloadInFolder: (id) =>

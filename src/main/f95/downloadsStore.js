@@ -3,16 +3,24 @@ const MAX_HISTORY_ITEMS = 40;
 /**
  * Download entry lifecycle:
  *   resolving → (queued) → downloading → installing → completed
+ *   resolving | downloading → action (user finishes a step in the browser)
+ *   action → downloading (auto-continue) | error | cancelled
  *   any active state → error | cancelled
  *   error | cancelled → resolving (retry)
  */
 const ACTIVE_STATUSES = new Set([
   "queued",
   "resolving",
+  "action",
   "downloading",
   "installing",
 ]);
-const CANCELLABLE_STATUSES = new Set(["queued", "resolving", "downloading"]);
+const CANCELLABLE_STATUSES = new Set([
+  "queued",
+  "resolving",
+  "action",
+  "downloading",
+]);
 const RETRYABLE_STATUSES = new Set(["error", "cancelled"]);
 const HISTORY_STATUSES = new Set(["completed", "error", "cancelled"]);
 
@@ -20,6 +28,7 @@ const STATUS_PRIORITY = {
   downloading: 0,
   resolving: 1,
   queued: 1,
+  action: 1,
   installing: 2,
   error: 3,
   cancelled: 3,
@@ -204,6 +213,31 @@ function createDownloadsStore() {
         return existing ? toPublicEntry(existing) : null;
       }
       return upsert(id, patch);
+    },
+    /**
+     * The mirror needs the user in the browser (captcha, Cloudflare check).
+     * The entry stays active and cancellable; `actionUrl` lets the UI reopen
+     * the page. Ignored for cancelled or unknown entries.
+     */
+    awaitingAction(id, patch = {}) {
+      const existing = findEntry(id);
+      if (!existing) {
+        return null;
+      }
+      if (existing.status === "cancelled") {
+        return toPublicEntry(existing);
+      }
+      return upsert(id, {
+        status: "action",
+        speedBytesPerSecond: 0,
+        error: "",
+        errorCode: "",
+        actionUrl: patch.actionUrl || existing.actionUrl || "",
+        text:
+          patch.text ||
+          `Finish the step in the browser window for ${existing.hostLabel || "this mirror"}`,
+        ...(patch.hostLabel ? { hostLabel: patch.hostLabel } : {}),
+      });
     },
     start(entry) {
       return upsertUnlessCancelled(entry.id, {

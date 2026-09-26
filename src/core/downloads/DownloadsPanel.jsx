@@ -72,6 +72,12 @@ const DOWNLOAD_STATUS_META = {
     tone: "border-border bg-white/5 text-text/85",
     bar: "bg-accent/60",
   },
+  action: {
+    label: "Your turn",
+    icon: "verified_user",
+    tone: "border-amber-400/40 bg-amber-500/10 text-amber-100",
+    bar: "bg-amber-400",
+  },
   downloading: {
     label: "Downloading",
     icon: "downloading",
@@ -115,6 +121,7 @@ const getDownloadStatusMeta = (status) =>
 const ACTIVE_DOWNLOAD_STATUSES = new Set([
   "resolving",
   "queued",
+  "action",
   "downloading",
   "installing",
 ]);
@@ -193,23 +200,12 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         });
         return;
       }
-      if (result?.code === "captcha_required" && result?.actionUrl) {
-        downloadsToast()?.warning(
-          result.error ||
-            "This mirror needs a captcha. Solve it in the browser window, then retry.",
+      if (result?.awaitingAction) {
+        downloadsToast()?.info(
+          `${result.hostLabel || "The mirror"} needs a quick step in the browser window. Finish it there and the download continues by itself.`,
           {
-            title: "Captcha required",
-            duration: 0,
-            actions: [
-              {
-                label: "Solve captcha",
-                onClick: () =>
-                  window.electronAPI.openF95BrowserUrl?.({
-                    url: result.actionUrl,
-                    title: "F95 Mirror Verification",
-                  }),
-              },
-            ],
+            title: "Your turn in the browser",
+            duration: 6000,
           },
         );
         return;
@@ -227,6 +223,15 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 
   const handleSolveCaptcha = () =>
     runItemAction("captcha", async () => {
+      if (typeof window.electronAPI?.openF95DownloadAction === "function") {
+        const result = await window.electronAPI.openF95DownloadAction(item.id);
+        if (result?.success) {
+          return;
+        }
+        if (result?.error && !item.actionUrl) {
+          throw new Error(result.error);
+        }
+      }
       await window.electronAPI.openF95BrowserUrl?.({
         url: item.actionUrl,
         title: "F95 Mirror Verification",
@@ -330,7 +335,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 
       {(canCancel || canRetry || item.status === "completed" || item.actionUrl) && (
         <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          {item.actionUrl && item.status === "error" && (
+          {item.actionUrl && (item.status === "error" || item.status === "action") && (
             <button
               type="button"
               onClick={handleSolveCaptcha}
@@ -340,7 +345,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                 verified_user
               </span>
-              Open mirror
+              {item.status === "action" ? "Show browser window" : "Finish in browser"}
             </button>
           )}
           {canCancel && (
