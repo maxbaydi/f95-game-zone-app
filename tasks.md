@@ -4603,3 +4603,18 @@ What remains / manual verification steps:
 - on Windows: fresh profile → assistant opens; pick the recommended drive, add found folders, finish and confirm the scan starts and games appear
 - confirm drive detection is quick with a disconnected network drive mapped
 - existing profile with games → no assistant; Settings → General → Run setup assistant works
+
+## 2026-09-26 — Release 1.3.0
+
+What was done:
+
+- bumped the app to 1.3.0 (mirror automation tiers with auto-fallback and browser handoff, first-run setup assistant, reworked settings and folder selection)
+- fixed the branch check workflow: it ran `node --test "test/*.test.js"` on Node 20, which does not expand the glob, so no test ran and every branch check failed; the check now uses Node 22 like Electron 37
+
+Release path:
+
+- merging to `main` triggers `.github/workflows/main.yml`, which builds Windows (NSIS) and Linux (deb, AppImage) packages and publishes the GitHub release `v1.3.0`; installed apps pick it up through electron-updater
+
+Not included:
+
+- `claude/dazzling-bardeen-4gwbcw` (download pipeline rework from another session) is not merged into `main` and is not part of this release
