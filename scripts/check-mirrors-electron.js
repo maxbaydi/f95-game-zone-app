@@ -233,6 +233,8 @@ async function main() {
     console.error("F95Launcher (or another check) is running with this profile. Close it first.");
     return 3;
   }
+  // The browser-step window is the only window; closing it must not quit.
+  app.on("window-all-closed", () => {});
   await app.whenReady();
 
   const session = electronSession.fromPartition(F95_AUTH_PARTITION);
