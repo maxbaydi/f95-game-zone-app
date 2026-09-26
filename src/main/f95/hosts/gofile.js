@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const path = require("path");
 
 const {
+  MirrorActionRequiredError,
   MirrorError,
   assertNotSplitArchive,
   cancelResponseBody,
@@ -133,7 +134,7 @@ async function createGofileGuestToken(ctx) {
       body: "{}",
     });
   } catch (error) {
-    if (error?.code === "cancelled") {
+    if (error?.code === "cancelled" || error instanceof MirrorActionRequiredError) {
       throw error;
     }
     throw createGofileUnavailableError();
@@ -180,7 +181,7 @@ async function syncGofileGuestAccount(ctx, token) {
       },
     });
   } catch (error) {
-    if (error?.code === "cancelled") {
+    if (error?.code === "cancelled" || error instanceof MirrorActionRequiredError) {
       throw error;
     }
     throw createGofileUnavailableError();

@@ -13,6 +13,7 @@
  */
 const {
   DownloadCancelledError,
+  MirrorActionRequiredError,
   MirrorError,
   createActionRequiredError,
   createResolverContext,
@@ -688,18 +689,33 @@ async function resolveMirrorTarget(ctx, rawUrl, retry = {}) {
 
     ctx.report(`Resolving ${label} link`);
     const urlToResolve = currentUrl;
-    const result = await withRetry(() => resolver(ctx, urlToResolve), {
-      attempts: retry.attempts ?? 3,
-      baseDelayMs: retry.baseDelayMs ?? 1500,
-      maxDelayMs: retry.maxDelayMs ?? 15000,
-      signal: ctx.signal || undefined,
-      sleep: (ms) => ctx.sleep(ms),
-      onRetry: ({ attempt, attempts, delayMs, error }) => {
-        ctx.report(
-          `${label}: ${summarizeError(error)} Retrying in ${Math.ceil(delayMs / 1000)}s (attempt ${attempt + 1}/${attempts})`,
+    let result;
+    try {
+      result = await withRetry(() => resolver(ctx, urlToResolve), {
+        attempts: retry.attempts ?? 3,
+        baseDelayMs: retry.baseDelayMs ?? 1500,
+        maxDelayMs: retry.maxDelayMs ?? 15000,
+        signal: ctx.signal || undefined,
+        sleep: (ms) => ctx.sleep(ms),
+        onRetry: ({ attempt, attempts, delayMs, error }) => {
+          ctx.report(
+            `${label}: ${summarizeError(error)} Retrying in ${Math.ceil(delayMs / 1000)}s (attempt ${attempt + 1}/${attempts})`,
+          );
+        },
+      });
+    } catch (error) {
+      if (error instanceof MirrorActionRequiredError && error.fromChallenge) {
+        // A wall on any sub-request (API, CDN) is solved by opening the
+        // mirror page itself in the browser, not the sub-request URL.
+        throw createActionRequiredError(
+          label,
+          urlToResolve,
+          "asks for a browser check (captcha / Cloudflare) before downloading.",
+          "captcha_required",
         );
-      },
-    });
+      }
+      throw error;
+    }
 
     if (result && typeof result === "object") {
       return buildPreparedDownload(requestedUrl, result, origin);

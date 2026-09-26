@@ -21,6 +21,10 @@
  *   --all-variants          with --thread: check every platform variant, not
  *                           only the one matching --platform
  *   --cookies <path>        Netscape cookies.txt (F95 login for masked links)
+ *   --cookie-domains <list> domains to keep from --cookies (default f95zone.to;
+ *                           a full browser export must not leak other logins)
+ *   --resolve-only          resolve every link, report file name/size, no transfer
+ *   --max-size <bytes>      skip the transfer (status SKIPPED) above this size
  *   --jar <path>            JSON cookie jar persisted between runs (keeps the
  *                           Gofile guest account, Cloudflare clearances, ...)
  *   --out <dir>             download directory (default: <tmp>/f95-check-mirrors)
@@ -107,6 +111,9 @@ function parseArgs(argv) {
     threads: [],
     allVariants: false,
     cookies: "",
+    cookieDomains: ["f95zone.to"],
+    resolveOnly: false,
+    maxSize: 0,
     jar: "",
     out: "",
     keep: false,
@@ -151,6 +158,20 @@ function parseArgs(argv) {
         break;
       case "--jar":
         options.jar = takeValue(index, argument);
+        index += 1;
+        break;
+      case "--cookie-domains":
+        options.cookieDomains = takeValue(index, argument)
+          .split(",")
+          .map((entry) => entry.trim().toLowerCase())
+          .filter(Boolean);
+        index += 1;
+        break;
+      case "--resolve-only":
+        options.resolveOnly = true;
+        break;
+      case "--max-size":
+        options.maxSize = Number.parseInt(takeValue(index, argument), 10) || 0;
         index += 1;
         break;
       case "--out":
@@ -343,11 +364,23 @@ async function expandThread(session, threadUrl, options) {
   return selected;
 }
 
-function loadCookies(filePath) {
-  const cookies = parseNetscapeCookies(fs.readFileSync(filePath, "utf8"));
+function loadCookies(filePath, domains) {
+  const all = parseNetscapeCookies(fs.readFileSync(filePath, "utf8"));
+  const wanted = (domains || []).map((domain) => domain.replace(/^\./, ""));
+  const cookies =
+    wanted.length === 0 || wanted.includes("*")
+      ? all
+      : all.filter((cookie) =>
+          wanted.some(
+            (domain) => cookie.domain === domain || cookie.domain.endsWith(`.${domain}`),
+          ),
+        );
   if (cookies.length === 0) {
-    usageError(`no cookies found in ${filePath}`);
+    usageError(`no cookies for ${wanted.join(", ") || "any domain"} found in ${filePath}`);
   }
+  console.log(
+    `cookies: ${cookies.length} of ${all.length} loaded (${wanted.join(", ") || "all domains"})`,
+  );
   return cookies;
 }
 
@@ -572,6 +605,22 @@ async function checkLink(entry, options, session, state) {
   log(
     `resolved → ${prepared.resolvedUrl}${prepared.fileName ? ` (${prepared.fileName}` : ""}${prepared.size ? `${prepared.fileName ? ", " : " ("}${formatBytes(prepared.size)}` : ""}${prepared.fileName || prepared.size ? ")" : ""} transfer=${prepared.transfer} range=${prepared.rangeMode}`,
   );
+  row.fileName = prepared.fileName || "";
+  row.size = prepared.size || 0;
+
+  if (options.resolveOnly) {
+    row.elapsedMs = Date.now() - startedAt;
+    row.status = "RESOLVED";
+    log(`RESOLVED (no transfer requested)`);
+    return row;
+  }
+  if (options.maxSize > 0 && prepared.size > options.maxSize) {
+    row.elapsedMs = Date.now() - startedAt;
+    row.status = "SKIPPED";
+    row.error = `announced size ${formatBytes(prepared.size)} exceeds --max-size ${formatBytes(options.maxSize)}`;
+    log(`SKIPPED ${row.error}`);
+    return row;
+  }
 
   // Transfer with the exact options the app uses.
   let dropped = false;
@@ -742,7 +791,7 @@ function renderTable(rows) {
   const columns = [
     { title: "host", width: 14, value: (row) => row.host },
     { title: "URL", width: 58, value: (row) => row.url },
-    { title: "status", width: 15, value: (row) => row.status + (row.unexpected ? "!" : "") },
+    { title: "status", width: 16, value: (row) => row.status + (row.unexpected ? "!" : "") },
     { title: "file", width: 34, value: (row) => row.fileName },
     { title: "size", width: 11, value: (row) => (row.size ? formatBytes(row.size) : "") },
     { title: "sha256", width: 64, value: (row) => row.sha256 },
@@ -798,7 +847,7 @@ async function main() {
   const session = createCookieJarSession({
     cookies: [
       ...(Array.isArray(persistedCookies) ? persistedCookies : []),
-      ...(options.cookies ? loadCookies(options.cookies) : []),
+      ...(options.cookies ? loadCookies(options.cookies, options.cookieDomains) : []),
     ],
     userAgent: options.userAgent || undefined,
     onResponse: options.capture
@@ -863,7 +912,7 @@ async function main() {
   }, {});
   const unexpected = rows.filter((row) => row.status === "ACTION_REQUIRED" && row.unexpected);
   console.log(
-    `PASS ${counts.PASS || 0} · ACTION_REQUIRED ${counts.ACTION_REQUIRED || 0}${unexpected.length ? ` (${unexpected.length} unexpected on automatic hosts, marked "!")` : ""} · FAIL ${counts.FAIL || 0}`,
+    `PASS ${counts.PASS || 0} · ACTION_REQUIRED ${counts.ACTION_REQUIRED || 0}${unexpected.length ? ` (${unexpected.length} unexpected on automatic hosts, marked "!")` : ""} · FAIL ${counts.FAIL || 0}${counts.RESOLVED ? ` · RESOLVED ${counts.RESOLVED}` : ""}${counts.SKIPPED ? ` · SKIPPED ${counts.SKIPPED}` : ""}`,
   );
 
   if (options.json) {

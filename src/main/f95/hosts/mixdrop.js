@@ -229,6 +229,18 @@ async function resolveMixdropTarget(ctx, rawUrl, seenUrls = new Set()) {
         transfer: "direct",
       };
     }
+
+    // Since 2026 the DOWNLOAD button carries a Cloudflare Turnstile site key
+    // (data-cf-key) and the delivery URL is only handed out after the widget
+    // passes; there is no packed script to unpack any more.
+    if (hasTurnstileDownloadButton(html)) {
+      throw createActionRequiredError(
+        HOST_LABEL,
+        finalPageUrl,
+        "protects its download button with a Cloudflare Turnstile check. Press DOWNLOAD in the browser window; the file is picked up automatically.",
+        "captcha_required",
+      );
+    }
   }
 
   throw createActionRequiredError(
@@ -238,9 +250,19 @@ async function resolveMixdropTarget(ctx, rawUrl, seenUrls = new Set()) {
   );
 }
 
+/**
+ * @param {string} html
+ */
+function hasTurnstileDownloadButton(html) {
+  return /data-cf-key\s*=|class="[^"]*download-btn[^"]*"[^>]*data-cf|challenges\.cloudflare\.com\/turnstile/i.test(
+    String(html || ""),
+  );
+}
+
 module.exports = {
   HOST_LABEL,
   extractMixdropFileRef,
+  hasTurnstileDownloadButton,
   isMixdropHost,
   resolveMixdropTarget,
   unpackDeanEdwardsPackedJs,
