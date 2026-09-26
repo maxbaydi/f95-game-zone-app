@@ -276,9 +276,10 @@ test("normalizeThreadDownloadLinks separates compressed platform sections and de
     result.variants.map((variant) => variant.label),
     ["Windows / Linux", "Compressed Windows / Linux"],
   );
+  // Automatable hosts are listed before browser-only ones such as MEGA.
   assert.deepEqual(
     result.variants[1].links.map((link) => link.host),
-    ["mega.nz", "pixeldrain.com"],
+    ["pixeldrain.com", "mega.nz"],
   );
 });
 

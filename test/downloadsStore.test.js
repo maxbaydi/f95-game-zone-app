@@ -77,3 +77,25 @@ test("downloads store still shows newest history items first after completion", 
 
   assert.deepEqual(orderedIds, ["download-2", "download-1"]);
 });
+
+test("downloads store keeps browser handoffs active until they are removed", () => {
+  const store = createDownloadsStore();
+
+  store.wait({
+    id: "handoff-1",
+    title: "Browser Game",
+    sourceHost: "mega.nz",
+  });
+
+  const [waitingEntry] = store.list();
+  assert.equal(waitingEntry.status, "waiting");
+  assert.match(waitingEntry.text, /browser/i);
+  assert.equal(store.activeCount(), 1);
+
+  store.start({ id: "handoff-1", title: "Browser Game" });
+  assert.equal(store.list()[0].status, "downloading");
+
+  store.remove("handoff-1");
+  assert.equal(store.list().length, 0);
+  assert.equal(store.activeCount(), 0);
+});

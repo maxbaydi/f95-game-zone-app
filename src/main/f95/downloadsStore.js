@@ -1,16 +1,22 @@
 const MAX_HISTORY_ITEMS = 40;
 
 function isActiveStatus(status) {
-  return status === "queued" || status === "downloading" || status === "installing";
+  return (
+    status === "queued" ||
+    status === "waiting" ||
+    status === "downloading" ||
+    status === "installing"
+  );
 }
 
 function sortDownloads(entries) {
   const statusPriority = {
     downloading: 0,
-    queued: 1,
-    installing: 2,
-    error: 3,
-    completed: 4,
+    waiting: 1,
+    queued: 2,
+    installing: 3,
+    error: 4,
+    completed: 5,
   };
 
   return [...entries].sort((left, right) => {
@@ -44,7 +50,10 @@ function sortDownloads(entries) {
 
 function trimHistory(entries) {
   const activeEntries = entries.filter(
-    (entry) => entry.status === "queued" || entry.status === "downloading",
+    (entry) =>
+      entry.status === "queued" ||
+      entry.status === "waiting" ||
+      entry.status === "downloading",
   );
   const installingEntries = entries.filter((entry) => entry.status === "installing");
   const historicalEntries = entries
@@ -107,6 +116,21 @@ function createDownloadsStore() {
         text: entry.text || `Queued ${entry.title || "download"}`,
       });
     },
+    wait(entry) {
+      return upsert(entry.id, {
+        title: entry.title || "F95 download",
+        status: "waiting",
+        threadUrl: entry.threadUrl || "",
+        requestedUrl: entry.requestedUrl || "",
+        sourceHost: entry.sourceHost || "",
+        sourceLabel: entry.sourceLabel || "",
+        version: entry.version || "",
+        creator: entry.creator || "",
+        text:
+          entry.text ||
+          `Waiting for ${entry.title || "the download"} to start in the browser`,
+      });
+    },
     start(entry) {
       return upsert(entry.id, {
         status: "downloading",
@@ -145,6 +169,9 @@ function createDownloadsStore() {
         speedBytesPerSecond: 0,
         ...patch,
       });
+    },
+    remove(id) {
+      entries = entries.filter((entry) => entry.id !== id);
     },
     list() {
       return sortDownloads(entries).map(cloneEntry);

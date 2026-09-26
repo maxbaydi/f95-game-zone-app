@@ -69,6 +69,14 @@ const KEEP_F95_NAVIGATION_IN_PLACE_SCRIPT = String.raw`(() => {
   });
 })();`;
 
+const useWorkspaceInstallAttempts =
+  window.useF95InstallAttempts ||
+  (() => ({
+    attemptEvents: [],
+    beginAttempts: () => {},
+    resetAttempts: () => {},
+  }));
+
 const formatBytes = (bytes) => {
   const value = Number(bytes) || 0;
   if (value <= 0) {
@@ -113,6 +121,10 @@ const F95BrowserWorkspace = () => {
   const [isStartingInstall, setIsStartingInstall] = useState(false);
   const [downloadState, setDownloadState] = useState(null);
   const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
+  const [pendingHandoff, setPendingHandoff] = useState(null);
+  const [selectedLinkUrl, setSelectedLinkUrl] = useState("");
+  const { attemptEvents, beginAttempts, resetAttempts } =
+    useWorkspaceInstallAttempts();
   const [threadInstallState, setThreadInstallState] = useState({
     checking: false,
     inLibrary: false,
@@ -126,6 +138,12 @@ const F95BrowserWorkspace = () => {
   });
 
   const currentUrl = browserState.url || F95_SEARCH_URL;
+  const threadLinks = Array.isArray(threadInfo?.links) ? threadInfo.links : [];
+  const selectedThreadLink =
+    threadLinks.find((link) => link.url === selectedLinkUrl) ||
+    threadLinks.find((link) => link.url === threadInfo?.preferredLinkUrl) ||
+    threadLinks[0] ||
+    null;
   const isThreadPage = F95_THREAD_PATTERN.test(currentUrl);
 
   const withWebview = (callback) => {
@@ -182,8 +200,22 @@ const F95BrowserWorkspace = () => {
     setInstallError("");
     setBrowserError("");
     setPendingCaptchaAction(null);
+    setPendingHandoff(null);
     captchaRetryKeyRef.current = "";
   }, [browserKey, authState.isAuthenticated]);
+
+  useEffect(() => {
+    if (
+      pendingHandoff?.id &&
+      downloadState?.id === pendingHandoff.id &&
+      ["downloading", "installing", "completed"].includes(downloadState?.phase)
+    ) {
+      setPendingHandoff(null);
+      setStatusMessage(
+        `Got the file from ${pendingHandoff.hostName}. F95Launcher is installing it now.`,
+      );
+    }
+  }, [downloadState?.phase, pendingHandoff]);
 
   useEffect(() => {
     let cancelled = false;
@@ -478,6 +510,7 @@ const F95BrowserWorkspace = () => {
       setThreadInfo(null);
       setDownloadState(null);
       setPendingCaptchaAction(null);
+      setPendingHandoff(null);
     } catch (error) {
       console.error("Failed to clear F95 session:", error);
       setInstallError(error.message);
@@ -511,11 +544,16 @@ const F95BrowserWorkspace = () => {
         return;
       }
 
-      if (payload.links.length === 1) {
-        await startInstall(payload, payload.links[0]);
+      const onlyLink = payload.links.length === 1 ? payload.links[0] : null;
+      if (onlyLink && !window.f95MirrorUi?.isBrowserOnly?.(onlyLink)) {
+        await startInstall(payload, onlyLink);
         return;
       }
 
+      resetAttempts();
+      setSelectedLinkUrl(
+        payload.preferredLinkUrl || payload.links[0]?.url || "",
+      );
       setThreadInfo(payload);
     } catch (error) {
       console.error("Failed to inspect F95 thread:", error);
@@ -570,19 +608,72 @@ const F95BrowserWorkspace = () => {
     }
   };
 
-  const startInstall = async (payload, link) => {
+  const buildInstallPayload = (payload, link) => {
+    const variant = window.f95MirrorUi?.findVariant?.(
+      payload.variants,
+      payload.links,
+      link.url,
+    );
+    return {
+      threadUrl: payload.threadUrl,
+      title: payload.title,
+      creator: payload.creator,
+      version: payload.version,
+      engine: payload.engine,
+      downloadLabel: link.label,
+      downloadUrl: link.url,
+      mirrorHost: link.host || "",
+      variantId: link.variantId || variant?.id || "",
+    };
+  };
+
+  const startBrowserHandoff = async (payload, link) => {
+    const hostName = window.getF95MirrorDisplayName?.(link) || "the mirror";
     setIsStartingInstall(true);
     setInstallError("");
 
     try {
+      const result = await window.electronAPI.startF95BrowserHandoff(
+        buildInstallPayload(payload, link),
+      );
+      if (!result?.success) {
+        setInstallError(result?.error || "Failed to open the mirror page.");
+        return;
+      }
+
+      const actionUrl = result.actionUrl || link.url;
+      setThreadInfo(null);
+      setPendingCaptchaAction(null);
+      setPendingHandoff({ id: result.handoffId, hostName, actionUrl });
+      setStatusMessage("");
+      withWebview((webview) => {
+        webview.loadURL(actionUrl);
+      });
+    } catch (error) {
+      console.error("Failed to start browser download:", error);
+      setInstallError(error.message);
+    } finally {
+      setIsStartingInstall(false);
+    }
+  };
+
+  const startInstall = async (payload, link, options = {}) => {
+    if (!options.overrideUrl && window.f95MirrorUi?.isBrowserOnly?.(link)) {
+      await startBrowserHandoff(payload, link);
+      return;
+    }
+
+    setIsStartingInstall(true);
+    setInstallError("");
+    setPendingHandoff(null);
+    beginAttempts(payload.threadUrl);
+
+    try {
       const result = await window.electronAPI.installF95Thread({
-        threadUrl: payload.threadUrl,
-        title: payload.title,
-        creator: payload.creator,
-        version: payload.version,
-        engine: payload.engine,
-        downloadLabel: link.label,
-        downloadUrl: link.url,
+        ...buildInstallPayload(payload, link),
+        downloadUrl: options.overrideUrl || link.url,
+        fallbackLinks:
+          window.f95MirrorUi?.buildFallbackLinks?.(payload, link) || [],
       });
 
       if (!result?.success) {
@@ -592,26 +683,45 @@ const F95BrowserWorkspace = () => {
             payload,
             link,
             actionUrl: captchaUrl,
+            actionKind: result?.actionKind || "captcha",
           });
           setThreadInfo(null);
           setStatusMessage(
-            "This mirror needs a captcha before F95Launcher can continue. Finish it in the browser below, then retry the install.",
+            result?.actionKind === "verification"
+              ? "This mirror wants a quick check in the browser below. After it, F95Launcher continues on its own, or just press Download on the page."
+              : "This mirror needs a captcha before F95Launcher can continue. Finish it in the browser below and the install resumes automatically.",
           );
           withWebview((webview) => {
             webview.loadURL(captchaUrl);
           });
         } else {
           setInstallError(result?.error || "Failed to queue download.");
+          if (
+            !threadInfo &&
+            Array.isArray(payload.links) &&
+            payload.links.length > 0
+          ) {
+            setSelectedLinkUrl(link.url);
+            setThreadInfo(payload);
+          }
         }
         return;
       }
 
+      const usedHostName = window.getF95MirrorDisplayName?.({
+        host: result?.usedHost || link.host,
+        label: result?.usedLabel || link.label,
+      });
+      const requestedHostName = window.getF95MirrorDisplayName?.(link);
       setThreadInfo(null);
       setPendingCaptchaAction(null);
+      resetAttempts();
       setStatusMessage(
-        `Queued ${payload.title} via ${
-          result?.sourceHost || link.host || link.label
-        }. Download and install will continue in the background.`,
+        result?.fellBack
+          ? `${requestedHostName} did not return the file, so F95Launcher switched to ${usedHostName}. ${payload.title} is downloading and installs in the background.`
+          : `Queued ${payload.title} via ${
+              usedHostName || result?.sourceHost || link.label
+            }. Download and install will continue in the background.`,
       );
     } catch (error) {
       console.error("Failed to queue F95 install:", error);
@@ -619,6 +729,28 @@ const F95BrowserWorkspace = () => {
     } finally {
       setIsStartingInstall(false);
     }
+  };
+
+  const stopWaitingForHandoff = () => {
+    const handoffId = pendingHandoff?.id;
+    setPendingHandoff(null);
+    if (handoffId) {
+      window.electronAPI
+        .cancelF95BrowserHandoff({ id: handoffId })
+        .catch((error) =>
+          console.error("Failed to stop waiting for download:", error),
+        );
+    }
+  };
+
+  const reopenHandoffPage = () => {
+    if (!pendingHandoff?.actionUrl) {
+      return;
+    }
+
+    withWebview((webview) => {
+      webview.loadURL(pendingHandoff.actionUrl);
+    });
   };
 
   const retryPendingCaptchaInstall = async () => {
@@ -631,10 +763,13 @@ const F95BrowserWorkspace = () => {
       currentUrl,
     );
 
-    await startInstall(pendingCaptchaAction.payload, {
-      ...pendingCaptchaAction.link,
-      url: continuationUrl || pendingCaptchaAction.link.url,
-    });
+    await startInstall(
+      pendingCaptchaAction.payload,
+      pendingCaptchaAction.link,
+      {
+        overrideUrl: continuationUrl || pendingCaptchaAction.link.url,
+      },
+    );
   };
 
   const reopenCaptchaPage = () => {
@@ -673,9 +808,8 @@ const F95BrowserWorkspace = () => {
 
     captchaRetryKeyRef.current = retryKey;
     setStatusMessage("Captcha confirmed. Resuming install...");
-    void startInstall(pendingCaptchaAction.payload, {
-      ...pendingCaptchaAction.link,
-      url: continuationUrl,
+    void startInstall(pendingCaptchaAction.payload, pendingCaptchaAction.link, {
+      overrideUrl: continuationUrl,
     });
   }, [
     pendingCaptchaAction,
@@ -882,17 +1016,52 @@ const F95BrowserWorkspace = () => {
         </div>
       )}
 
+      {pendingHandoff && (
+        <div className="relative z-10 border-b border-accent/40 bg-accent/10 px-4 py-3 text-sm text-text">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="material-symbols-outlined animate-atlas-pulse-soft text-[22px] leading-none text-accent">
+              ads_click
+            </span>
+            <div className="min-w-[280px] flex-1">
+              <div className="font-semibold">
+                Press Download on the {pendingHandoff.hostName} page below
+              </div>
+              <div className="text-xs text-text/70">
+                F95Launcher catches the file as soon as it starts and installs
+                it into your library automatically.
+              </div>
+            </div>
+            <button
+              onClick={reopenHandoffPage}
+              className="rounded border border-accent/40 bg-white/5 px-3 py-2 text-xs font-medium text-text transition hover:bg-white/10"
+            >
+              Open the page again
+            </button>
+            <button
+              onClick={stopWaitingForHandoff}
+              className="rounded border border-border bg-white/5 px-3 py-2 text-xs font-medium text-text/75 transition hover:bg-white/10"
+            >
+              Stop waiting
+            </button>
+          </div>
+        </div>
+      )}
+
       {pendingCaptchaAction && (
         <div className="relative z-10 border-b border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex-1 min-w-[280px]">
-              Finish the captcha in the page below, then retry the install.
+              {pendingCaptchaAction.actionKind === "verification"
+                ? "Finish the check in the page below. F95Launcher continues automatically, or press Download on the page and the file is installed for you."
+                : "Finish the captcha in the page below. The install resumes automatically."}
             </div>
             <button
               onClick={reopenCaptchaPage}
               className="rounded border border-amber-300/30 bg-white/5 px-3 py-2 text-xs font-medium text-amber-50 transition hover:bg-white/10"
             >
-              Open Captcha Page
+              {pendingCaptchaAction.actionKind === "verification"
+                ? "Open Check Page"
+                : "Open Captcha Page"}
             </button>
             <button
               onClick={retryPendingCaptchaInstall}
@@ -905,7 +1074,7 @@ const F95BrowserWorkspace = () => {
         </div>
       )}
 
-      {installError && (
+      {installError && !threadInfo && (
         <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
           {installError}
         </div>
@@ -929,8 +1098,8 @@ const F95BrowserWorkspace = () => {
         )}
 
         {threadInfo && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6">
-            <div className="max-h-[80vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 py-6">
+            <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
               <div className="border-b border-border px-6 py-4">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
                   Thread Install
@@ -947,21 +1116,77 @@ const F95BrowserWorkspace = () => {
                 </div>
               </div>
 
-              <div className="max-h-[50vh] overflow-y-auto px-6 py-5">
-                <window.F95MirrorColumns
-                  variants={threadInfo.variants}
-                  links={threadInfo.links}
-                  onSelectLink={(link) => startInstall(threadInfo, link)}
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+                {installError && (
+                  <div className="border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                    <div>{installError}</div>
+                    {selectedThreadLink &&
+                      !window.f95MirrorUi?.isBrowserOnly?.(
+                        selectedThreadLink,
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            startBrowserHandoff(threadInfo, selectedThreadLink)
+                          }
+                          disabled={isStartingInstall}
+                          className="mt-3 rounded border border-red-200/20 bg-white/5 px-3 py-2 text-xs font-medium text-red-50 transition hover:bg-white/10 disabled:opacity-60"
+                        >
+                          Download{" "}
+                          {window.getF95MirrorDisplayName?.(selectedThreadLink)}{" "}
+                          in the browser instead
+                        </button>
+                      )}
+                  </div>
+                )}
+
+                <window.F95MirrorPicker
+                  key={threadInfo.threadUrl || "thread"}
+                  thread={threadInfo}
+                  selectedLinkUrl={selectedThreadLink?.url || ""}
+                  onSelectLink={(link) => {
+                    setInstallError("");
+                    setSelectedLinkUrl(link.url);
+                  }}
                   disabled={isStartingInstall}
+                  attemptEvents={attemptEvents}
                 />
               </div>
 
               <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
                 <button
-                  onClick={() => setThreadInfo(null)}
+                  onClick={() => {
+                    setThreadInfo(null);
+                    resetAttempts();
+                  }}
                   className="rounded border border-border bg-secondary px-4 py-2 text-sm hover:bg-selected"
                 >
                   Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    selectedThreadLink &&
+                    startInstall(threadInfo, selectedThreadLink)
+                  }
+                  disabled={isStartingInstall || !selectedThreadLink}
+                  className="flex items-center gap-2 rounded bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span
+                    className={`material-symbols-outlined text-[18px] leading-none ${
+                      isStartingInstall ? "animate-spin" : ""
+                    }`}
+                  >
+                    {isStartingInstall
+                      ? "progress_activity"
+                      : window.f95MirrorUi?.isBrowserOnly?.(selectedThreadLink)
+                        ? "open_in_browser"
+                        : "download"}
+                  </span>
+                  {isStartingInstall
+                    ? "Starting..."
+                    : window.f95MirrorUi?.getActionLabel?.(
+                        selectedThreadLink,
+                      ) || "Install"}
                 </button>
               </div>
             </div>

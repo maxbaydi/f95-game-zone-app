@@ -46,6 +46,8 @@ const getDownloadStatusTone = (status) => {
       return "border-accent/30 bg-accent/10 text-text";
     case "queued":
       return "border-border bg-white/5 text-text/85";
+    case "waiting":
+      return "border-amber-400/40 bg-amber-500/10 text-amber-100";
     case "installing":
       return "border-sky-400/30 bg-sky-500/10 text-sky-100";
     case "completed":
@@ -57,7 +59,16 @@ const getDownloadStatusTone = (status) => {
   }
 };
 
-const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
+const getDownloadStatusLabel = (status) =>
+  status === "waiting" ? "your turn" : status || "unknown";
+
+const DownloadsPanel = ({
+  isOpen,
+  items,
+  activeCount,
+  onClose,
+  onCancelWaiting,
+}) => {
   if (!isOpen) {
     return null;
   }
@@ -122,7 +133,7 @@ const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
                       <div
                         className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${getDownloadStatusTone(item.status)}`}
                       >
-                        {item.status || "unknown"}
+                        {getDownloadStatusLabel(item.status)}
                       </div>
                     </div>
 
@@ -130,30 +141,51 @@ const DownloadsPanel = ({ isOpen, items, activeCount, onClose }) => {
                       {item.text || "Waiting"}
                     </div>
 
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10">
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-300 ${
-                          item.status === "error"
-                            ? "bg-red-500"
-                            : item.status === "completed"
-                              ? "bg-emerald-500"
-                              : item.status === "installing"
-                                ? "bg-sky-500"
-                                : "bg-gradient-to-r from-accent to-accentBar"
-                        }`}
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
+                    {item.status === "waiting" ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10">
+                          <div className="h-full w-full animate-atlas-pulse-soft bg-amber-400/60" />
+                        </div>
+                        {onCancelWaiting && (
+                          <button
+                            type="button"
+                            onClick={() => onCancelWaiting(item)}
+                            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
+                          >
+                            Stop waiting
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10">
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-300 ${
+                            item.status === "error"
+                              ? "bg-red-500"
+                              : item.status === "completed"
+                                ? "bg-emerald-500"
+                                : item.status === "installing"
+                                  ? "bg-sky-500"
+                                  : "bg-gradient-to-r from-accent to-accentBar"
+                          }`}
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    )}
 
                     <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text/60">
-                      <div>{percent}%</div>
+                      {item.status !== "waiting" && <div>{percent}%</div>}
                       {hasTransferStats && (
                         <div>
                           {formatDownloadBytes(receivedBytes)} /{" "}
                           {formatDownloadBytes(totalBytes)}
                         </div>
                       )}
-                      <div>{formatDownloadSpeed(item.speedBytesPerSecond)}</div>
+                      {item.status !== "waiting" && (
+                        <div>
+                          {formatDownloadSpeed(item.speedBytesPerSecond)}
+                        </div>
+                      )}
                       {item.sourceHost && <div>{item.sourceHost}</div>}
                       {item.updatedAt && (
                         <div>{formatDownloadTimestamp(item.updatedAt)}</div>
