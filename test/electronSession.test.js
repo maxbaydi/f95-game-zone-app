@@ -51,8 +51,10 @@ function fakeSession(cookies = COOKIES) {
   return {
     setCalls,
     cookies: {
-      async get() {
-        return cookies;
+      // Electron's own URL filter misses domain cookies; emulate the worst
+      // case (nothing matched natively) so the wrapper must send them itself.
+      async get(filter = {}) {
+        return filter.url ? cookies.filter((cookie) => cookie.hostOnly && cookie.domain === new URL(filter.url).hostname) : cookies;
       },
       async set(cookie) {
         setCalls.push(cookie);
@@ -92,7 +94,10 @@ test("requests go through the transport with the session's user agent and matchi
 
 test("F95 login cookies reach masked-link requests, nothing reaches unrelated hosts", async () => {
   const seen = [];
-  const wrapped = createElectronResolverSession(fakeSession(), {
+  // Chromium matches nothing natively here, so the wrapper must send xf_user.
+  const session = fakeSession();
+  session.cookies.get = async (filter = {}) => (filter.url ? [] : COOKIES);
+  const wrapped = createElectronResolverSession(session, {
     transport: async (rawSession, url, init) => {
       seen.push(new Headers(init.headers).get("cookie"));
       return createMockResponse({ url, body: "ok" });
@@ -150,4 +155,26 @@ test("a cookie store that throws does not break the fetch", async () => {
   assert.equal(await response.text(), "ok");
   assert.equal(wrapped.getUserAgent(), "");
   assert.deepEqual(await wrapped.cookies.get({ url: "https://host.test/" }), []);
+});
+
+test("cookies Chromium matches on its own are not duplicated in the explicit header", async () => {
+  let seenInit = null;
+  const session = {
+    cookies: {
+      async get(filter = {}) {
+        return filter.url ? COOKIES.filter((cookie) => cookie.name === "cf_clearance") : COOKIES;
+      },
+      async set() {},
+      async remove() {},
+    },
+    getUserAgent: () => "Electron/37",
+  };
+  const wrapped = createElectronResolverSession(session, {
+    transport: async (rawSession, url, init) => {
+      seenInit = init;
+      return createMockResponse({ url, body: "ok" });
+    },
+  });
+  await wrapped.fetch("https://bzzhr.to/api/x", {});
+  assert.equal(new Headers(seenInit.headers).get("cookie"), "scoped=s", "cf_clearance is left to Chromium");
 });
