@@ -110,6 +110,18 @@ async function resolveKrakenfilesTarget(ctx, rawUrl) {
     (downloadForm?.attributes?.action &&
       buildAbsoluteUrl(finalPageUrl, downloadForm.attributes.action)) ||
     `https://krakenfiles.com/download/${fileHash}`;
+  // The form now embeds a Cloudflare Turnstile widget; without its token the
+  // server answers HTTP 500 {"status":"error","msg":"captcha not valid"}.
+  const formCaptcha = detectCaptchaKind(downloadForm?.innerHtml || "") || detectCaptchaKind(html);
+  if (formCaptcha) {
+    throw createActionRequiredError(
+      HOST_LABEL,
+      finalPageUrl,
+      `asks for a captcha (${formCaptcha}) before downloading. Press "Download now" in the browser window; the file is picked up automatically.`,
+      "captcha_required",
+    );
+  }
+
   const postResponse = await ctx.fetch(actionUrl, {
     method: "POST",
     headers: {
@@ -122,12 +134,18 @@ async function resolveKrakenfilesTarget(ctx, rawUrl) {
     },
     body: new URLSearchParams({ token }).toString(),
   });
+  const payload = await readResponseJson(postResponse);
+  if (/captcha/i.test(String(payload?.msg || ""))) {
+    throw createActionRequiredError(
+      HOST_LABEL,
+      finalPageUrl,
+      "asks for a captcha before downloading. Press \"Download now\" in the browser window; the file is picked up automatically.",
+      "captcha_required",
+    );
+  }
   if (!postResponse.ok) {
-    await cancelResponseBody(postResponse);
     throw createHttpError(postResponse, HOST_LABEL);
   }
-
-  const payload = await readResponseJson(postResponse);
   const downloadUrl = buildAbsoluteUrl(finalPageUrl, String(payload?.url || ""));
   if (downloadUrl && (!payload?.status || payload.status === "ok")) {
     return {

@@ -1,4 +1,5 @@
 const {
+  MirrorActionRequiredError,
   MirrorError,
   buildAbsoluteUrl,
   cancelResponseBody,
@@ -400,7 +401,11 @@ async function resolveGoogleDriveTarget(ctx, rawUrl) {
         };
       }
     } catch (error) {
-      if (error?.code === "cancelled" || error?.code === "quota_exceeded") {
+      if (
+        error?.code === "cancelled" ||
+        error?.code === "quota_exceeded" ||
+        (error instanceof MirrorActionRequiredError && error.fromChallenge)
+      ) {
         throw error;
       }
       if (!bestError || getErrorPriority(error) > getErrorPriority(bestError)) {

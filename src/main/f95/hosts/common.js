@@ -81,6 +81,8 @@ class MirrorActionRequiredError extends Error {
     this.userMessage = options.userMessage || message;
     this.hostLabel = options.hostLabel || "";
     this.retryable = false;
+    /** Set by detectBrowserChallenge: the registry swaps actionUrl for the mirror link. */
+    this.fromChallenge = false;
   }
 }
 
@@ -281,6 +283,16 @@ function parseBooleanAttribute(value) {
 }
 
 /**
+ * Markup inside comments is not part of the page. File hosts hide decoy
+ * forms and old links there (datanodes.to keeps a commented-out "<form>"
+ * above the real download form).
+ * @param {string} html
+ */
+function stripHtmlComments(html) {
+  return String(html || "").replace(/<!--[\s\S]*?-->/g, " ");
+}
+
+/**
  * Collect every anchor (`<a href>`) on a page with its visible text.
  * @param {string} html
  * @param {string} pageUrl
@@ -290,7 +302,7 @@ function extractAnchors(html, pageUrl) {
   const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
   let match = null;
 
-  while ((match = anchorPattern.exec(String(html || "")))) {
+  while ((match = anchorPattern.exec(stripHtmlComments(html)))) {
     const attributes = parseHtmlTagAttributes(match[1]);
     const url = buildAbsoluteUrl(pageUrl, attributes.href || "");
     if (!url) {
@@ -309,17 +321,34 @@ function extractAnchors(html, pageUrl) {
 
 /**
  * Parse every `<form>` on a page into a submit-ready description.
+ *
+ * A form ends at its `</form>` or at the next `<form` opening tag, so an
+ * unclosed form cannot swallow the ones after it; comments are ignored.
  * @param {string} html
  * @param {string} pageUrl
  */
 function extractHtmlForms(html, pageUrl) {
   const forms = [];
-  const formPattern = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
-  let formMatch = null;
+  const source = stripHtmlComments(html);
+  const openPattern = /<form\b([^>]*)>/gi;
+  const openings = [];
+  let openMatch = null;
+  while ((openMatch = openPattern.exec(source))) {
+    openings.push({
+      attributes: openMatch[1],
+      start: openMatch.index,
+      bodyStart: openMatch.index + openMatch[0].length,
+    });
+  }
 
-  while ((formMatch = formPattern.exec(String(html || "")))) {
-    const attributes = parseHtmlTagAttributes(formMatch[1]);
-    const innerHtml = formMatch[2] || "";
+  for (let index = 0; index < openings.length; index += 1) {
+    const opening = openings[index];
+    const nextOpening = openings[index + 1] ? openings[index + 1].start : source.length;
+    const closing = source.indexOf("</form>", opening.bodyStart);
+    const bodyEnd =
+      closing >= 0 && closing < nextOpening ? closing : nextOpening;
+    const attributes = parseHtmlTagAttributes(opening.attributes);
+    const innerHtml = source.slice(opening.bodyStart, bodyEnd);
     const inputs = [];
     const fields = {};
     const inputPattern = /<(input|button|select|textarea)\b([^>]*)>/gi;
@@ -950,6 +979,51 @@ function linkAbortSignals(signals, timeoutMs = 0) {
   };
 }
 
+const CHALLENGE_STATUSES = new Set([403, 429, 503]);
+const CHALLENGE_BODY_LIMIT = 256 * 1024;
+
+/**
+ * Cloudflare "Just a moment" pages and captcha walls answer 403/503/429 with
+ * an HTML body. Every host resolver would otherwise report them as a plain
+ * HTTP error, and the app only opens the browser-step window for
+ * action-required errors — so detect them once, here.
+ * @param {Response} response
+ * @param {string} url
+ * @returns {Promise<MirrorActionRequiredError | null>}
+ */
+async function detectBrowserChallenge(response, url) {
+  const status = Number(response?.status) || 0;
+  if (!CHALLENGE_STATUSES.has(status)) {
+    return null;
+  }
+  if (!isHtmlLikeContentType(getHeader(response, "content-type"))) {
+    return null;
+  }
+  const mitigated = getHeader(response, "cf-mitigated").toLowerCase();
+  let body = "";
+  try {
+    body = await readResponseText(response.clone(), CHALLENGE_BODY_LIMIT);
+  } catch {
+    body = "";
+  }
+  if (
+    mitigated !== "challenge" &&
+    !looksLikeCloudflareChallenge(body) &&
+    !detectCaptchaKind(body)
+  ) {
+    return null;
+  }
+  const error = createActionRequiredError(
+    hostnameOf(url) || "This mirror",
+    url,
+    "asks for a browser check (captcha / Cloudflare) before downloading.",
+    "captcha_required",
+  );
+  // The registry replaces actionUrl with the mirror link being resolved.
+  error.fromChallenge = true;
+  return error;
+}
+
 /**
  * Resolver context: a fetch bound to the Electron session with cancellation,
  * per-request timeouts and a status reporter.
@@ -978,11 +1052,20 @@ function createResolverContext(input = {}) {
       );
 
       try {
-        return await fetchWithSession(input.session, url, {
+        const response = await fetchWithSession(input.session, url, {
           ...fetchOptions,
           signal: link.signal,
         });
+        const challenge = await detectBrowserChallenge(response, url);
+        if (challenge) {
+          await cancelResponseBody(response);
+          throw challenge;
+        }
+        return response;
       } catch (error) {
+        if (error instanceof MirrorActionRequiredError) {
+          throw error;
+        }
         if (signal?.aborted) {
           throw new DownloadCancelledError();
         }
@@ -1171,6 +1254,7 @@ module.exports = {
   createResolverContext,
   decodeJavascriptEscapes,
   describeHttpStatus,
+  detectBrowserChallenge,
   detectCaptchaKind,
   extractAnchors,
   extractHtmlForms,
@@ -1206,6 +1290,7 @@ module.exports = {
   safeParseUrl,
   sleep,
   storeResponseCookies,
+  stripHtmlComments,
   stripHtmlTags,
   throwIfAborted,
   withRetry,

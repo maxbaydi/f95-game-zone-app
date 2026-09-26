@@ -103,11 +103,13 @@ function decodePayloadUrl(value) {
  * @param {NonNullable<ReturnType<typeof parseCountdownLandingConfig>>} config
  * @param {string} hostLabel
  */
-async function submitCountdownLanding(ctx, pageUrl, config, hostLabel) {
+async function submitCountdownLanding(ctx, pageUrl, config, hostLabel, actionUrl = pageUrl) {
   if (config.hasCaptcha) {
+    // Opening /download without the file context shows nothing useful; send
+    // the user to the mirror link, which lands on the same component.
     throw createActionRequiredError(
       hostLabel,
-      pageUrl,
+      actionUrl || pageUrl,
       "asks for a captcha before downloading.",
       "captcha_required",
     );
@@ -716,6 +718,7 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
         pageUrl,
         countdownConfig,
         hostLabel,
+        rawUrl,
       );
       return finalizeFromPage(downloadUrl, pageUrl);
     }

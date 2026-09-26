@@ -1,4 +1,5 @@
 const {
+  MirrorActionRequiredError,
   MirrorError,
   cancelResponseBody,
   createActionRequiredError,
@@ -142,7 +143,7 @@ async function fetchPixeldrainFileInfo(ctx, origin, id) {
       headers: { accept: "application/json" },
     });
   } catch (error) {
-    if (error?.code === "cancelled") {
+    if (error?.code === "cancelled" || error instanceof MirrorActionRequiredError) {
       throw error;
     }
     // Info is only used for pre-flight checks; the transfer will surface
