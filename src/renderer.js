@@ -95,6 +95,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   logoutF95: () => ipcRenderer.invoke("logout-f95"),
   installF95Thread: (payload) =>
     ipcRenderer.invoke("install-f95-thread", payload),
+  cancelF95Download: (id) => ipcRenderer.invoke("cancel-f95-download", id),
+  retryF95Download: (id) => ipcRenderer.invoke("retry-f95-download", id),
+  clearF95DownloadHistory: () =>
+    ipcRenderer.invoke("clear-f95-download-history"),
+  showF95DownloadInFolder: (id) =>
+    ipcRenderer.invoke("show-f95-download-in-folder", id),
   addAtlasMapping: (recordId, atlasId) =>
     ipcRenderer.invoke("add-atlas-mapping", { recordId, atlasId }),
   findF95Id: (atlasId) => ipcRenderer.invoke("find-f95-id", atlasId),
