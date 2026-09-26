@@ -75,6 +75,7 @@ function createF95BrowserWindow({
   title = "F95 Browser",
   reuseKey = "__atlasF95BrowserWindow",
   onNavigation = null,
+  openDevTools = true,
 }) {
   const emitNavigation = (windowInstance) => {
     if (
@@ -143,7 +144,7 @@ function createF95BrowserWindow({
   browserWindow.__atlasF95NavigationHandler =
     typeof onNavigation === "function" ? onNavigation : null;
 
-  if (process.defaultApp || appConfig?.Interface?.showDebugConsole) {
+  if (openDevTools && (process.defaultApp || appConfig?.Interface?.showDebugConsole)) {
     browserWindow.webContents.openDevTools({ mode: "detach" });
   }
 

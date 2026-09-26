@@ -1,17 +1,51 @@
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 
-const TEXTUAL_MIME_TYPES = new Set([
-  "text/html",
-  "application/xhtml+xml",
-  "text/plain",
-  "application/json",
-  "application/xml",
-  "text/xml",
-  "application/javascript",
-  "text/javascript",
-]);
+const {
+  DownloadCancelledError,
+  MirrorActionRequiredError,
+  MirrorError,
+  TEXTUAL_MIME_TYPES,
+  cancelResponseBody,
+  createResolverContext,
+  hostnameOf,
+  isFileResponse,
+  isTransientError,
+  looksLikeHtmlDocument,
+  normalizeHostname,
+  readResponseText,
+} = require("./hosts/common");
+const {
+  getMirrorHostInfo,
+  interpretMirrorTransferError,
+  isKnownMirrorHost,
+  prepareMirrorDownload,
+} = require("./hosts");
+const {
+  extractGoogleDriveConfirmUrl,
+  extractGoogleDriveDirectUrlFromHtml,
+  extractGoogleDriveFileId,
+  resolveGoogleDriveUrlWithContext,
+} = require("./hosts/googleDrive");
+const {
+  extractGofileContentId,
+  generateGofileWebsiteToken,
+  resolveGofileTarget,
+} = require("./hosts/gofile");
+const {
+  extractMixdropFileRef,
+  resolveMixdropTarget,
+  unpackDeanEdwardsPackedJs,
+} = require("./hosts/mixdrop");
+const { resolveUploadhavenTarget } = require("./hosts/uploadhaven");
+const {
+  extractHtmlDownloadCandidates,
+  parseCountdownLandingConfig,
+  resolveHtmlLandingDownloadUrlWithContext,
+  submitCountdownLanding,
+} = require("./hosts/xfilesharing");
+const { resolveKnownFileHostUrl } = require("./hosts/pixeldrain");
+const { createMegaDecryptTransform } = require("./hosts/mega");
 
 const TEXTUAL_PAGE_EXTENSIONS = new Set([
   "html",
@@ -81,15 +115,6 @@ const F95_ENGINE_LABELS = {
   tads: "Tads",
 };
 
-const GOFILE_CLIENT_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-const GOFILE_CLIENT_LANGUAGE = "en-US";
-const GOFILE_STATIC_WEBSITE_TOKEN = "4fd6sg89d7s6";
-const GOFILE_WT_WINDOW_SECONDS = 14400;
-
-const UPLOADHAVEN_SUBMIT_DELAY_MS = 5000;
-const MAX_PACKED_KEYWORD_COUNT = 10000;
-
 class DownloadValidationError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -99,35 +124,10 @@ class DownloadValidationError extends Error {
   }
 }
 
-class MirrorActionRequiredError extends Error {
-  constructor(message, options = {}) {
-    super(message);
-    this.name = "MirrorActionRequiredError";
-    this.code = options.code || "mirror_action_required";
-    this.actionUrl = options.actionUrl || "";
-    this.userMessage = options.userMessage || message;
-  }
-}
-
-function normalizeHostname(hostname) {
-  return String(hostname || "")
-    .replace(/^www\./i, "")
-    .toLowerCase();
-}
-
 function normalizeText(value) {
   return String(value || "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function safeDecodeHtmlEntities(value) {
-  return String(value || "")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
 }
 
 function extractBracketTokens(rawTitle) {
@@ -275,273 +275,6 @@ function detectArchiveTypeFromBuffer(buffer) {
   return "";
 }
 
-function looksLikeHtmlDocument(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    return false;
-  }
-
-  const previewText = buffer
-    .toString("utf8", 0, Math.min(buffer.length, 2048))
-    .toLowerCase();
-
-  return (
-    previewText.includes("<!doctype html") ||
-    previewText.includes("<html") ||
-    previewText.includes("<head") ||
-    previewText.includes("<body") ||
-    previewText.includes("<title>link masked") ||
-    previewText.includes("you're leaving f95zone")
-  );
-}
-
-function isHtmlLikeContentType(contentType) {
-  const normalizedContentType = String(contentType || "")
-    .toLowerCase()
-    .split(";")[0]
-    .trim();
-
-  return (
-    !normalizedContentType ||
-    TEXTUAL_MIME_TYPES.has(normalizedContentType) ||
-    normalizedContentType.startsWith("text/")
-  );
-}
-
-function buildAbsoluteUrl(baseUrl, rawValue) {
-  const normalizedValue = safeDecodeHtmlEntities(rawValue).trim();
-  if (!normalizedValue || normalizedValue.startsWith("javascript:")) {
-    return "";
-  }
-
-  try {
-    return new URL(normalizedValue, baseUrl).toString();
-  } catch {
-    return "";
-  }
-}
-
-function parseHtmlTagAttributes(rawAttributes) {
-  const attributes = {};
-  const attributePattern = /([:@a-zA-Z0-9_-]+)\s*=\s*["']([^"']*)["']/g;
-  let match = null;
-
-  while ((match = attributePattern.exec(String(rawAttributes || "")))) {
-    attributes[String(match[1] || "").toLowerCase()] = safeDecodeHtmlEntities(
-      match[2] || "",
-    );
-  }
-
-  return attributes;
-}
-
-function decodeJavascriptEscapes(value) {
-  return String(value || "")
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) =>
-      String.fromCharCode(Number.parseInt(code, 16)),
-    )
-    .replace(/\\x([0-9a-fA-F]{2})/g, (_, code) =>
-      String.fromCharCode(Number.parseInt(code, 16)),
-    )
-    .replace(/\\\//g, "/");
-}
-
-function extractHtmlTagAttributes(html, tagName) {
-  const pattern = new RegExp(`<${tagName}\\b([^>]*)>`, "i");
-  const match = String(html || "").match(pattern);
-  if (!match) {
-    return null;
-  }
-
-  return parseHtmlTagAttributes(match[1]);
-}
-
-function readTagAttribute(attributes, names) {
-  for (const name of names) {
-    const normalizedName = String(name || "").toLowerCase();
-    if (
-      attributes &&
-      Object.prototype.hasOwnProperty.call(attributes, normalizedName)
-    ) {
-      return attributes[normalizedName];
-    }
-  }
-
-  return "";
-}
-
-function parseBooleanAttribute(value) {
-  return /^(true|1|yes)$/i.test(String(value || "").trim());
-}
-
-function parseCountdownLandingConfig(html, pageUrl) {
-  const countdownAttributes = extractHtmlTagAttributes(
-    html,
-    "download-countdown",
-  );
-  if (!countdownAttributes) {
-    return null;
-  }
-
-  const fileActionAttributes =
-    extractHtmlTagAttributes(html, "file-actions") || {};
-  const referer = readTagAttribute(countdownAttributes, ["referer"]) || pageUrl;
-  const code =
-    readTagAttribute(countdownAttributes, ["code"]) ||
-    readTagAttribute(fileActionAttributes, ["code"]);
-
-  if (!code) {
-    return null;
-  }
-
-  return {
-    code,
-    referer,
-    rand: readTagAttribute(countdownAttributes, ["rand"]),
-    freeMethod: readTagAttribute(countdownAttributes, [
-      "free-method",
-      "freemethod",
-    ]),
-    premiumMethod: readTagAttribute(countdownAttributes, [
-      "premium-method",
-      "premiummethod",
-    ]),
-    countdown: Number(
-      readTagAttribute(countdownAttributes, [":countdown", "countdown"]) || 0,
-    ),
-    hasCaptcha: parseBooleanAttribute(
-      readTagAttribute(countdownAttributes, [":has-captcha", "has-captcha"]),
-    ),
-    hasPassword: parseBooleanAttribute(
-      readTagAttribute(countdownAttributes, [":has-password", "has-password"]),
-    ),
-    hasCountdown: parseBooleanAttribute(
-      readTagAttribute(countdownAttributes, [
-        ":has-countdown",
-        "has-countdown",
-      ]),
-    ),
-    fileLink: readTagAttribute(fileActionAttributes, ["link"]),
-    fileToken: readTagAttribute(fileActionAttributes, ["token"]),
-  };
-}
-
-function isGoogleDriveHost(hostname) {
-  const normalizedHost = normalizeHostname(hostname);
-  return (
-    normalizedHost === "drive.google.com" ||
-    normalizedHost === "docs.google.com" ||
-    normalizedHost === "drive.usercontent.google.com"
-  );
-}
-
-function getHostFamily(hostname) {
-  const parts = normalizeHostname(hostname).split(".").filter(Boolean);
-  if (parts.length <= 2) {
-    return parts.join(".");
-  }
-
-  return parts.slice(-2).join(".");
-}
-
-function isSameHostFamily(baseUrl, candidateUrl) {
-  try {
-    const baseHost = new URL(baseUrl).hostname;
-    const candidateHost = new URL(candidateUrl).hostname;
-    return getHostFamily(baseHost) === getHostFamily(candidateHost);
-  } catch {
-    return false;
-  }
-}
-
-function scoreHtmlDownloadCandidate(candidate) {
-  const url = String(candidate?.url || "");
-  const urlLower = url.toLowerCase();
-  const context = normalizeText(candidate?.context || "").toLowerCase();
-  let score = 0;
-
-  if (/\/download(?:\/|$)|\/dl(?:\/|$)|[?&]download(?:=|&|$)/i.test(url)) {
-    score += 80;
-  }
-
-  if (/direct/i.test(context)) {
-    score += 25;
-  }
-
-  if (/download|get file|start/i.test(context)) {
-    score += 35;
-  }
-
-  if (
-    /pricing|terms|privacy|blog|help|contact|report|preview|show in browser/i.test(
-      urlLower,
-    )
-  ) {
-    score -= 120;
-  }
-
-  if (/pricing|terms|privacy|blog|help|contact|report|preview/i.test(context)) {
-    score -= 80;
-  }
-
-  if (
-    candidate?.attributeName &&
-    /hx-get|href|formaction|action/i.test(candidate.attributeName)
-  ) {
-    score += 10;
-  }
-
-  return score;
-}
-
-function extractHtmlDownloadCandidates(pageUrl, html) {
-  const candidates = [];
-  const seen = new Set();
-  const tagPattern = /<(a|button|form)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
-  const attributePattern =
-    /\b(href|hx-get|hx-post|data-href|data-url|formaction|action)\s*=\s*["']([^"']+)["']/gi;
-
-  const pushCandidate = (attributeName, attributeValue, context) => {
-    const absoluteUrl = buildAbsoluteUrl(pageUrl, attributeValue);
-    if (!absoluteUrl || seen.has(`${attributeName}:${absoluteUrl}`)) {
-      return;
-    }
-
-    if (!isSameHostFamily(pageUrl, absoluteUrl)) {
-      return;
-    }
-
-    seen.add(`${attributeName}:${absoluteUrl}`);
-    candidates.push({
-      attributeName,
-      url: absoluteUrl,
-      context: normalizeText(context),
-    });
-  };
-
-  let tagMatch = null;
-  while ((tagMatch = tagPattern.exec(html))) {
-    const [, tagName, attributes, innerHtml] = tagMatch;
-    const context = normalizeText(
-      safeDecodeHtmlEntities(
-        `${attributes} ${String(innerHtml || "").replace(/<[^>]+>/g, " ")}`,
-      ),
-    );
-
-    let attributeMatch = null;
-    while ((attributeMatch = attributePattern.exec(attributes))) {
-      pushCandidate(attributeMatch[1], attributeMatch[2], context || tagName);
-    }
-  }
-
-  return candidates
-    .map((candidate) => ({
-      ...candidate,
-      score: scoreHtmlDownloadCandidate(candidate),
-    }))
-    .filter((candidate) => candidate.score > 0)
-    .sort((left, right) => right.score - left.score);
-}
-
 async function readFileHeader(filePath, bytesToRead = 4096) {
   const handle = await fs.promises.open(filePath, "r");
 
@@ -554,927 +287,74 @@ async function readFileHeader(filePath, bytesToRead = 4096) {
   }
 }
 
-async function buildCookieHeader(session, url) {
-  if (!session?.cookies?.get) {
-    return "";
-  }
-
-  const cookies = await session.cookies.get({ url });
-  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+/**
+ * Resolve a thread mirror link (masked F95 link or direct host link) into a
+ * transfer target. See src/main/f95/hosts/index.js for the host registry.
+ *
+ * Returns `{requestedUrl, resolvedUrl, sourceHost, mirrorHost, hostId,
+ * hostLabel, transfer, rangeMode, headers, fileName, size, mega}`.
+ * @param {any} session
+ * @param {string} rawUrl
+ * @param {Parameters<typeof prepareMirrorDownload>[2]} [options]
+ */
+async function prepareF95DownloadUrl(session, rawUrl, options = {}) {
+  return prepareMirrorDownload(session, rawUrl, options);
 }
 
-async function fetchWithSession(session, url, options) {
-  if (session && typeof session.fetch === "function") {
-    return session.fetch(url, options);
-  }
+// ─── Legacy single-host helpers (kept for callers and regression tests) ─────
 
-  const headers = new Headers(options?.headers || {});
-  const cookieHeader = await buildCookieHeader(session, url);
-  if (cookieHeader && !headers.has("cookie")) {
-    headers.set("cookie", cookieHeader);
-  }
-
-  return fetch(url, {
-    ...options,
-    headers,
-  });
+function createLegacyContext(session, options = {}) {
+  return createResolverContext({ session, ...options });
 }
 
-async function cancelResponseBody(response) {
-  try {
-    if (response?.body && typeof response.body.cancel === "function") {
-      await response.body.cancel();
-    }
-  } catch {
-    // Ignore body cancellation failures.
+function targetToUrl(result, fallbackUrl) {
+  if (!result) {
+    return fallbackUrl;
   }
-}
-
-function extractGoogleDriveFileId(rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (!isGoogleDriveHost(parsedUrl.hostname)) {
-      return "";
-    }
-
-    const searchParamId = normalizeText(parsedUrl.searchParams.get("id"));
-    if (searchParamId) {
-      return searchParamId;
-    }
-
-    const segments = parsedUrl.pathname.split("/").filter(Boolean);
-    const driveFileIndex = segments.findIndex((segment) => segment === "d");
-    if (driveFileIndex >= 0 && segments[driveFileIndex + 1]) {
-      return normalizeText(segments[driveFileIndex + 1]);
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-function extractGoogleDriveResourceKey(rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (!isGoogleDriveHost(parsedUrl.hostname)) {
-      return "";
-    }
-
-    return normalizeText(parsedUrl.searchParams.get("resourcekey"));
-  } catch {
-    return "";
-  }
-}
-
-function isGoogleDriveDownloadPath(pathname) {
-  return /(?:^|\/)(?:uc|download)(?:$|[/?#])/i.test(String(pathname || ""));
-}
-
-function isGoogleDriveDirectDownloadUrl(rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (!isGoogleDriveHost(parsedUrl.hostname)) {
-      return false;
-    }
-
-    if (!isGoogleDriveDownloadPath(parsedUrl.pathname)) {
-      return false;
-    }
-
-    return Boolean(
-      normalizeText(parsedUrl.searchParams.get("id")) &&
-        (normalizeText(parsedUrl.searchParams.get("export")) === "download" ||
-          parsedUrl.pathname.toLowerCase().includes("/download") ||
-          normalizeText(parsedUrl.searchParams.get("confirm"))),
-    );
-  } catch {
-    return false;
-  }
-}
-
-function buildGoogleDriveCandidateUrls(rawUrl) {
-  const fileId = extractGoogleDriveFileId(rawUrl);
-  if (!fileId) {
-    return [rawUrl];
-  }
-
-  const resourceKey = extractGoogleDriveResourceKey(rawUrl);
-  const candidates = new Set([rawUrl]);
-  const addCandidate = (hostname, pathname) => {
-    const candidateUrl = new URL(`https://${hostname}${pathname}`);
-    candidateUrl.searchParams.set("export", "download");
-    candidateUrl.searchParams.set("id", fileId);
-    if (resourceKey) {
-      candidateUrl.searchParams.set("resourcekey", resourceKey);
-    }
-    candidates.add(candidateUrl.toString());
-  };
-
-  addCandidate("drive.google.com", "/uc");
-  addCandidate("drive.usercontent.google.com", "/uc");
-  addCandidate("drive.usercontent.google.com", "/download");
-
-  return [...candidates];
-}
-
-function extractGoogleDriveDirectUrlFromHtml(html) {
-  const normalizedHtml = decodeJavascriptEscapes(String(html || ""));
-  const directUrlMatches =
-    normalizedHtml.match(
-      /https:\/\/drive(?:\.usercontent)?\.google\.com\/(?:u\/\d+\/)?(?:uc|download)\?[^"'<>\\\s]+/gi,
-    ) || [];
-
-  for (const rawMatch of directUrlMatches) {
-    const directUrl = safeDecodeHtmlEntities(rawMatch).trim();
-    if (isGoogleDriveDirectDownloadUrl(directUrl)) {
-      return directUrl;
-    }
-  }
-
-  return "";
-}
-
-function extractGoogleDriveConfirmUrl(html, pageUrl) {
-  const normalizedHtml = decodeJavascriptEscapes(String(html || ""));
-  const formPattern = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
-  let formMatch = null;
-
-  while ((formMatch = formPattern.exec(normalizedHtml))) {
-    const formAttributes = parseHtmlTagAttributes(formMatch[1]);
-    const actionUrl = buildAbsoluteUrl(pageUrl, formAttributes.action || "");
-    if (!actionUrl) {
-      continue;
-    }
-
-    let parsedAction = null;
-    try {
-      parsedAction = new URL(actionUrl);
-    } catch {
-      continue;
-    }
-
-    if (
-      !isGoogleDriveHost(parsedAction.hostname) ||
-      !isGoogleDriveDownloadPath(parsedAction.pathname)
-    ) {
-      continue;
-    }
-
-    const inputPattern = /<input\b([^>]*)>/gi;
-    let inputMatch = null;
-    while ((inputMatch = inputPattern.exec(formMatch[2]))) {
-      const inputAttributes = parseHtmlTagAttributes(inputMatch[1]);
-      const inputName = normalizeText(inputAttributes.name);
-      if (!inputName) {
-        continue;
-      }
-
-      parsedAction.searchParams.set(inputName, inputAttributes.value || "");
-    }
-
-    if (!parsedAction.searchParams.get("export")) {
-      parsedAction.searchParams.set("export", "download");
-    }
-
-    return parsedAction.toString();
-  }
-
-  return "";
-}
-
-function extractGofileContentId(rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (normalizeHostname(parsedUrl.hostname) !== "gofile.io") {
-      return "";
-    }
-
-    const segments = parsedUrl.pathname.split("/").filter(Boolean);
-    if (segments.length >= 2 && segments[0].toLowerCase() === "d") {
-      return segments[1];
-    }
-
-    if (
-      segments.length >= 3 &&
-      segments[0].toLowerCase() === "download" &&
-      segments[1].toLowerCase() === "web"
-    ) {
-      return segments[2];
-    }
-
-    if (segments.length >= 2 && segments[0].toLowerCase() === "file") {
-      return segments[1];
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-function extractNestedDownloadUrl(value) {
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-
-  const normalizedType = normalizeText(value.type).toLowerCase();
-
-  if (normalizedType === "file") {
-    if (typeof value.directLink === "string" && value.directLink.trim()) {
-      return value.directLink.trim();
-    }
-
-    if (typeof value.link === "string" && value.link.trim()) {
-      return value.link.trim();
-    }
-  }
-
-  if (Array.isArray(value.children)) {
-    for (const entry of value.children) {
-      const nestedUrl = extractNestedDownloadUrl(entry);
-      if (nestedUrl) {
-        return nestedUrl;
-      }
-    }
-  }
-
-  if (value.children && typeof value.children === "object") {
-    for (const entry of Object.values(value.children)) {
-      const nestedUrl = extractNestedDownloadUrl(entry);
-      if (nestedUrl) {
-        return nestedUrl;
-      }
-    }
-  }
-
-  if (value.directLinks && typeof value.directLinks === "object") {
-    for (const directLink of Object.values(value.directLinks)) {
-      if (typeof directLink === "string" && directLink.trim()) {
-        return directLink.trim();
-      }
-    }
-  }
-
-  return "";
-}
-
-async function createGofileGuestToken(session) {
-  let response;
-  try {
-    response = await fetchWithSession(
-      session,
-      "https://api.gofile.io/accounts",
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          "user-agent": GOFILE_CLIENT_USER_AGENT,
-          origin: "https://gofile.io",
-          referer: "https://gofile.io/",
-        },
-        body: "{}",
-      },
-    );
-  } catch (networkError) {
-    throw new Error(
-      "Gofile API is not responding (connection closed or timed out). Gofile may be temporarily rate-limiting your IP. Try again in a few minutes or use a different mirror.",
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `Gofile account bootstrap failed with HTTP ${response.status}.`,
-    );
-  }
-
-  const payload = await response.json().catch(() => null);
-  const token = payload?.data?.token;
-  if (!token) {
-    throw new Error("Gofile did not return a guest access token.");
-  }
-
-  return token;
-}
-
-function generateGofileWebsiteToken(token, salt, options = {}) {
-  const userAgent = options.userAgent || GOFILE_CLIENT_USER_AGENT;
-  const language = options.language || GOFILE_CLIENT_LANGUAGE;
-  const nowMs = typeof options.nowMs === "number" ? options.nowMs : Date.now();
-  const windowBucket = Math.floor(
-    Math.floor(nowMs / 1000) / GOFILE_WT_WINDOW_SECONDS,
-  ).toString();
-  const signatureInput = `${userAgent}::${language}::${token}::${windowBucket}::${salt}`;
-
-  return crypto.createHash("sha256").update(signatureInput).digest("hex");
-}
-
-async function fetchGofileWebsiteToken(session) {
-  try {
-    const response = await fetchWithSession(
-      session,
-      "https://gofile.io/dist/js/config.js",
-      {
-        method: "GET",
-        headers: { "user-agent": GOFILE_CLIENT_USER_AGENT },
-      },
-    );
-
-    if (!response.ok) {
-      return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
-    }
-
-    const js = await response.text();
-    const wtMatch = js.match(
-      /\bwebsiteToken\s*[:=]\s*["']([a-zA-Z0-9_-]+)["']/,
-    );
-    if (wtMatch) {
-      return { token: wtMatch[1], salt: "" };
-    }
-
-    const saltMatch = js.match(
-      /\bsalt\s*[:=]\s*["']([a-zA-Z0-9_-]+)["']/,
-    );
-    if (saltMatch) {
-      return { token: "", salt: saltMatch[1] };
-    }
-
-    return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
-  } catch {
-    return { token: GOFILE_STATIC_WEBSITE_TOKEN, salt: "" };
-  }
-}
-
-async function syncGofileGuestAccount(session, token) {
-  let response;
-  try {
-    response = await fetchWithSession(
-      session,
-      "https://api.gofile.io/accounts/website",
-      {
-        method: "GET",
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${token}`,
-          "user-agent": GOFILE_CLIENT_USER_AGENT,
-          origin: "https://gofile.io",
-          referer: "https://gofile.io/",
-        },
-      },
-    );
-  } catch (networkError) {
-    throw new Error(
-      "Gofile API is not responding. Gofile may be temporarily rate-limiting your IP. Try again in a few minutes or use a different mirror.",
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(`Gofile account sync failed with HTTP ${response.status}.`);
-  }
-
-  const payload = await response.json().catch(() => null);
-  if (payload?.status !== "ok" || !payload?.data?.token) {
-    throw new Error("Gofile did not return a usable synced account.");
-  }
-
-  return payload.data;
+  return typeof result === "string" ? result : result.url || fallbackUrl;
 }
 
 async function resolveGofileUrl(session, rawUrl) {
-  const contentId = extractGofileContentId(rawUrl);
-  if (!contentId) {
-    return rawUrl;
-  }
-
-  const guestToken = await createGofileGuestToken(session);
-  const account = await syncGofileGuestAccount(session, guestToken);
-
-  if (session?.cookies?.set) {
-    try {
-      await session.cookies.set({
-        url: "https://gofile.io",
-        name: "accountToken",
-        value: account.token,
-        domain: ".gofile.io",
-      });
-    } catch {
-      // Best-effort cookie injection for CDN downloads.
-    }
-  }
-
-  const wtInfo = await fetchGofileWebsiteToken(session);
-  const websiteToken = wtInfo.token
-    ? wtInfo.token
-    : generateGofileWebsiteToken(account.token, wtInfo.salt, {
-        userAgent: GOFILE_CLIENT_USER_AGENT,
-        language: GOFILE_CLIENT_LANGUAGE,
-      });
-
-  const fetchGofileContent = async (wt) => {
-    const contentResponse = await fetchWithSession(
-      session,
-      `https://api.gofile.io/contents/${encodeURIComponent(contentId)}`,
-      {
-        headers: {
-          accept: "application/json",
-          authorization: `Bearer ${account.token}`,
-          "x-website-token": wt,
-          "x-bl": GOFILE_CLIENT_LANGUAGE,
-          "user-agent": GOFILE_CLIENT_USER_AGENT,
-          origin: "https://gofile.io",
-          referer: "https://gofile.io/",
-        },
-      },
-    );
-    return contentResponse;
-  };
-
-  let response = await fetchGofileContent(websiteToken);
-
-  if (response.status === 401 && websiteToken !== GOFILE_STATIC_WEBSITE_TOKEN) {
-    await cancelResponseBody(response);
-    response = await fetchGofileContent(GOFILE_STATIC_WEBSITE_TOKEN);
-  }
-
-  if (!response.ok) {
-    const status = response.status;
-    await cancelResponseBody(response);
-    if (status === 401 || status === 403) {
-      throw new Error(
-        "Gofile rejected the request (authentication failed). The website token may have changed. Try again later or use a different mirror.",
-      );
-    }
-    throw new Error(
-      `Gofile content lookup failed with HTTP ${status}.`,
-    );
-  }
-
-  const payload = await response.json().catch(() => null);
-  const status = String(payload?.status || "");
-
-  if (status === "error-notPremium") {
-    throw new Error(
-      "This Gofile mirror requires a premium/direct-download path and cannot be installed automatically.",
-    );
-  }
-
-  if (status && status !== "ok") {
-    throw new Error(
-      payload?.status === "error-notFound"
-        ? "This Gofile mirror no longer exists."
-        : payload?.status || "Gofile content lookup failed.",
-    );
-  }
-
-  const resolvedUrl = extractNestedDownloadUrl(payload?.data || {});
-  if (!resolvedUrl) {
-    throw new Error(
-      "Gofile did not expose a downloadable file URL for this mirror.",
-    );
-  }
-
-  return resolvedUrl;
-}
-
-async function resolveGoogleDriveCandidateUrl(session, candidateUrl, seenUrls) {
-  if (!candidateUrl || seenUrls.has(candidateUrl)) {
-    return "";
-  }
-
-  seenUrls.add(candidateUrl);
-
-  const response = await fetchWithSession(session, candidateUrl, {
-    method: "GET",
-    redirect: "follow",
-  });
-
-  if (!response.ok) {
-    await cancelResponseBody(response);
-    throw new Error(`Google Drive mirror failed with HTTP ${response.status}.`);
-  }
-
-  const finalUrl = response.url || candidateUrl;
-  const contentType = response.headers.get("content-type") || "";
-  const contentDisposition = response.headers.get("content-disposition") || "";
-
-  if (
-    /attachment/i.test(contentDisposition) ||
-    !isHtmlLikeContentType(contentType)
-  ) {
-    await cancelResponseBody(response);
-    return finalUrl;
-  }
-
-  const html = await response.text();
-  if (
-    /Google Drive - Quota exceeded|too many users have viewed or downloaded this file|can't view or download this file at this time/i.test(
-      html,
-    )
-  ) {
-    throw new Error(
-      "This Google Drive mirror is temporarily unavailable because its public download quota is exceeded.",
-    );
-  }
-
-  const embeddedDirectUrl = extractGoogleDriveDirectUrlFromHtml(html);
-  if (embeddedDirectUrl && !seenUrls.has(embeddedDirectUrl)) {
-    const resolvedEmbeddedUrl = await resolveGoogleDriveCandidateUrl(
-      session,
-      embeddedDirectUrl,
-      seenUrls,
-    );
-    if (resolvedEmbeddedUrl) {
-      return resolvedEmbeddedUrl;
-    }
-  }
-
-  const confirmUrl = extractGoogleDriveConfirmUrl(html, finalUrl);
-  if (confirmUrl && !seenUrls.has(confirmUrl)) {
-    const resolvedConfirmUrl = await resolveGoogleDriveCandidateUrl(
-      session,
-      confirmUrl,
-      seenUrls,
-    );
-    if (resolvedConfirmUrl) {
-      return resolvedConfirmUrl;
-    }
-  }
-
-  throw new Error(
-    "Google Drive returned an unsupported interstitial page instead of a direct download.",
+  return targetToUrl(
+    await resolveGofileTarget(createLegacyContext(session), rawUrl),
+    rawUrl,
   );
 }
 
 async function resolveGoogleDriveUrl(session, rawUrl) {
-  try {
-    if (!isGoogleDriveHost(new URL(rawUrl).hostname)) {
-      return rawUrl;
-    }
-  } catch {
-    return rawUrl;
-  }
-
-  const seenUrls = new Set();
-  const candidateUrls = buildGoogleDriveCandidateUrls(rawUrl);
-  let lastError = null;
-
-  for (const candidateUrl of candidateUrls) {
-    try {
-      const resolvedUrl = await resolveGoogleDriveCandidateUrl(
-        session,
-        candidateUrl,
-        seenUrls,
-      );
-      if (resolvedUrl) {
-        return resolvedUrl;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
-  }
-
-  return rawUrl;
+  return resolveGoogleDriveUrlWithContext(createLegacyContext(session), rawUrl);
 }
 
-async function resolveMaskedF95Url(session, maskedUrl) {
-  const requestBody = new URLSearchParams({
-    xhr: "1",
-    download: "1",
-  }).toString();
-
-  const response = await fetchWithSession(session, maskedUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "x-requested-with": "XMLHttpRequest",
-    },
-    body: requestBody,
-  });
-
-  if (!response.ok) {
-    throw new Error(`F95 masked link failed with HTTP ${response.status}.`);
-  }
-
-  const payload = await response.json().catch(() => null);
-  if (!payload || typeof payload !== "object") {
-    throw new Error("F95 masked link returned an invalid response.");
-  }
-
-  if (payload.status === "ok" && payload.msg) {
-    return String(payload.msg);
-  }
-
-  if (payload.status === "captcha") {
-    throw new MirrorActionRequiredError(
-      "This masked F95 link now requires captcha confirmation. Open the mirror in the embedded browser and finish the captcha there.",
-      {
-        code: "captcha_required",
-        actionUrl: maskedUrl,
-        userMessage:
-          "This mirror needs captcha confirmation before F95Launcher can continue. Finish the captcha, then retry the install.",
-      },
-    );
-  }
-
-  throw new Error(
-    payload.msg || "F95 did not return a downloadable mirror for this thread.",
+async function resolveMixdropUrl(session, rawUrl) {
+  return targetToUrl(
+    await resolveMixdropTarget(createLegacyContext(session), rawUrl),
+    rawUrl,
   );
 }
 
-function extractMixdropFileRef(rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (!/(?:^|\.)mixdrop\./i.test(normalizeHostname(parsedUrl.hostname))) {
-      return "";
-    }
-
-    const match = parsedUrl.pathname.match(/^\/[ef]\/([a-zA-Z0-9]+)/i);
-    return match ? match[1] : "";
-  } catch {
-    return "";
-  }
-}
-
-function unpackDeanEdwardsPackedJs(packed) {
-  const argsMatch = String(packed || "").match(
-    /}\s*\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\.)*)'\s*\.split\s*\(\s*'\|'\s*\)/,
-  );
-  if (!argsMatch) {
-    return "";
-  }
-
-  const payload = argsMatch[1].replace(/\\(.)/g, (_, char) => char);
-  const radix = parseInt(argsMatch[2], 10);
-  const count = parseInt(argsMatch[3], 10);
-  const keywords = argsMatch[4].split("|");
-
-  if (
-    !Number.isSafeInteger(radix) ||
-    radix < 2 ||
-    radix > 62 ||
-    !Number.isSafeInteger(count) ||
-    count < 0 ||
-    count > MAX_PACKED_KEYWORD_COUNT ||
-    keywords.length === 0
-  ) {
-    return "";
-  }
-
-  function baseEncode(value) {
-    const remainder = value % radix;
-    const prefix =
-      value >= radix ? baseEncode(Math.floor(value / radix)) : "";
-    const digit =
-      remainder > 35
-        ? String.fromCharCode(remainder + 29)
-        : remainder.toString(36);
-    return prefix + digit;
-  }
-
-  const dict = {};
-  for (let i = 0; i < count; i++) {
-    const token = baseEncode(i);
-    dict[token] = keywords[i] || token;
-  }
-
-  return payload.replace(/\b\w+\b/g, (token) => dict[token] || token);
-}
-
-async function resolveMixdropUrl(session, rawUrl, seenUrls = new Set()) {
-  if (!extractMixdropFileRef(rawUrl)) {
-    return rawUrl;
-  }
-
-  if (seenUrls.has(rawUrl)) {
-    return rawUrl;
-  }
-  seenUrls.add(rawUrl);
-
-  const downloadPageUrl = rawUrl.replace(/\/e\//, "/f/");
-  const response = await fetchWithSession(session, downloadPageUrl, {
-    method: "GET",
-    redirect: "follow",
-  });
-
-  if (!response.ok) {
-    await cancelResponseBody(response);
-    throw new Error(`Mixdrop mirror failed with HTTP ${response.status}.`);
-  }
-
-  const html = await response.text();
-
-  if (/WE ARE SORRY/i.test(html)) {
-    throw new Error("This Mixdrop mirror no longer exists or was removed.");
-  }
-
-  if (
-    /cf-browser-verification|challenge-platform|cf-turnstile|just a moment/i.test(
-      html,
-    )
-  ) {
-    throw new MirrorActionRequiredError(
-      "This Mixdrop mirror requires browser verification.",
-      {
-        code: "mirror_action_required",
-        actionUrl: downloadPageUrl,
-        userMessage:
-          "This mirror requires browser verification. Open it in the embedded browser to continue.",
-      },
-    );
-  }
-
-  const redirectMatch = html.match(
-    /\bwindow\.location\s*=\s*['"]([^'"]+)['"]/,
-  );
-  if (redirectMatch) {
-    const redirectUrl = buildAbsoluteUrl(downloadPageUrl, redirectMatch[1]);
-    if (redirectUrl && !seenUrls.has(redirectUrl)) {
-      return resolveMixdropUrl(session, redirectUrl, seenUrls);
-    }
-  }
-
-  const unpacked = unpackDeanEdwardsPackedJs(html);
-  if (!unpacked) {
-    throw new MirrorActionRequiredError(
-      "Mixdrop page could not be parsed automatically.",
-      {
-        code: "mirror_action_required",
-        actionUrl: downloadPageUrl,
-        userMessage:
-          "This Mixdrop mirror could not be resolved automatically. Open it in the embedded browser to download.",
-      },
-    );
-  }
-
-  const wurlMatch = unpacked.match(/\bwurl\s*=\s*"([^"]+)"/);
-  if (wurlMatch) {
-    return wurlMatch[1].startsWith("//")
-      ? `https:${wurlMatch[1]}`
-      : wurlMatch[1];
-  }
-
-  const mdCoreMatches = [
-    ...unpacked.matchAll(/MDCore\.\w+\s*=\s*"([^"]+)"/g),
-  ];
-  for (const [, value] of mdCoreMatches) {
-    if (
-      /\/(?:dl|d|f|download)\//i.test(value) ||
-      /\.\w{2,4}(?:\?|$)/.test(value)
-    ) {
-      return value.startsWith("//") ? `https:${value}` : value;
-    }
-  }
-
-  throw new Error(
-    "Mixdrop page did not expose a downloadable file URL.",
+/**
+ * @param {any} session
+ * @param {string} rawUrl
+ * @param {{delayMs?: number}} [options]
+ */
+async function resolveUploadhavenUrl(session, rawUrl, options = {}) {
+  return targetToUrl(
+    await resolveUploadhavenTarget(createLegacyContext(session), rawUrl, options),
+    rawUrl,
   );
 }
 
-async function resolveUploadhavenUrl(session, rawUrl) {
-  try {
-    const parsedUrl = new URL(rawUrl);
-    if (normalizeHostname(parsedUrl.hostname) !== "uploadhaven.com") {
-      return rawUrl;
-    }
-    if (!parsedUrl.pathname.startsWith("/download/")) {
-      return rawUrl;
-    }
-  } catch {
-    return rawUrl;
-  }
-
-  const response = await fetchWithSession(session, rawUrl, {
-    method: "GET",
-    redirect: "follow",
-  });
-
-  if (!response.ok) {
-    await cancelResponseBody(response);
-    throw new Error(
-      `Uploadhaven mirror failed with HTTP ${response.status}.`,
-    );
-  }
-
-  const finalUrl = response.url || rawUrl;
-  const contentType = response.headers.get("content-type") || "";
-  const contentDisposition =
-    response.headers.get("content-disposition") || "";
-
-  if (
-    /attachment/i.test(contentDisposition) ||
-    !isHtmlLikeContentType(contentType)
-  ) {
-    await cancelResponseBody(response);
-    return finalUrl;
-  }
-
-  const html = await response.text();
-
-  if (/file not found|no longer available|has been removed/i.test(html)) {
-    throw new Error(
-      "This Uploadhaven mirror no longer exists or was removed.",
-    );
-  }
-
-  const hiddenFields = {};
-  const inputPattern = /<input\b([^>]*)>/gi;
-  let inputMatch;
-  while ((inputMatch = inputPattern.exec(html))) {
-    const attrs = parseHtmlTagAttributes(inputMatch[1]);
-    if ((attrs.type || "").toLowerCase() === "hidden" && attrs.name) {
-      hiddenFields[attrs.name] = attrs.value || "";
-    }
-  }
-
-  if (!hiddenFields._token) {
-    const metaCsrf = html.match(
-      /<meta\b[^>]*name\s*=\s*["']csrf-token["'][^>]*content\s*=\s*["']([^"']+)["']/i,
-    );
-    if (metaCsrf) {
-      hiddenFields._token = metaCsrf[1];
-    }
-  }
-
-  if (!hiddenFields._token) {
-    throw new MirrorActionRequiredError(
-      "Uploadhaven page did not contain the expected download form.",
-      {
-        code: "mirror_action_required",
-        actionUrl: rawUrl,
-        userMessage:
-          "This Uploadhaven mirror could not be downloaded automatically. Open it in the embedded browser to download.",
-      },
-    );
-  }
-
-  await new Promise((resolve) =>
-    setTimeout(resolve, UPLOADHAVEN_SUBMIT_DELAY_MS),
-  );
-
-  const formBody = new URLSearchParams({
-    ...hiddenFields,
-    type: "free",
-  }).toString();
-
-  const postResponse = await fetchWithSession(session, finalUrl, {
-    method: "POST",
-    redirect: "follow",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      origin: new URL(finalUrl).origin,
-      referer: finalUrl,
-    },
-    body: formBody,
-  });
-
-  if (!postResponse.ok) {
-    await cancelResponseBody(postResponse);
-    throw new Error(
-      `Uploadhaven download handshake failed with HTTP ${postResponse.status}.`,
-    );
-  }
-
-  const postFinalUrl = postResponse.url || finalUrl;
-  const postContentType =
-    postResponse.headers.get("content-type") || "";
-  const postContentDisposition =
-    postResponse.headers.get("content-disposition") || "";
-
-  if (
-    /attachment/i.test(postContentDisposition) ||
-    !isHtmlLikeContentType(postContentType)
-  ) {
-    await cancelResponseBody(postResponse);
-    return postFinalUrl;
-  }
-
-  const postHtml = await postResponse.text();
-
-  const downloadLinkMatch = postHtml.match(
-    /<a\b[^>]*href\s*=\s*["'](https?:\/\/[^"']+?)["'][^>]*>[\s\S]*?(?:download|click\s+here|get\s+file)/i,
-  );
-  if (downloadLinkMatch) {
-    return downloadLinkMatch[1];
-  }
-
-  throw new MirrorActionRequiredError(
-    "Uploadhaven free download handshake did not produce a direct file link.",
-    {
-      code: "mirror_action_required",
-      actionUrl: rawUrl,
-      userMessage:
-        "This Uploadhaven mirror could not be downloaded automatically. Open it in the embedded browser to download.",
-    },
+async function resolveHtmlLandingDownloadUrl(session, rawUrl, seenUrls = new Set()) {
+  return resolveHtmlLandingDownloadUrlWithContext(
+    createLegacyContext(session),
+    rawUrl,
+    seenUrls,
   );
 }
 
 async function resolveCountdownLandingDownloadUrl(session, rawUrl) {
-  const response = await fetchWithSession(session, rawUrl, {
+  const ctx = createLegacyContext(session);
+  const response = await ctx.fetch(rawUrl, {
     method: "GET",
     redirect: "follow",
   });
@@ -1485,211 +365,23 @@ async function resolveCountdownLandingDownloadUrl(session, rawUrl) {
   }
 
   const finalUrl = response.url || rawUrl;
-  const contentType = response.headers.get("content-type") || "";
-  const contentDisposition = response.headers.get("content-disposition") || "";
-
-  if (
-    /attachment/i.test(contentDisposition) ||
-    !isHtmlLikeContentType(contentType)
-  ) {
+  if (isFileResponse(response)) {
     await cancelResponseBody(response);
     return finalUrl;
   }
 
-  const html = await response.text();
+  const html = await readResponseText(response);
   const countdownConfig = parseCountdownLandingConfig(html, finalUrl);
   if (!countdownConfig) {
     return finalUrl;
   }
 
-  if (countdownConfig.hasCaptcha) {
-    throw new MirrorActionRequiredError(
-      "This mirror now requires captcha confirmation. Open it in the embedded browser and finish the captcha there.",
-      {
-        code: "captcha_required",
-        actionUrl: finalUrl,
-        userMessage:
-          "This mirror needs captcha confirmation before F95Launcher can continue. Finish the captcha, then retry the install.",
-      },
-    );
-  }
-
-  if (countdownConfig.hasPassword) {
-    throw new Error(
-      "Password-protected mirrors are not supported for automatic install yet.",
-    );
-  }
-
-  const requestBody = new URLSearchParams({
-    op: "download2",
-    id: countdownConfig.code,
-    rand: countdownConfig.rand || "",
-    referer: countdownConfig.referer || finalUrl,
-    method_free: countdownConfig.freeMethod || "",
-    method_premium: countdownConfig.premiumMethod || "",
-    g_captch__a: "1",
-  }).toString();
-
-  const countdownResponse = await fetchWithSession(session, finalUrl, {
-    method: "POST",
-    redirect: "manual",
-    headers: {
-      accept: "application/json, text/plain, */*",
-      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      referer: countdownConfig.referer || finalUrl,
-      "x-requested-with": "XMLHttpRequest",
-    },
-    body: requestBody,
-  });
-
-  if (!countdownResponse.ok) {
-    await cancelResponseBody(countdownResponse);
-    throw new Error(
-      `Mirror download handshake failed with HTTP ${countdownResponse.status}.`,
-    );
-  }
-
-  const payload = await countdownResponse.json().catch(() => null);
-  const resolvedPayloadUrl = buildAbsoluteUrl(
+  return submitCountdownLanding(
+    ctx,
     finalUrl,
-    decodeURIComponent(String(payload?.url || "")),
+    countdownConfig,
+    hostnameOf(finalUrl) || "This mirror",
   );
-
-  if (resolvedPayloadUrl) {
-    return resolvedPayloadUrl;
-  }
-
-  if (payload?.error) {
-    throw new Error(String(payload.error));
-  }
-
-  return finalUrl;
-}
-
-function resolveKnownFileHostUrl(rawUrl) {
-  const parsedUrl = new URL(rawUrl);
-  const hostname = normalizeHostname(parsedUrl.hostname);
-
-  if (hostname === "pixeldrain.com") {
-    const fileMatch = parsedUrl.pathname.match(/^\/u\/([^/?#]+)/i);
-    if (fileMatch) {
-      const directUrl = new URL(
-        `https://pixeldrain.com/api/file/${fileMatch[1]}`,
-      );
-      directUrl.searchParams.set("download", "");
-      return directUrl.toString();
-    }
-
-    const apiMatch = parsedUrl.pathname.match(/^\/api\/file\/([^/?#]+)/i);
-    if (apiMatch) {
-      parsedUrl.searchParams.set("download", "");
-      return parsedUrl.toString();
-    }
-
-    const listMatch = parsedUrl.pathname.match(/^\/l\/([^/?#]+)/i);
-    if (listMatch) {
-      throw new Error(
-        "Pixeldrain list mirrors are not supported yet. Pick a single-file mirror or open it in the embedded browser.",
-      );
-    }
-  }
-
-  return rawUrl;
-}
-
-async function resolveHtmlLandingDownloadUrl(
-  session,
-  rawUrl,
-  seenUrls = new Set(),
-) {
-  if (!rawUrl || seenUrls.has(rawUrl)) {
-    return rawUrl;
-  }
-
-  seenUrls.add(rawUrl);
-
-  const response = await fetchWithSession(session, rawUrl, {
-    method: "GET",
-    redirect: "follow",
-  });
-
-  if (!response.ok) {
-    await cancelResponseBody(response);
-    return response.url || rawUrl;
-  }
-
-  const finalUrl = response.url || rawUrl;
-  const contentType = response.headers.get("content-type") || "";
-  const contentDisposition = response.headers.get("content-disposition") || "";
-
-  if (
-    /attachment/i.test(contentDisposition) ||
-    !isHtmlLikeContentType(contentType)
-  ) {
-    await cancelResponseBody(response);
-    return finalUrl;
-  }
-
-  const html = await response.text();
-  const candidates = extractHtmlDownloadCandidates(finalUrl, html);
-  if (candidates.length === 0) {
-    return finalUrl;
-  }
-
-  for (const candidate of candidates) {
-    const normalizedCandidate = resolveKnownFileHostUrl(candidate.url);
-    if (!normalizedCandidate || seenUrls.has(normalizedCandidate)) {
-      continue;
-    }
-
-    const resolvedCandidate = await resolveHtmlLandingDownloadUrl(
-      session,
-      normalizedCandidate,
-      seenUrls,
-    );
-    if (resolvedCandidate && resolvedCandidate !== finalUrl) {
-      return resolvedCandidate;
-    }
-  }
-
-  return finalUrl;
-}
-
-async function prepareF95DownloadUrl(session, rawUrl) {
-  const parsedUrl = new URL(rawUrl);
-  let resolvedUrl = rawUrl;
-
-  if (
-    normalizeHostname(parsedUrl.hostname) === "f95zone.to" &&
-    parsedUrl.pathname.includes("/masked/")
-  ) {
-    resolvedUrl = await resolveMaskedF95Url(session, rawUrl);
-  }
-
-  resolvedUrl = await resolveGoogleDriveUrl(session, resolvedUrl);
-
-  const resolvedParsedUrl = new URL(resolvedUrl);
-  const resolvedHostname = normalizeHostname(resolvedParsedUrl.hostname);
-
-  if (resolvedHostname === "mega.nz" || resolvedHostname === "mega.io") {
-    throw new Error(
-      "MEGA mirrors are not supported for automatic install yet. Open the mirror in the embedded browser and download it manually.",
-    );
-  }
-
-  resolvedUrl = resolveKnownFileHostUrl(resolvedUrl);
-  resolvedUrl = await resolveGofileUrl(session, resolvedUrl);
-  resolvedUrl = await resolveMixdropUrl(session, resolvedUrl);
-  resolvedUrl = await resolveUploadhavenUrl(session, resolvedUrl);
-  resolvedUrl = await resolveCountdownLandingDownloadUrl(session, resolvedUrl);
-  resolvedUrl = await resolveHtmlLandingDownloadUrl(session, resolvedUrl);
-  resolvedUrl = resolveKnownFileHostUrl(resolvedUrl);
-
-  return {
-    requestedUrl: rawUrl,
-    resolvedUrl,
-    sourceHost: normalizeHostname(new URL(resolvedUrl).hostname),
-  };
 }
 
 async function inspectDownloadedPackage(input) {
@@ -1764,8 +456,11 @@ async function inspectDownloadedPackage(input) {
 }
 
 module.exports = {
+  DownloadCancelledError,
   DownloadValidationError,
   MirrorActionRequiredError,
+  MirrorError,
+  createMegaDecryptTransform,
   detectArchiveTypeFromBuffer,
   extractGofileContentId,
   extractGoogleDriveConfirmUrl,
@@ -1774,14 +469,17 @@ module.exports = {
   extractHtmlDownloadCandidates,
   extractMixdropFileRef,
   generateGofileWebsiteToken,
+  getMirrorHostInfo,
   inspectDownloadedPackage,
+  interpretMirrorTransferError,
+  isKnownMirrorHost,
+  isTransientError,
   looksLikeHtmlDocument,
   normalizeEngineLabel,
   normalizeHostname,
   parseCountdownLandingConfig,
   parseF95ThreadTitle,
   prepareF95DownloadUrl,
-  resolveMaskedF95Url,
   resolveCountdownLandingDownloadUrl,
   resolveGofileUrl,
   resolveGoogleDriveUrl,

@@ -22,7 +22,7 @@ const EmulatorLauncher = () => {
   const handleAddEmulator = async (e) => {
     e.preventDefault();
     if (!extension || !programPath) {
-      alert("Please provide both an extension and a program path.");
+      window.AtlasToast?.warning("Provide both a file extension and a program path.", { title: "Emulators" });
       return;
     }
 
@@ -40,12 +40,14 @@ const EmulatorLauncher = () => {
     // Save to database
     try {
       await window.electronAPI.saveEmulatorConfig(newEmulator);
+      window.AtlasToast?.success(`.${newEmulator.extension} files will open with the selected program.`, { title: "Emulator saved" });
       setExtension("");
       setProgramPath("");
       setParameters("");
     } catch (err) {
       console.error("Error saving emulator config:", err);
-      alert("Failed to save emulator configuration.");
+      setEmulators(emulators);
+      window.AtlasToast?.error(err?.message || "The emulator configuration could not be saved.", { title: "Emulators" });
     }
   };
 
@@ -70,7 +72,8 @@ const EmulatorLauncher = () => {
       await window.electronAPI.removeEmulatorConfig(ext);
     } catch (err) {
       console.error("Error removing emulator config:", err);
-      alert("Failed to remove emulator configuration.");
+      setEmulators(emulators);
+      window.AtlasToast?.error(err?.message || "The emulator configuration could not be removed.", { title: "Emulators" });
     }
   };
 

@@ -1,25 +1,35 @@
-const F95UpdateModal = ({
-  isOpen,
-  game,
-  thread,
-  isLoading,
-  isInstalling,
-  error,
-  captchaUrl,
-  actionKind,
-  handoff,
-  attemptEvents,
-  selectedLinkUrl,
-  onSelectLink,
-  onSolveCaptcha,
-  onOpenInBrowser,
-  onReopenHandoff,
-  onConfirm,
-  onClose,
-}) => {
-  if (!isOpen) {
+const useF95UpdateModalLayer = (isOpen, props, options) =>
+  window.AtlasMotion?.useModalLayer
+    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+    : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
+
+const F95UpdateModal = (liveProps) => {
+  const layer = useF95UpdateModalLayer(liveProps.isOpen, liveProps, {
+    onClose: () => {
+      if (!liveProps.isInstalling) {
+        liveProps.onClose?.();
+      }
+    },
+  });
+
+  if (!layer.isMounted) {
     return null;
   }
+
+  const {
+    game,
+    thread,
+    isLoading,
+    isInstalling,
+    error,
+    captchaUrl,
+    attemptEvents,
+    selectedLinkUrl,
+    onSelectLink,
+    onSolveCaptcha,
+    onConfirm,
+    onClose,
+  } = layer.props;
 
   const mirrorUi = window.f95MirrorUi || {};
   const links = Array.isArray(thread?.links) ? thread.links : [];
@@ -45,17 +55,43 @@ const F95UpdateModal = ({
     : mirrorUi.getActionLabel?.(selectedLink, {
         isUpdate: hasInstalledVersions,
       }) || (hasInstalledVersions ? "Update Now" : "Install Now");
-  const actionButtonLabel =
-    actionKind === "captcha" ? "Solve Captcha" : "Open Verification Page";
 
   return (
-    <div className="fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md">
-      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl">
-        <div className="border-b border-border px-6 py-5">
+    <div
+      className="atlas-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
+      data-state={layer.state}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !isInstalling) {
+          onClose?.();
+        }
+      }}
+    >
+      <div
+        ref={layer.dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={hasInstalledVersions ? "Update game" : "Install game"}
+        className="atlas-dialog flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        data-state={layer.state}
+      >
+        <div className="relative border-b border-border px-6 py-5">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isInstalling}
+            className="group absolute right-4 top-4 flex h-8 w-8 items-center justify-center border border-border bg-white/5 text-text transition hover:bg-white/10 disabled:opacity-40"
+            aria-label="Close"
+            title="Close (Esc)"
+          >
+            <span className="material-symbols-outlined text-[18px] leading-none transition-transform duration-500 group-hover:rotate-90">
+              close
+            </span>
+          </button>
           <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
             {hasInstalledVersions ? "Library Update" : "Library Install"}
           </div>
-          <div className="mt-2 text-2xl font-semibold text-text">
+          <div className="mt-2 pr-10 text-2xl font-semibold text-text">
             {thread?.title || game?.displayTitle || game?.title || "Update"}
           </div>
           <div className="mt-2 text-sm text-text/65">
@@ -69,104 +105,91 @@ const F95UpdateModal = ({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-          {isLoading && (
-            <div className="flex items-center justify-center gap-3 rounded-2xl border border-border bg-white/5 px-5 py-8 text-sm text-text/70">
-              <span className="material-symbols-outlined animate-spin text-[20px] leading-none text-accent">
-                progress_activity
-              </span>
-              Checking the live F95 thread and picking the best mirror...
+          {isLoading ? (
+            <div className="atlas-fade-enter space-y-4 rounded-2xl border border-border bg-white/5 px-5 py-6 text-sm text-text/70">
+              <div className="flex items-center justify-center gap-2">
+                <span
+                  className="atlas-spinner atlas-keep-motion text-accent"
+                  aria-hidden
+                />
+                Checking the live F95 thread and picking the best mirror...
+              </div>
+              <div className="space-y-3">
+                <div className="atlas-skeleton h-28 w-full" />
+                <div className="atlas-skeleton h-11 w-full" />
+              </div>
             </div>
-          )}
-
-          {handoff && (
-            <div className="border border-accent/40 bg-accent/10 px-5 py-4 text-sm text-text">
-              <div className="flex items-center gap-2 font-semibold">
-                <span className="material-symbols-outlined animate-atlas-pulse-soft text-[20px] leading-none text-accent">
-                  open_in_browser
-                </span>
-                Waiting for your download from {handoff.hostName}
-              </div>
-              <div className="mt-2 text-text/75">
-                The {handoff.hostName} page is open in the browser window. Press
-                its Download button. F95Launcher picks up the file and installs
-                it automatically, and you can follow it in Downloads.
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={onReopenHandoff}
-                  className="rounded-lg border border-accent/40 bg-white/5 px-4 py-2 text-sm text-text transition hover:bg-white/10"
+          ) : (
+            <>
+              {error && (
+                <div
+                  key={error}
+                  className="atlas-shake rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100"
+                  role="alert"
                 >
-                  Open the page again
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!isLoading && error && (
-            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100">
-              <div>{error}</div>
-              {captchaUrl ? (
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={onSolveCaptcha}
-                    className="rounded-lg border border-red-200/20 bg-white/5 px-4 py-2 text-sm text-red-50 transition hover:bg-white/10"
-                  >
-                    {actionButtonLabel}
-                  </button>
-                  <div className="text-xs text-red-100/80">
-                    After the check F95Launcher continues on its own. If the
-                    host shows a Download button instead, just press it and the
-                    file is installed for you.
-                  </div>
-                </div>
-              ) : (
-                thread &&
-                selectedLink &&
-                !selectedIsBrowserOnly &&
-                !isInstalling && (
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={onOpenInBrowser}
-                      className="rounded-lg border border-red-200/20 bg-white/5 px-4 py-2 text-sm text-red-50 transition hover:bg-white/10"
+                  <div className="flex items-start gap-2">
+                    <span
+                      className="material-symbols-outlined shrink-0 text-[18px] text-red-300"
+                      aria-hidden
                     >
-                      Download {hostName} in the browser instead
-                    </button>
-                    <div className="text-xs text-red-100/80">
-                      Press Download on the page and F95Launcher installs the
-                      file for you.
+                      error
+                    </span>
+                    <div>
+                      {error}
+                      {thread && links.length > 1 && !captchaUrl && (
+                        <div className="mt-1 text-xs text-red-100/75">
+                          Pick another mirror below and try again.
+                        </div>
+                      )}
                     </div>
                   </div>
-                )
+                  {captchaUrl && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={onSolveCaptcha}
+                        className="rounded-lg border border-red-200/20 bg-white/5 px-4 py-2 text-sm text-red-50 transition hover:bg-white/10"
+                      >
+                        Solve Captcha
+                      </button>
+                      <div className="text-xs text-red-100/80">
+                        After the check F95Launcher continues on its own.
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
-            </div>
-          )}
 
-          {!isLoading && thread && links.length === 0 && (
-            <div className="rounded-2xl border border-border bg-white/5 px-5 py-8 text-center text-sm text-text/70">
-              No mirrors were found for this thread.
-            </div>
-          )}
+              {thread && links.length === 0 && (
+                <div className="rounded-2xl border border-border bg-white/5 px-5 py-8 text-center text-sm text-text/70">
+                  No mirrors were found for this thread.
+                </div>
+              )}
 
-          {!isLoading && thread && links.length > 0 && (
-            <window.F95MirrorPicker
-              key={thread.threadUrl || "thread"}
-              thread={thread}
-              selectedLinkUrl={selectedLink?.url || ""}
-              onSelectLink={(link) => onSelectLink(link.url)}
-              disabled={isInstalling}
-              attemptEvents={attemptEvents}
-            />
+              {thread && links.length > 0 && (
+                <div className="atlas-view-enter">
+                  <window.F95MirrorPicker
+                    key={thread.threadUrl || "thread"}
+                    thread={thread}
+                    selectedLinkUrl={selectedLink?.url || ""}
+                    onSelectLink={(link) => onSelectLink(link.url)}
+                    disabled={isInstalling}
+                    attemptEvents={attemptEvents}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
-          <div className="min-w-0 text-xs text-text/55">
+          <div
+            key={selectedLink?.url || "none"}
+            className="atlas-fade-enter min-w-0 text-xs text-text/55"
+          >
             {selectedLink
               ? selectedIsBrowserOnly
-                ? `${hostName} opens in the browser; the download is installed automatically.`
+                ? `${hostName} opens in a browser window; press Download there and the file is installed for you.`
                 : `${hostName} downloads and installs automatically.`
               : "No mirror selected"}
           </div>
@@ -174,28 +197,32 @@ const F95UpdateModal = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-border bg-white/5 px-4 py-2 text-sm text-text transition hover:bg-white/10"
+              disabled={isInstalling}
+              className="rounded-lg border border-border bg-white/5 px-4 py-2 text-sm text-text transition hover:bg-white/10 disabled:opacity-50"
             >
-              {handoff ? "Close" : "Cancel"}
+              Cancel
             </button>
             <button
               type="button"
               onClick={onConfirm}
               disabled={isLoading || isInstalling || !selectedLink}
-              className="flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <span
-                className={`material-symbols-outlined text-[18px] leading-none ${
-                  isInstalling ? "animate-spin" : ""
-                }`}
-              >
-                {isInstalling
-                  ? "progress_activity"
-                  : selectedIsBrowserOnly && !captchaUrl
-                    ? "open_in_browser"
-                    : "download"}
-              </span>
-              {isInstalling ? "Starting..." : confirmLabel}
+              {isInstalling ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span
+                  className="material-symbols-outlined text-[18px] leading-none"
+                  aria-hidden
+                >
+                  {captchaUrl
+                    ? "refresh"
+                    : selectedIsBrowserOnly
+                      ? "open_in_browser"
+                      : "download"}
+                </span>
+              )}
+              {isInstalling ? "Connecting to the mirror..." : confirmLabel}
             </button>
           </div>
         </div>

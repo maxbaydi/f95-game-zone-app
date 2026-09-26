@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-04-13
+Last updated: 2026-09-26
 
 ## How To Read This File
 
@@ -20,6 +20,63 @@ Last updated: 2026-04-13
 | Stage 4. Sync UX                 | in_progress |      68% | Settings now have a dedicated Cloud Saves page for config/auth, the library details panel exposes refresh/upload/restore actions plus sync state, false warning rendering after successful backup is fixed, and the cloud panel now exposes bulk backup/sync actions plus cloud-library refresh state. Richer conflict prompts, remote history browsing and long-running background sync smoke are still missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Stage 5. Quality hardening       | partial     |      63% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests, archive safety tests, a dedicated tray controller, and system-notification coverage for app/tray flows now exist. Manual packaged smoke and longer-running desktop lifecycle validation are still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | MVP total                        | in_progress |      84% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### 2026-09-27 — Установка из файла, скачанного в своём браузере (обход Turnstile/Adscore)
+
+- Status: done
+- Progress: 100%
+- ТЗ coverage: закрывает установку/обновление игр из интерфейса для зеркал, которые не проходятся во встроенном окне
+
+What was done:
+
+- Жалобы из приложения разобраны в отдельном профиле Electron с реальными кликами: DataNodes 404 «file no longer exists» — терялись cookies промежуточного редиректа в `net.request` (исправлено в `electronSession.js`, теперь ACTION_REQUIRED, как и ожидалось); Mixdrop — клик по DOWNLOAD открывает рекламный попап, Adscore помечает окно как бота; DataNodes шаг 2 — Turnstile отвечает 600010 и с sandbox, и без, и с UA Chrome. Вывод: такие зеркала во встроенном окне не завершить.
+- Новый модуль `src/main/f95/manualInstall.js`: проверка выбранного файла (расширение пакета, не `.crdownload`/`.part`, непустой), копирование в папку загрузок под уникальным именем, тексты ошибок.
+- main.js: `installF95PackageFromFile` (копия → обычный `finalizeF95DownloadedPackage`), IPC `open-f95-download-in-browser` (shell.openExternal, только http(s), запись в `action` с `actionMode: "file"`) и `install-f95-download-from-file` (системный диалог, проверка до смены состояния, установка в фоне).
+- Стор: публичное поле `actionMode` (`window` | `file`), сбрасывается при `fail`/`resolving`/`start`/`cancel`/`complete`.
+- Панель загрузок: блок «Stuck on this page?» (Open in my browser / Pick downloaded file) для статуса Your turn и для Failed со ссылкой; режим «Waiting for your file» после открытия в браузере; кнопка «Install from file» у любой неудавшейся загрузки; тосты.
+- Документация: `docs/mirror-manual-install.md`, обновлены `mirror-browser-step.md`, `mirror-verification.md`, индекс.
+
+How:
+
+- Копия вместо переноса: файл выбирал пользователь, а обработанный пакет после установки удаляется — перенос уничтожил бы пользовательскую копию. Проверка файла выполняется до смены статуса, чтобы неверный выбор не ломал карточку.
+- Тесты: `test/manualInstall.test.js` (9), `test/downloadsStoreAction.test.js` (+2); `npm run lint`, `npm run typecheck`, `npm test` (370) — зелёные; JSX панели проверен Babel (react+env).
+
+Проверка в приложении (2026-09-27, `npm run dev`, логин пользователя, клики через Orca):
+
+- Shattered Grace → DataNodes → окно шага закрыто → Failed с блоком «Stuck on this page?» → Open in my browser (Chrome открыл страницу, карточка «Your turn / Waiting for your file») → Pick downloaded file с `notes.txt` → тост «Pick the game archive or installer…», карточка без изменений → выбор `ShatteredGrace-0.1.11.1-win.zip` (222 МБ) → Installing → Installed, Show in library, библиотека 63 → 64, оригинал не тронут, папка загрузок приложения пуста.
+- Попутно: устаревшая строка «needs a quick step in the browser window…» в F95-обозревателе теперь снимается, как только прогресс переходит в downloading/installing/completed/error/cancelled.
+
+What is left:
+
+- Cancel в режиме «Waiting for your file» и «Open the link again» проверены только кодом/тестами стора, не кликами.
+- Mixdrop в приложении: тот же путь (Adscore не даёт скачать во встроенном окне), живой клик не повторялся.
+
+### 2026-09-26 — Живая проверка зеркал, Gofile, шаг в браузере с автопродолжением
+
+- Status: in_progress
+- Progress: 85%
+- ТЗ coverage: закрывает «загрузка через зеркала F95» на реальных серверах; UX капчи/Cloudflare; сессия Electron для загрузчика
+
+What was done:
+
+- `scripts/check-mirrors.js` (`npm run check:mirrors`): реальные ссылки через код приложения (resolver → downloadToFile → inspectDownloadedPackage), SHA-256, размер, `7z t`, `--simulate-drop` (докачка по Range/MEGA-path), `--capture` (фикстуры), `--thread` (зеркала стартового поста F95), `--jar`, `--resolve-only`, `--max-size`, `--cookie-domains`.
+- `scripts/check-mirrors-electron.js` (`npm run check:mirrors:app`): те же проверки через сессию приложения (партиция `persist:f95-auth`, Chromium) и настоящий поток «шаг в браузере» с усыновлением загрузок из окна.
+- Общий модуль опций передачи `src/main/f95/transferOptions.js`; `src/main/f95/cookieJar.js` — Node-сессия; `fetchWithCookieJar` с редиректами и Set-Cookie.
+- Резолверы по реальным ответам: Gofile (новый website-token, ротация, аккаунт в cookie), Dropbox (страница «File Deleted» → not_found, зонд `?dl=1`), qu.ax/pomf (лендинг + Referer), формы в HTML-комментариях и незакрытые формы (DataNodes), Turnstile у Mixdrop/Krakenfiles/DataNodes/UsersDrive → `captcha_required`, Cloudflare-стены централизованно в `ctx.fetch`, XFS POST-редиректы вручную, «голые» домены не считаются зеркалами.
+- `src/main/f95/mirrorActionFlow.js` + main.js: капча/Cloudflare открываются в окне, после прохождения загрузка стартует сама (зонд цели `probeTarget`); статус `action` в сторе и панели.
+- `src/main/f95/electronSession.js`: выяснено на Electron 37, что `session.fetch` из main не шлёт cookies, не сохраняет Set-Cookie, не даёт ручные редиректы и блокирует Referer — все запросы загрузчика теперь идут через `net.request` с явными cookies партиции, `referrerPolicy: unsafe-url` и записью Set-Cookie.
+- Попутно: импорт метаданных Atlas падал на новой колонке `external_ids`; `db` в main.js брался до инициализации — исправлено с тестами.
+- Документация: `docs/check-mirrors.md`, `docs/mirror-browser-step.md`, `docs/mirror-verification.md`, индекс `docs/README.md`.
+
+How:
+
+- Живые прогоны: публичные файлы, собственные тестовые загрузки, ~450 тредов F95 (поиск по хостам с cookies пользователя) → 31+ хостов; ответы серверов сохранены обезличенно как фикстуры (`test/fixtures/hosts/*`), регрессионные тесты офлайн (353 теста).
+
+What is left:
+
+- Финальный Electron-прогон с новым транспортом (Buzzheavier, DailyUploads, masked-ссылки) и итоговая таблица в `docs/mirror-verification.md`.
+- Хосты с Turnstile на кнопке (Mixdrop, Krakenfiles, DataNodes, Send.cm, UsersDrive, Uploadhaven, HexUpload) — только с человеком в окне; проверка в приложении с пользователем.
+- Ручная проверка UI приложения (статусы, отмена/повтор, `.part`) с пользователем.
 
 ### 2026-04-13 — Desktop shell UX: tray minimization plus native update notifications
 
@@ -4618,3 +4675,32 @@ Release path:
 Not included:
 
 - `claude/dazzling-bardeen-4gwbcw` (download pipeline rework from another session) is not merged into `main` and is not part of this release
+
+## 2026-09-26 — Merge `claude/dazzling-bardeen-4gwbcw` into `main`
+
+What was done:
+
+- merged the download pipeline rework (host registry, browser-step window, manual install, downloads queue with cancel/retry, vendored assets, animation runtime, crash-safe config writes) into `main`
+- the mirror tiers now follow the host registry: every host the pipeline downloads without the user (Pixeldrain, Gofile, Google Drive, MediaFire, MEGA, Dropbox, Yandex, Catbox, Pomf, DailyUploads) is "Auto"; Buzzheavier, Files.fm and OneDrive are "Usually automatic"; hosts the registry marks as browser-only are "In browser"
+- the auto-fallback chain runs inside the new pipeline: if the chosen mirror fails, up to three other mirrors of the same build are tried; if none works without the user, the browser step opens for the first mirror that asked for one
+- the old "browser handoff" (waiting for a download from a mirror page) was removed; the pipeline's browser-step window covers it (the download started in that window is adopted and installed)
+- settings: kept the reworked pages; ported the "Interface animations" choice (System / Full / Reduced / Off) into Appearance; each page is wrapped in an error boundary, the page switch animates and the selection bar slides; the settings window uses the crash screen and the vendored assets
+- update dialog and F95 browser: recommendation card, attempt log and fallback notes on top of the animated dialog layer, close button, loading skeleton and error shake
+- empty library shows the getting-started guide once the library has loaded; the setup assistant opens on first launch
+
+Removed:
+
+- `src/main/f95/browserHandoffs.js` and its tests, `start/cancel-f95-browser-handoff` IPC
+- `Interface.jsx`, `Notifications.jsx`, `Appearance.jsx` (old settings pages) and `settingsStore.js`; saves go through the allow-listed `update-settings` IPC, which now also accepts `Interface.motion`
+
+Checks:
+
+- `npm run lint`, `npm run typecheck`
+- `npm test`: 402 pass; the same 5 environment-only failures (Windows paths, missing 7-Zip binary)
+- every script listed in `index.html` and `settings.html` compiles with the bundled Babel, and no two scripts declare the same top-level name
+- rendered first launch, the empty library, Settings (General, Library & folders, About, Appearance), the settings window and the update dialog (recommended, expanded, attempts, all mirrors failed) in Chromium; no page errors
+
+What remains / manual verification steps:
+
+- on Windows: install from Pixeldrain/Gofile; pick a browser-only mirror and confirm the browser-step window opens and the download is installed
+- make the first mirror fail (e.g. block it) and confirm the next one is used and the Downloads entry says so

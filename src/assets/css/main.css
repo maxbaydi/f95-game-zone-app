@@ -112,9 +112,958 @@ html.atlas-scrollbar-reveal *::-webkit-scrollbar-thumb,
 }
 
 details.tags-spoiler > summary .tag-chevron {
-  transition: transform 200ms ease;
+  transition: transform var(--atlas-dur-fast) var(--atlas-ease-out);
 }
 
 details.tags-spoiler[open] > summary .tag-chevron {
   transform: rotate(180deg);
+}
+
+/* ==========================================================================
+   Motion system
+   Every interactive surface animates in the 400-700ms range with an
+   expo-out curve so long durations still feel responsive. The
+   `data-motion` attribute on <html> (auto | full | reduced | off) is set by
+   atlas-ui.js from Settings > Interface and respects the OS preference in
+   "auto" mode.
+   ========================================================================== */
+
+:root {
+  --atlas-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --atlas-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
+  --atlas-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --atlas-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --atlas-dur-fast: 400ms;
+  --atlas-dur-base: 500ms;
+  --atlas-dur-slow: 650ms;
+  --atlas-dur-exit: 400ms;
+  --atlas-stagger: 35ms;
+  interpolate-size: allow-keywords;
+  accent-color: #66c0f4;
+  color-scheme: dark;
+}
+
+html[data-motion="reduced"] {
+  --atlas-dur-fast: 160ms;
+  --atlas-dur-base: 180ms;
+  --atlas-dur-slow: 200ms;
+  --atlas-dur-exit: 150ms;
+  --atlas-stagger: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-motion="auto"] {
+    --atlas-dur-fast: 160ms;
+    --atlas-dur-base: 180ms;
+    --atlas-dur-slow: 200ms;
+    --atlas-dur-exit: 150ms;
+    --atlas-stagger: 0ms;
+  }
+}
+
+html[data-motion="off"] *:not(.atlas-keep-motion):not(.animate-spin):not(.atlas-skeleton),
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+}
+
+::selection {
+  background: rgba(102, 192, 244, 0.35);
+  color: #ffffff;
+}
+
+/* Low-specificity defaults: any control without its own Tailwind transition
+   still eases its hover/focus colors instead of snapping. */
+:where(button, a, input, select, textarea, summary, label, [role="button"],
+    [role="tab"], [role="option"], .cursor-pointer) {
+  transition-property: color, background-color, border-color, outline-color,
+    text-decoration-color, fill, stroke, box-shadow, opacity, filter;
+  transition-duration: var(--atlas-dur-fast);
+  transition-timing-function: var(--atlas-ease-out);
+}
+
+:where(input, select, textarea):focus-visible {
+  box-shadow: 0 0 0 2px rgba(102, 192, 244, 0.35);
+}
+
+:where(button, a, [role="button"], [tabindex]):focus-visible {
+  outline-offset: 2px;
+  animation: atlas-focus-ring var(--atlas-dur-base) var(--atlas-ease-out);
+}
+
+:where(button):disabled {
+  cursor: not-allowed;
+}
+
+/* Smooth open/close for every <details> (Chromium 131+). */
+details::details-content {
+  block-size: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    block-size var(--atlas-dur-base) var(--atlas-ease-out),
+    opacity var(--atlas-dur-base) var(--atlas-ease-out),
+    content-visibility var(--atlas-dur-base) allow-discrete;
+}
+
+details[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+
+@keyframes atlas-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes atlas-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes atlas-rise-in {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-sink-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
+}
+
+@keyframes atlas-dialog-in {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.955); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-dialog-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
+}
+
+@keyframes atlas-drawer-in-right {
+  from { opacity: 0.4; transform: translate3d(104%, 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-drawer-out-right {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0.4; transform: translate3d(104%, 0, 0); }
+}
+
+@keyframes atlas-panel-in-right {
+  from { opacity: 0; transform: translate3d(48px, 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-panel-out-right {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(48px, 0, 0); }
+}
+
+@keyframes atlas-popover-in {
+  from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-popover-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.97); }
+}
+
+@keyframes atlas-dock-in {
+  from { opacity: 0; transform: translate3d(-50%, 20px, 0) scale(0.97); }
+  to { opacity: 1; transform: translate3d(-50%, 0, 0); }
+}
+
+@keyframes atlas-dock-out {
+  from { opacity: 1; transform: translate3d(-50%, 0, 0); }
+  to { opacity: 0; transform: translate3d(-50%, 16px, 0) scale(0.97); }
+}
+
+@keyframes atlas-view-in {
+  from { opacity: 0; transform: translate3d(0, 12px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-card-in {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.965); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-slide-in-left {
+  from { opacity: 0; transform: translate3d(-14px, 0, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-ripple {
+  from { transform: translate(-50%, -50%) scale(0); opacity: 0.42; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+@keyframes atlas-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+@keyframes atlas-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+
+@keyframes atlas-focus-ring {
+  from { outline-offset: 6px; outline-color: rgba(102, 192, 244, 0); }
+  to { outline-offset: 2px; }
+}
+
+@keyframes atlas-progress-stripes {
+  from { background-position: 0 0; }
+  to { background-position: 28px 0; }
+}
+
+@keyframes atlas-indeterminate {
+  0% { transform: translateX(-110%) scaleX(0.6); }
+  60% { transform: translateX(80%) scaleX(0.9); }
+  100% { transform: translateX(260%) scaleX(0.6); }
+}
+
+@keyframes atlas-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes atlas-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(102, 192, 244, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(102, 192, 244, 0.22); }
+}
+
+@keyframes atlas-badge-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes atlas-shimmer-x {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* ---- Presence states (driven by AtlasMotion.usePresence) ---------------- */
+
+.atlas-overlay[data-state="open"] {
+  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-overlay[data-state="closed"] {
+  animation: atlas-fade-out var(--atlas-dur-exit) var(--atlas-ease-in-out) both;
+  pointer-events: none;
+}
+
+.atlas-dialog[data-state="open"] {
+  animation: atlas-dialog-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+}
+
+.atlas-dialog[data-state="closed"] {
+  animation: atlas-dialog-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+.atlas-drawer-right[data-state="open"] {
+  animation: atlas-drawer-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+}
+
+.atlas-drawer-right[data-state="closed"] {
+  animation: atlas-drawer-out-right var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+.atlas-panel-right[data-state="open"] {
+  animation: atlas-panel-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+}
+
+.atlas-panel-right[data-state="closed"] {
+  animation: atlas-panel-out-right var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+.atlas-popover[data-state="open"] {
+  transform-origin: bottom right;
+  animation: atlas-popover-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-popover[data-state="closed"] {
+  transform-origin: bottom right;
+  animation: atlas-popover-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+.atlas-dock[data-state="open"] {
+  animation: atlas-dock-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-dock[data-state="closed"] {
+  animation: atlas-dock-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+/* ---- One-shot entrance helpers ------------------------------------------ */
+
+.atlas-view-enter {
+  animation: atlas-view-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+}
+
+.atlas-fade-enter {
+  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-rise-enter {
+  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-card-enter {
+  animation: atlas-card-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+  animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
+}
+
+.atlas-list-enter {
+  animation: atlas-slide-in-left var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+  animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
+}
+
+.atlas-pop {
+  animation: atlas-pop var(--atlas-dur-base) var(--atlas-ease-spring);
+}
+
+.atlas-shake {
+  animation: atlas-shake var(--atlas-dur-base) var(--atlas-ease-out);
+}
+
+.atlas-badge-enter {
+  animation: atlas-badge-in var(--atlas-dur-base) var(--atlas-ease-spring) backwards;
+}
+
+.atlas-attention {
+  animation: atlas-glow-pulse 1.8s var(--atlas-ease-in-out) infinite;
+}
+
+.atlas-spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  animation: atlas-spin 0.8s linear infinite;
+  vertical-align: -0.125em;
+}
+
+.atlas-skeleton {
+  animation: atlas-shimmer-x 1.8s ease-in-out infinite;
+}
+
+/* ---- Progress bars ------------------------------------------------------ */
+
+.atlas-progress-fill {
+  transition:
+    width var(--atlas-dur-slow) var(--atlas-ease-out),
+    background-color var(--atlas-dur-base) var(--atlas-ease-out);
+}
+
+.atlas-progress-fill--active {
+  background-image: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.16) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.16) 75%,
+    transparent 75%,
+    transparent
+  );
+  background-size: 28px 28px;
+  animation: atlas-progress-stripes 0.9s linear infinite;
+}
+
+.atlas-progress-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+
+.atlas-progress-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #66c0f4, transparent);
+  animation: atlas-indeterminate 1.4s var(--atlas-ease-in-out) infinite;
+}
+
+/* ---- Ripple (atlas-ui.js) ----------------------------------------------- */
+
+.atlas-ripple-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.atlas-ripple-dot {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: atlas-ripple 620ms var(--atlas-ease-out) forwards;
+}
+
+/* Generic rise/sink presence used by status docks and inline notices. */
+.atlas-rise[data-state="open"] {
+  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+}
+
+.atlas-rise[data-state="closed"] {
+  animation: atlas-sink-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  pointer-events: none;
+}
+
+/* ---- Library cards ------------------------------------------------------ */
+
+.banner-root {
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  transform: skewX(0.001deg);
+  transition:
+    transform var(--atlas-dur-base) var(--atlas-ease-out),
+    box-shadow var(--atlas-dur-base) var(--atlas-ease-out);
+}
+
+.banner-root:hover {
+  transform: rotateX(5deg) translateY(-6px) scale(1.02);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.55),
+    0 0 0 1px #3d4450,
+    0 0 20px rgba(102, 192, 244, 0.12);
+}
+
+.banner-root::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 5%;
+  left: 5%;
+  width: 90%;
+  height: 90%;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  transform-origin: top center;
+  transform: skewX(0.001deg);
+  transition:
+    transform var(--atlas-dur-base) var(--atlas-ease-out) 80ms,
+    opacity var(--atlas-dur-slow) ease 80ms;
+}
+
+.banner-root:hover::before {
+  opacity: 0.55;
+  transform: rotateX(5deg) translateY(-6px) scale(1.02);
+}
+
+.banner-thumb-img {
+  opacity: 0;
+  transform: scale(1.04);
+  transition:
+    opacity var(--atlas-dur-slow) var(--atlas-ease-out),
+    transform 700ms var(--atlas-ease-out);
+}
+
+.banner-thumb-img[data-loaded="true"] {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.banner-root:hover .banner-thumb-img[data-loaded="true"] {
+  transform: scale(1.05);
+}
+
+html[data-motion="reduced"] .banner-root:hover,
+html[data-motion="off"] .banner-root:hover {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-motion="auto"] .banner-root:hover,
+  html[data-motion="auto"] .banner-root:hover::before {
+    transform: none;
+  }
+}
+
+.atlas-img-fade {
+  opacity: 0;
+  transition: opacity var(--atlas-dur-slow) var(--atlas-ease-out);
+}
+
+.atlas-img-fade[data-loaded="true"] {
+  opacity: 1;
+}
+
+/* ---- Sidebar ------------------------------------------------------------ */
+
+.atlas-sidebar-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 68px;
+  background: linear-gradient(180deg, #67c1f5, #66c0f4);
+  box-shadow: 0 0 14px rgba(102, 192, 244, 0.35);
+  transition:
+    transform var(--atlas-dur-slow) var(--atlas-ease-spring),
+    opacity var(--atlas-dur-base) var(--atlas-ease-out);
+  pointer-events: none;
+}
+
+.atlas-tooltip {
+  opacity: 0;
+  transform: translate3d(-6px, 0, 0);
+  transition:
+    opacity var(--atlas-dur-fast) var(--atlas-ease-out),
+    transform var(--atlas-dur-fast) var(--atlas-ease-out);
+}
+
+.group:hover > .atlas-tooltip,
+.group:focus-visible > .atlas-tooltip {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---- Toasts (atlas-ui.js) ----------------------------------------------- */
+
+.atlas-toast-viewport {
+  position: fixed;
+  right: 14px;
+  bottom: 52px;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column-reverse;
+  transition: right var(--atlas-dur-slow) var(--atlas-ease-out);
+  width: min(380px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+/* Keep toasts beside the downloads popover instead of on top of it. */
+html.atlas-downloads-open .atlas-toast-viewport {
+  right: calc(min(520px, 100vw - 1rem) + 24px);
+}
+
+.atlas-toast {
+  position: relative;
+  display: flex;
+  flex: none;
+  gap: 10px;
+  align-items: flex-start;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 12px 12px 14px;
+  overflow: hidden;
+  color: #c7d5e0;
+  background: linear-gradient(180deg, rgba(27, 40, 56, 0.97), rgba(22, 32, 45, 0.97));
+  border: 1px solid #3d4450;
+  border-left: 3px solid #66c0f4;
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+  font-size: 12px;
+  line-height: 1.45;
+  animation: atlas-toast-in var(--atlas-dur-slow) var(--atlas-ease-spring) both;
+}
+
+.atlas-toast[data-type="success"] { border-left-color: #34d399; }
+.atlas-toast[data-type="error"] { border-left-color: #f87171; }
+.atlas-toast[data-type="warning"] { border-left-color: #fbbf24; }
+.atlas-toast[data-type="loading"] { border-left-color: #66c0f4; }
+
+.atlas-toast__icon {
+  flex: none;
+  font-size: 20px !important;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.atlas-toast[data-type="success"] .atlas-toast__icon { color: #6ee7b7; }
+.atlas-toast[data-type="error"] .atlas-toast__icon { color: #fca5a5; }
+.atlas-toast[data-type="warning"] .atlas-toast__icon { color: #fcd34d; }
+.atlas-toast[data-type="info"] .atlas-toast__icon,
+.atlas-toast[data-type="loading"] .atlas-toast__icon { color: #66c0f4; }
+
+.atlas-toast__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.atlas-toast__title {
+  font-weight: 700;
+  color: #ffffff;
+  font-size: 12.5px;
+}
+
+.atlas-toast__message {
+  margin-top: 2px;
+  color: rgba(199, 213, 224, 0.82);
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.atlas-toast__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.atlas-toast__action {
+  border: 1px solid rgba(102, 192, 244, 0.45);
+  background: rgba(102, 192, 244, 0.14);
+  color: #e6f4ff;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.atlas-toast__action:hover {
+  background: rgba(102, 192, 244, 0.28);
+}
+
+.atlas-toast__close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -2px -2px 0 0;
+  color: rgba(199, 213, 224, 0.6);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.atlas-toast__close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.atlas-toast__timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.35;
+  transform-origin: left center;
+  animation-name: atlas-toast-timer;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+.atlas-toast:hover .atlas-toast__timer {
+  animation-play-state: paused;
+}
+
+.atlas-toast[data-type="success"] .atlas-toast__timer { color: #34d399; }
+.atlas-toast[data-type="error"] .atlas-toast__timer { color: #f87171; }
+.atlas-toast[data-type="warning"] .atlas-toast__timer { color: #fbbf24; }
+.atlas-toast[data-type="info"] .atlas-toast__timer { color: #66c0f4; }
+
+.atlas-toast--bump {
+  animation: atlas-shake var(--atlas-dur-base) var(--atlas-ease-out);
+}
+
+@keyframes atlas-toast-in {
+  from { opacity: 0; transform: translate3d(110%, 0, 0) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes atlas-toast-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+/* ---- Confirm dialog (atlas-ui.js) --------------------------------------- */
+
+.atlas-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(8px);
+}
+
+.atlas-confirm {
+  width: min(460px, 100%);
+  color: #c7d5e0;
+  background: linear-gradient(180deg, #1b2838 0%, #16202d 100%);
+  border: 1px solid #3d4450;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  outline: none;
+}
+
+.atlas-confirm__header {
+  padding: 18px 20px 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.atlas-confirm__message {
+  padding: 0 20px 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(199, 213, 224, 0.8);
+  white-space: pre-line;
+}
+
+.atlas-confirm__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid #3d4450;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.atlas-confirm__btn {
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #3d4450;
+  background: rgba(255, 255, 255, 0.05);
+  color: #c7d5e0;
+  cursor: pointer;
+}
+
+.atlas-confirm__btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.atlas-confirm__btn--primary {
+  border-color: rgba(102, 192, 244, 0.6);
+  background: #66c0f4;
+  color: #0e141b;
+}
+
+.atlas-confirm__btn--primary:hover {
+  background: #8fd2f8;
+}
+
+.atlas-confirm__btn--danger {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.atlas-confirm__btn--danger:hover {
+  background: #ef4444;
+}
+
+/* ---- Boot splash / fatal screen ----------------------------------------- */
+
+.atlas-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  color: #c7d5e0;
+  background:
+    radial-gradient(ellipse 100% 70% at 0% 0%, rgba(102, 192, 244, 0.08), transparent 52%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, rgba(42, 71, 94, 0.5), transparent 48%),
+    #171a21;
+  box-shadow: inset 0 0 0 1px #3d4450;
+  font-family: Manrope, "Segoe UI", Arial, sans-serif;
+  -webkit-app-region: drag;
+  transition:
+    opacity var(--atlas-dur-slow) var(--atlas-ease-out),
+    transform var(--atlas-dur-slow) var(--atlas-ease-out),
+    visibility 0s linear var(--atlas-dur-slow);
+}
+
+.atlas-boot[data-state="done"] {
+  opacity: 0;
+  transform: scale(1.02);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.atlas-boot__logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  animation: atlas-dialog-in 700ms var(--atlas-ease-out) both;
+  filter: drop-shadow(0 0 24px rgba(102, 192, 244, 0.25));
+}
+
+.atlas-boot__title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #ffffff;
+  animation: atlas-rise-in 650ms var(--atlas-ease-out) 120ms both;
+}
+
+.atlas-boot__bar {
+  width: 220px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  animation: atlas-fade-in 500ms var(--atlas-ease-out) 200ms both;
+}
+
+.atlas-boot__status {
+  min-height: 18px;
+  font-size: 12px;
+  color: rgba(199, 213, 224, 0.6);
+  animation: atlas-fade-in 500ms var(--atlas-ease-out) 260ms both;
+}
+
+.atlas-boot__error {
+  display: none;
+  width: min(560px, calc(100vw - 48px));
+  padding: 16px 18px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-app-region: no-drag;
+  animation: atlas-dialog-in 500ms var(--atlas-ease-out) both;
+}
+
+.atlas-boot[data-state="error"] .atlas-boot__error {
+  display: block;
+}
+
+.atlas-boot[data-state="error"] .atlas-boot__bar {
+  display: none;
+}
+
+.atlas-boot__error pre {
+  max-height: 160px;
+  margin: 10px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  color: rgba(254, 202, 202, 0.8);
+  user-select: text;
+}
+
+.atlas-boot__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.atlas-boot__actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #3d4450;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.atlas-boot__actions button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.atlas-boot__actions button[data-primary] {
+  border-color: rgba(102, 192, 244, 0.6);
+  background: #66c0f4;
+  color: #0e141b;
+}
+
+/* ---- Error boundary ----------------------------------------------------- */
+
+.atlas-crash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 24px;
+  margin: 16px;
+  text-align: center;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.14);
+  color: #fecaca;
+  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+}
+
+.atlas-crash--screen {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  z-index: 2900;
+  background: #171a21;
+  border: 1px solid #3d4450;
+  -webkit-app-region: drag;
+}
+
+.atlas-crash--screen button {
+  -webkit-app-region: no-drag;
+}
+
+.atlas-crash__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.atlas-crash__message {
+  max-width: 560px;
+  font-size: 12px;
+  color: rgba(254, 202, 202, 0.85);
+  word-break: break-word;
+  user-select: text;
+}
+
+.atlas-crash__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.atlas-crash__actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid #3d4450;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.atlas-crash__actions button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.atlas-crash__actions button[data-primary] {
+  border-color: rgba(102, 192, 244, 0.6);
+  background: #66c0f4;
+  color: #0e141b;
 }

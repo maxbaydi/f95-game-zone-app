@@ -19,6 +19,24 @@ const initializeDatabase = (dataDirOrPaths, options = {}) => {
   });
 };
 
+/**
+ * Live handle of the open database. `module.exports.db` is captured at
+ * require time (before initializeDatabase ran) and is therefore undefined
+ * for callers; use this accessor instead.
+ */
+const getDb = () => db;
+
+const getTableColumns = (tableName) =>
+  new Promise((resolve, reject) => {
+    db.all(`PRAGMA table_info(${tableName})`, (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve((rows || []).map((row) => String(row.name)));
+    });
+  });
+
 const resolveBannerPath = (appPaths, bannerPath) => {
   if (!bannerPath) {
     return null;
@@ -1227,35 +1245,89 @@ const getAtlasData = (atlasId) => {
   });
 };
 
+/**
+ * Bulk INSERT OR REPLACE of remote metadata rows (Atlas / F95 dumps).
+ *
+ * The remote schema moves faster than the local one: fields the local table
+ * does not have (e.g. `external_ids`) are dropped instead of failing the
+ * whole import, rows use the union of their keys and every SQLite error
+ * rejects the promise rather than surfacing as an uncaught exception.
+ * @param {Array<Record<string, any>>} jsonData
+ * @param {string} tableName
+ */
 const insertJsonData = async (jsonData, tableName) => {
+  const rows = Array.isArray(jsonData) ? jsonData.filter((row) => row && typeof row === "object") : [];
+  if (rows.length === 0) {
+    return;
+  }
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(String(tableName || ""))) {
+    throw new Error(`Refusing to import into an invalid table name: ${tableName}`);
+  }
+
+  const tableColumns = new Set(await getTableColumns(tableName));
+  if (tableColumns.size === 0) {
+    throw new Error(`Cannot import metadata: table ${tableName} does not exist.`);
+  }
+  const payloadKeys = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  const columns = payloadKeys.filter((key) => tableColumns.has(key));
+  const dropped = payloadKeys.filter((key) => !tableColumns.has(key));
+  if (columns.length === 0) {
+    throw new Error(
+      `Cannot import metadata into ${tableName}: no known columns in payload (${payloadKeys.join(", ")}).`,
+    );
+  }
+  if (dropped.length > 0) {
+    console.warn(
+      `[db.import] Ignoring ${dropped.length} unknown column(s) for ${tableName}: ${dropped.join(", ")}`,
+    );
+  }
+
+  const sql = `INSERT OR REPLACE INTO ${tableName} (${columns.join(", ")}) VALUES (${columns
+    .map(() => "?")
+    .join(", ")})`;
+
   return new Promise((resolve, reject) => {
+    let failed = false;
+    const fail = (err) => {
+      if (failed) {
+        return;
+      }
+      failed = true;
+      db.run("ROLLBACK", () => reject(err));
+    };
+
     db.serialize(() => {
       db.run("BEGIN TRANSACTION");
-      const stmt = db.prepare(
-        `INSERT OR REPLACE INTO ${tableName} (${Object.keys(jsonData[0]).join(", ")}) VALUES (${Object.keys(
-          jsonData[0],
-        )
-          .map(() => "?")
-          .join(", ")})`,
-      );
-      for (const item of jsonData) {
-        stmt.run(Object.values(item), (err) => {
-          if (err) {
-            db.run("ROLLBACK");
-            reject(err);
-          }
-        });
+      const stmt = db.prepare(sql, (prepareError) => {
+        if (prepareError) {
+          fail(prepareError);
+        }
+      });
+      for (const row of rows) {
+        stmt.run(
+          columns.map((column) => (row[column] === undefined ? null : row[column])),
+          (err) => {
+            if (err) {
+              fail(err);
+            }
+          },
+        );
       }
       stmt.finalize((err) => {
-        if (err) {
-          db.run("ROLLBACK");
-          reject(err);
-        } else {
-          db.run("COMMIT", (err) => {
-            if (err) reject(err);
-            else resolve();
-          });
+        if (failed) {
+          return;
         }
+        if (err) {
+          fail(err);
+          return;
+        }
+        db.run("COMMIT", (commitError) => {
+          if (commitError) {
+            fail(commitError);
+          } else {
+            resolve();
+          }
+        });
       });
     });
   });
@@ -1593,5 +1665,6 @@ module.exports = {
   deleteVersion,
   deleteGameCompletely,
   getUniqueFilterOptions,
-  db, // Export db instance
+  db, // Export db instance (undefined until initializeDatabase; prefer getDb)
+  getDb,
 };

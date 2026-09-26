@@ -82,9 +82,15 @@ function buildMirrorCandidates(primary, fallbackLinks) {
  *   candidates: Array<{ url: string, host: string, label: string, variantId?: string }>,
  *   prepare: (url: string) => Promise<any>,
  *   onAttempt?: (attempt: Record<string, any>) => void,
+ *   shouldStop?: (error: unknown) => boolean,
  * }} options
  */
-async function resolveMirrorWithFallback({ candidates, prepare, onAttempt }) {
+async function resolveMirrorWithFallback({
+  candidates,
+  prepare,
+  onAttempt,
+  shouldStop,
+}) {
   const attempts = [];
   const total = candidates.length;
   let actionFailure = null;
@@ -109,8 +115,21 @@ async function resolveMirrorWithFallback({ candidates, prepare, onAttempt }) {
         attempts,
         actionFailure: null,
         lastError: null,
+        stopped: false,
       };
     } catch (error) {
+      // Cancellation ends the whole chain; it is not a mirror failure.
+      if (shouldStop?.(error)) {
+        return {
+          prepared: null,
+          candidate: null,
+          attempts,
+          actionFailure: null,
+          lastError: error,
+          stopped: true,
+        };
+      }
+
       const actionRequired = isMirrorActionError(error);
       const message = getErrorMessage(error, "Mirror did not return a file.");
       attempts.push({
@@ -149,6 +168,7 @@ async function resolveMirrorWithFallback({ candidates, prepare, onAttempt }) {
     attempts,
     actionFailure,
     lastError,
+    stopped: false,
   };
 }
 

@@ -19,7 +19,9 @@
     "structure": "node scripts/generate-structure.js > scripts/project-structure.txt",
     "publish": "npm run build:css && electron-builder --win -p always",
     "format": "prettier --write src/**/*.{js,jsx,css} && prettier --write src/assets/**/*.{js,jsx,css}",
-    "lint": "eslint src/main.js src/database.js \"src/main/**/*.js\" \"src/shared/**/*.js\" \"test/**/*.test.js\"",
+    "lint": "eslint src/main.js src/database.js \"src/main/**/*.js\" \"src/shared/**/*.js\" \"test/**/*.test.js\" scripts/check-mirrors.js scripts/check-mirrors-electron.js",
+    "check:mirrors": "node scripts/check-mirrors.js",
+    "check:mirrors:app": "electron scripts/check-mirrors-electron.js",
     "typecheck": "tsc --project tsconfig.typecheck.json --noEmit",
     "test": "node --test \"test/*.test.js\"",
     "ci:check": "npm run build:css && npm run lint && npm run typecheck && npm run test"

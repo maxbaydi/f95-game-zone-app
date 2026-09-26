@@ -119,9 +119,12 @@ const F95BrowserWorkspace = () => {
   const [installError, setInstallError] = useState("");
   const [isInspectingThread, setIsInspectingThread] = useState(false);
   const [isStartingInstall, setIsStartingInstall] = useState(false);
+  const useWorkspaceEscape = window.AtlasMotion?.useEscape || (() => {});
+  useWorkspaceEscape(Boolean(threadInfo) && !isStartingInstall, () =>
+    setThreadInfo(null),
+  );
   const [downloadState, setDownloadState] = useState(null);
   const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
-  const [pendingHandoff, setPendingHandoff] = useState(null);
   const [selectedLinkUrl, setSelectedLinkUrl] = useState("");
   const { attemptEvents, beginAttempts, resetAttempts } =
     useWorkspaceInstallAttempts();
@@ -186,6 +189,20 @@ const F95BrowserWorkspace = () => {
 
     window.electronAPI.onF95DownloadProgress((progressState) => {
       setDownloadState(progressState || null);
+      // The "queued" / "your turn in the browser window" note is superseded
+      // as soon as the progress line reports the transfer itself, otherwise
+      // it lingers under a finished or failed download.
+      if (
+        [
+          "downloading",
+          "installing",
+          "completed",
+          "error",
+          "cancelled",
+        ].includes(progressState?.phase)
+      ) {
+        setStatusMessage("");
+      }
     });
 
     return () => {
@@ -200,22 +217,8 @@ const F95BrowserWorkspace = () => {
     setInstallError("");
     setBrowserError("");
     setPendingCaptchaAction(null);
-    setPendingHandoff(null);
     captchaRetryKeyRef.current = "";
   }, [browserKey, authState.isAuthenticated]);
-
-  useEffect(() => {
-    if (
-      pendingHandoff?.id &&
-      downloadState?.id === pendingHandoff.id &&
-      ["downloading", "installing", "completed"].includes(downloadState?.phase)
-    ) {
-      setPendingHandoff(null);
-      setStatusMessage(
-        `Got the file from ${pendingHandoff.hostName}. F95Launcher is installing it now.`,
-      );
-    }
-  }, [downloadState?.phase, pendingHandoff]);
 
   useEffect(() => {
     let cancelled = false;
@@ -510,7 +513,6 @@ const F95BrowserWorkspace = () => {
       setThreadInfo(null);
       setDownloadState(null);
       setPendingCaptchaAction(null);
-      setPendingHandoff(null);
     } catch (error) {
       console.error("Failed to clear F95 session:", error);
       setInstallError(error.message);
@@ -627,45 +629,9 @@ const F95BrowserWorkspace = () => {
     };
   };
 
-  const startBrowserHandoff = async (payload, link) => {
-    const hostName = window.getF95MirrorDisplayName?.(link) || "the mirror";
-    setIsStartingInstall(true);
-    setInstallError("");
-
-    try {
-      const result = await window.electronAPI.startF95BrowserHandoff(
-        buildInstallPayload(payload, link),
-      );
-      if (!result?.success) {
-        setInstallError(result?.error || "Failed to open the mirror page.");
-        return;
-      }
-
-      const actionUrl = result.actionUrl || link.url;
-      setThreadInfo(null);
-      setPendingCaptchaAction(null);
-      setPendingHandoff({ id: result.handoffId, hostName, actionUrl });
-      setStatusMessage("");
-      withWebview((webview) => {
-        webview.loadURL(actionUrl);
-      });
-    } catch (error) {
-      console.error("Failed to start browser download:", error);
-      setInstallError(error.message);
-    } finally {
-      setIsStartingInstall(false);
-    }
-  };
-
   const startInstall = async (payload, link, options = {}) => {
-    if (!options.overrideUrl && window.f95MirrorUi?.isBrowserOnly?.(link)) {
-      await startBrowserHandoff(payload, link);
-      return;
-    }
-
     setIsStartingInstall(true);
     setInstallError("");
-    setPendingHandoff(null);
     beginAttempts(payload.threadUrl);
 
     try {
@@ -716,12 +682,17 @@ const F95BrowserWorkspace = () => {
       setThreadInfo(null);
       setPendingCaptchaAction(null);
       resetAttempts();
+      const fallbackNote = result?.fellBack
+        ? `${requestedHostName} did not return the file, so F95Launcher switched to ${usedHostName}. `
+        : "";
       setStatusMessage(
-        result?.fellBack
-          ? `${requestedHostName} did not return the file, so F95Launcher switched to ${usedHostName}. ${payload.title} is downloading and installs in the background.`
-          : `Queued ${payload.title} via ${
-              usedHostName || result?.sourceHost || link.label
-            }. Download and install will continue in the background.`,
+        result?.awaitingAction
+          ? `${fallbackNote}${result.hostLabel || usedHostName || "The mirror"} needs a quick step in the browser window that just opened. Finish it there and ${payload.title} downloads by itself.`
+          : result?.fellBack
+            ? `${fallbackNote}${payload.title} is downloading and installs in the background.`
+            : `Queued ${payload.title} via ${
+                usedHostName || result?.sourceHost || link.label
+              }. Download and install will continue in the background.`,
       );
     } catch (error) {
       console.error("Failed to queue F95 install:", error);
@@ -729,28 +700,6 @@ const F95BrowserWorkspace = () => {
     } finally {
       setIsStartingInstall(false);
     }
-  };
-
-  const stopWaitingForHandoff = () => {
-    const handoffId = pendingHandoff?.id;
-    setPendingHandoff(null);
-    if (handoffId) {
-      window.electronAPI
-        .cancelF95BrowserHandoff({ id: handoffId })
-        .catch((error) =>
-          console.error("Failed to stop waiting for download:", error),
-        );
-    }
-  };
-
-  const reopenHandoffPage = () => {
-    if (!pendingHandoff?.actionUrl) {
-      return;
-    }
-
-    withWebview((webview) => {
-      webview.loadURL(pendingHandoff.actionUrl);
-    });
   };
 
   const retryPendingCaptchaInstall = async () => {
@@ -1016,37 +965,6 @@ const F95BrowserWorkspace = () => {
         </div>
       )}
 
-      {pendingHandoff && (
-        <div className="relative z-10 border-b border-accent/40 bg-accent/10 px-4 py-3 text-sm text-text">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="material-symbols-outlined animate-atlas-pulse-soft text-[22px] leading-none text-accent">
-              ads_click
-            </span>
-            <div className="min-w-[280px] flex-1">
-              <div className="font-semibold">
-                Press Download on the {pendingHandoff.hostName} page below
-              </div>
-              <div className="text-xs text-text/70">
-                F95Launcher catches the file as soon as it starts and installs
-                it into your library automatically.
-              </div>
-            </div>
-            <button
-              onClick={reopenHandoffPage}
-              className="rounded border border-accent/40 bg-white/5 px-3 py-2 text-xs font-medium text-text transition hover:bg-white/10"
-            >
-              Open the page again
-            </button>
-            <button
-              onClick={stopWaitingForHandoff}
-              className="rounded border border-border bg-white/5 px-3 py-2 text-xs font-medium text-text/75 transition hover:bg-white/10"
-            >
-              Stop waiting
-            </button>
-          </div>
-        </div>
-      )}
-
       {pendingCaptchaAction && (
         <div className="relative z-10 border-b border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
           <div className="flex flex-wrap items-center gap-3">
@@ -1075,31 +993,95 @@ const F95BrowserWorkspace = () => {
       )}
 
       {installError && !threadInfo && (
-        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
-          {installError}
+        <div
+          key={installError}
+          role="alert"
+          className="atlas-shake relative z-10 flex items-center gap-2 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden>
+            error
+          </span>
+          <span className="min-w-0 flex-1">{installError}</span>
         </div>
       )}
 
       {browserError && (
-        <div className="relative z-10 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100">
-          {browserError}
+        <div
+          key={browserError}
+          role="alert"
+          className="atlas-rise-enter relative z-10 flex flex-wrap items-center gap-3 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
+        >
+          <span className="material-symbols-outlined text-[18px]" aria-hidden>
+            wifi_off
+          </span>
+          <span className="min-w-0 flex-1">{browserError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setBrowserError("");
+              withWebview((webview) => {
+                try {
+                  webview.reload();
+                } catch (error) {
+                  webview.loadURL(F95_SEARCH_URL);
+                }
+              });
+            }}
+            className="inline-flex items-center gap-1 border border-red-200/30 bg-white/5 px-3 py-1 text-xs font-medium text-red-50 transition hover:bg-white/10"
+          >
+            <span
+              className="material-symbols-outlined text-[15px] leading-none"
+              aria-hidden
+            >
+              refresh
+            </span>
+            Reload page
+          </button>
         </div>
       )}
+
+      <div
+        className={`h-[2px] w-full ${
+          browserState.loading
+            ? "atlas-progress-indeterminate atlas-keep-motion"
+            : ""
+        }`}
+        aria-hidden
+      />
 
       <div className="relative flex-1">
         <div ref={hostRef} className="h-full w-full bg-black" />
 
         {!browserError && browserState.loading && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
-            <div className="rounded-xl border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
+          <div className="atlas-fade-enter pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
+            <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
+              <span
+                className="atlas-spinner atlas-keep-motion text-accent"
+                aria-hidden
+              />
               Loading F95...
             </div>
           </div>
         )}
 
         {threadInfo && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 py-6">
-            <div className="flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl">
+          <div
+            className="atlas-overlay absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 py-6 backdrop-blur-sm"
+            data-state="open"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !isStartingInstall) {
+                setThreadInfo(null);
+                resetAttempts();
+              }
+            }}
+          >
+            <div
+              className="atlas-dialog flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl"
+              data-state="open"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Thread install"
+            >
               <div className="border-b border-border px-6 py-4">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
                   Thread Install
@@ -1118,25 +1100,25 @@ const F95BrowserWorkspace = () => {
 
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
                 {installError && (
-                  <div className="border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-                    <div>{installError}</div>
-                    {selectedThreadLink &&
-                      !window.f95MirrorUi?.isBrowserOnly?.(
-                        selectedThreadLink,
-                      ) && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            startBrowserHandoff(threadInfo, selectedThreadLink)
-                          }
-                          disabled={isStartingInstall}
-                          className="mt-3 rounded border border-red-200/20 bg-white/5 px-3 py-2 text-xs font-medium text-red-50 transition hover:bg-white/10 disabled:opacity-60"
-                        >
-                          Download{" "}
-                          {window.getF95MirrorDisplayName?.(selectedThreadLink)}{" "}
-                          in the browser instead
-                        </button>
+                  <div
+                    key={installError}
+                    role="alert"
+                    className="atlas-shake flex items-start gap-2 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+                  >
+                    <span
+                      className="material-symbols-outlined text-[18px]"
+                      aria-hidden
+                    >
+                      error
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {installError}
+                      {threadLinks.length > 1 && (
+                        <div className="mt-1 text-xs text-red-100/75">
+                          Pick another mirror below and try again.
+                        </div>
                       )}
+                    </div>
                   </div>
                 )}
 
@@ -1154,16 +1136,29 @@ const F95BrowserWorkspace = () => {
               </div>
 
               <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
+                {isStartingInstall && (
+                  <div className="atlas-fade-enter mr-auto flex items-center gap-2 text-sm text-text/70">
+                    <span
+                      className="atlas-spinner atlas-keep-motion text-accent"
+                      aria-hidden
+                    />
+                    Connecting to the selected mirror…
+                  </div>
+                )}
                 <button
+                  type="button"
                   onClick={() => {
                     setThreadInfo(null);
                     resetAttempts();
                   }}
-                  className="rounded border border-border bg-secondary px-4 py-2 text-sm hover:bg-selected"
+                  disabled={isStartingInstall}
+                  title="Cancel (Esc)"
+                  className="rounded border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={() =>
                     selectedThreadLink &&
                     startInstall(threadInfo, selectedThreadLink)
@@ -1171,17 +1166,21 @@ const F95BrowserWorkspace = () => {
                   disabled={isStartingInstall || !selectedThreadLink}
                   className="flex items-center gap-2 rounded bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <span
-                    className={`material-symbols-outlined text-[18px] leading-none ${
-                      isStartingInstall ? "animate-spin" : ""
-                    }`}
-                  >
-                    {isStartingInstall
-                      ? "progress_activity"
-                      : window.f95MirrorUi?.isBrowserOnly?.(selectedThreadLink)
+                  {isStartingInstall ? (
+                    <span
+                      className="atlas-spinner atlas-keep-motion"
+                      aria-hidden
+                    />
+                  ) : (
+                    <span
+                      className="material-symbols-outlined text-[18px] leading-none"
+                      aria-hidden
+                    >
+                      {window.f95MirrorUi?.isBrowserOnly?.(selectedThreadLink)
                         ? "open_in_browser"
                         : "download"}
-                  </span>
+                    </span>
+                  )}
                   {isStartingInstall
                     ? "Starting..."
                     : window.f95MirrorUi?.getActionLabel?.(

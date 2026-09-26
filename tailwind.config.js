@@ -1,5 +1,5 @@
 module.exports = {
-  content: ['./src/**/*.{html,js,jsx}'],
+  content: ['./src/**/*.{html,js,jsx}', '!./src/assets/vendor/**'],
   theme: {
     borderRadius: {
       none: '0',
@@ -48,8 +48,19 @@ module.exports = {
         'glow-accent': '0 0 14px rgba(102, 192, 244, 0.22)',
         'glow-glam': '0 0 10px rgba(213, 165, 27, 0.2)',
       },
+      // UI motion lives in the 400-700ms range; the expo-out curve keeps
+      // long transitions feeling immediate. See the motion section of main.css.
       transitionDuration: {
-        DEFAULT: '220ms',
+        DEFAULT: '450ms',
+        400: '400ms',
+        450: '450ms',
+        600: '600ms',
+        650: '650ms',
+      },
+      transitionTimingFunction: {
+        DEFAULT: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        'out-expo': 'cubic-bezier(0.22, 1, 0.36, 1)',
+        spring: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
       },
       keyframes: {
         'atlas-shimmer': {
@@ -67,7 +78,7 @@ module.exports = {
       },
       animation: {
         'atlas-shimmer': 'atlas-shimmer 2.4s ease-in-out infinite',
-        'atlas-fade-up': 'atlas-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'atlas-fade-up': 'atlas-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
         'atlas-pulse-soft': 'atlas-pulse-soft 2s ease-in-out infinite',
       },
     },

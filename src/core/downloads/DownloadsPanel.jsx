@@ -27,6 +27,25 @@ const formatDownloadSpeed = (bytesPerSecond) => {
   return `${formatDownloadBytes(value)}/s`;
 };
 
+const formatDownloadEta = (item) => {
+  const total = Number(item.totalBytes) || 0;
+  const received = Number(item.receivedBytes) || 0;
+  const speed = Number(item.speedBytesPerSecond) || 0;
+  if (total <= 0 || speed <= 0 || received >= total) {
+    return "";
+  }
+
+  const seconds = Math.round((total - received) / speed);
+  if (seconds < 60) {
+    return `${seconds}s left`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ${seconds % 60}s left`;
+  }
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m left`;
+};
+
 const formatDownloadTimestamp = (value) => {
   if (!value) {
     return "";
@@ -40,166 +59,602 @@ const formatDownloadTimestamp = (value) => {
   return date.toLocaleString();
 };
 
-const getDownloadStatusTone = (status) => {
-  switch (status) {
-    case "downloading":
-      return "border-accent/30 bg-accent/10 text-text";
-    case "queued":
-      return "border-border bg-white/5 text-text/85";
-    case "waiting":
-      return "border-amber-400/40 bg-amber-500/10 text-amber-100";
-    case "installing":
-      return "border-sky-400/30 bg-sky-500/10 text-sky-100";
-    case "completed":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-100";
-    case "error":
-      return "border-red-500/30 bg-red-500/10 text-red-100";
-    default:
-      return "border-border bg-white/5 text-text/85";
-  }
+const DOWNLOAD_STATUS_META = {
+  resolving: {
+    label: "Resolving",
+    icon: "travel_explore",
+    tone: "border-accent/30 bg-accent/10 text-text",
+    bar: "bg-accent",
+  },
+  queued: {
+    label: "Queued",
+    icon: "schedule",
+    tone: "border-border bg-white/5 text-text/85",
+    bar: "bg-accent/60",
+  },
+  action: {
+    label: "Your turn",
+    icon: "verified_user",
+    tone: "border-amber-400/40 bg-amber-500/10 text-amber-100",
+    bar: "bg-amber-400",
+  },
+  downloading: {
+    label: "Downloading",
+    icon: "downloading",
+    tone: "border-accent/30 bg-accent/10 text-text",
+    bar: "bg-gradient-to-r from-accent to-accentBar",
+  },
+  installing: {
+    label: "Installing",
+    icon: "inventory_2",
+    tone: "border-sky-400/30 bg-sky-500/10 text-sky-100",
+    bar: "bg-sky-500",
+  },
+  completed: {
+    label: "Installed",
+    icon: "check_circle",
+    tone: "border-emerald-500/30 bg-emerald-500/10 text-emerald-100",
+    bar: "bg-emerald-500",
+  },
+  error: {
+    label: "Failed",
+    icon: "error",
+    tone: "border-red-500/30 bg-red-500/10 text-red-100",
+    bar: "bg-red-500",
+  },
+  cancelled: {
+    label: "Cancelled",
+    icon: "block",
+    tone: "border-border bg-white/5 text-text/70",
+    bar: "bg-text/30",
+  },
 };
 
-const getDownloadStatusLabel = (status) =>
-  status === "waiting" ? "your turn" : status || "unknown";
+const getDownloadStatusMeta = (status) =>
+  DOWNLOAD_STATUS_META[status] || {
+    label: status || "Unknown",
+    icon: "help",
+    tone: "border-border bg-white/5 text-text/85",
+    bar: "bg-accent/60",
+  };
 
-const DownloadsPanel = ({
-  isOpen,
-  items,
-  activeCount,
-  onClose,
-  onCancelWaiting,
-}) => {
-  if (!isOpen) {
+const ACTIVE_DOWNLOAD_STATUSES = new Set([
+  "resolving",
+  "queued",
+  "action",
+  "downloading",
+  "installing",
+]);
+
+const useDownloadsLayer = (isOpen, props, options) =>
+  window.AtlasMotion?.useModalLayer
+    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+    : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
+
+const downloadsToast = () => window.AtlasToast || null;
+
+const callDownloadsApi = async (method, ...args) => {
+  const api = window.electronAPI;
+  if (!api || typeof api[method] !== "function") {
+    throw new Error("This action needs a newer F95Launcher build.");
+  }
+  return api[method](...args);
+};
+
+const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
+  const [pendingAction, setPendingAction] = React.useState("");
+  const meta = getDownloadStatusMeta(item.status);
+  const percent = Math.max(0, Math.min(100, Number(item.percent) || 0));
+  const totalBytes = Number(item.totalBytes) || 0;
+  const receivedBytes = Number(item.receivedBytes) || 0;
+  const hasTransferStats = totalBytes > 0;
+  const isActive = ACTIVE_DOWNLOAD_STATUSES.has(item.status);
+  const isIndeterminate =
+    item.status === "resolving" ||
+    item.status === "installing" ||
+    (item.status === "downloading" && totalBytes <= 0) ||
+    (item.status === "queued" && percent <= 0);
+  const canCancel =
+    item.canCancel ??
+    (item.status === "resolving" ||
+      item.status === "queued" ||
+      item.status === "downloading");
+  const canRetry =
+    item.canRetry ?? (item.status === "error" || item.status === "cancelled");
+  const eta = item.status === "downloading" ? formatDownloadEta(item) : "";
+  const hostLabel = item.hostLabel || item.sourceLabel || item.sourceHost || "";
+  // The page was opened in the user's own browser; the app waits for the file.
+  const waitingForFile = item.status === "action" && item.actionMode === "file";
+  // Mirrors guarded by bot detection cannot be finished in the embedded
+  // window, so every browser step offers the "own browser + pick file" way.
+  const showManualHelp =
+    item.status === "action" || (item.status === "error" && Boolean(item.actionUrl));
+  const canInstallFromFile =
+    item.status === "action" || (item.status === "error" && canRetry);
+
+  const runItemAction = async (actionKey, action) => {
+    if (pendingAction) {
+      return;
+    }
+    setPendingAction(actionKey);
+    try {
+      await action();
+    } catch (error) {
+      downloadsToast()?.error(
+        window.AtlasUI?.errorMessage(error, "The action failed.") ||
+          String(error),
+        { title: item.title || "Download" },
+      );
+    } finally {
+      setPendingAction("");
+    }
+  };
+
+  const handleCancel = () =>
+    runItemAction("cancel", async () => {
+      const result = await callDownloadsApi("cancelF95Download", item.id);
+      if (!result?.success) {
+        throw new Error(result?.error || "The download could not be cancelled.");
+      }
+    });
+
+  const handleRetry = () =>
+    runItemAction("retry", async () => {
+      const result = await callDownloadsApi("retryF95Download", item.id);
+      if (result?.success) {
+        downloadsToast()?.info("The mirror is being resolved again.", {
+          title: `Retrying ${item.title || "download"}`,
+          duration: 3000,
+        });
+        return;
+      }
+      if (result?.awaitingAction) {
+        downloadsToast()?.info(
+          `${result.hostLabel || "The mirror"} needs a quick step in the browser window. Finish it there and the download continues by itself.`,
+          {
+            title: "Your turn in the browser",
+            duration: 6000,
+          },
+        );
+        return;
+      }
+      throw new Error(result?.error || "The download could not be restarted.");
+    });
+
+  const handleShowInFolder = () =>
+    runItemAction("folder", async () => {
+      const result = await callDownloadsApi("showF95DownloadInFolder", item.id);
+      if (result && result.success === false) {
+        throw new Error(result.error || "The download folder could not be opened.");
+      }
+    });
+
+  const handleOpenInBrowser = () =>
+    runItemAction("browser", async () => {
+      const result = await callDownloadsApi("openF95DownloadInBrowser", item.id);
+      if (!result?.success) {
+        throw new Error(result?.error || "The link could not be opened in your browser.");
+      }
+      downloadsToast()?.info(
+        `${result.hostLabel || "The mirror"} opened in your browser. Download the file there, then pick it here.`,
+        { title: "Download in your browser", duration: 7000 },
+      );
+    });
+
+  const handleInstallFromFile = () =>
+    runItemAction("file", async () => {
+      const result = await callDownloadsApi("installF95DownloadFromFile", item.id);
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.success) {
+        throw new Error(result?.error || "The file could not be used.");
+      }
+      downloadsToast()?.info(`Installing ${item.title || "the game"} from ${result.fileName}.`, {
+        title: "Install from file",
+        duration: 4000,
+      });
+    });
+
+  const handleSolveCaptcha = () =>
+    runItemAction("captcha", async () => {
+      if (typeof window.electronAPI?.openF95DownloadAction === "function") {
+        const result = await window.electronAPI.openF95DownloadAction(item.id);
+        if (result?.success) {
+          return;
+        }
+        if (result?.error && !item.actionUrl) {
+          throw new Error(result.error);
+        }
+      }
+      await window.electronAPI.openF95BrowserUrl?.({
+        url: item.actionUrl,
+        title: "F95 Mirror Verification",
+      });
+    });
+
+  return (
+    <div
+      className="atlas-list-enter rounded-2xl border border-border bg-black/20 px-4 py-4 transition-[border-color,background-color] duration-500 hover:border-accent/30 hover:bg-black/30"
+      style={{ "--atlas-index": Math.min(index, 10) }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span
+            className={`material-symbols-outlined mt-0.5 shrink-0 text-[20px] ${
+              item.status === "error"
+                ? "text-red-300"
+                : item.status === "completed"
+                  ? "text-emerald-300"
+                  : item.status === "cancelled"
+                    ? "text-text/45"
+                    : "text-accent"
+            } ${isActive ? "animate-pulse atlas-keep-motion" : "atlas-pop"}`}
+            aria-hidden
+          >
+            {meta.icon}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-text" title={item.title}>
+              {item.title || item.fileName || "Unnamed download"}
+            </div>
+            <div className="mt-1 truncate text-xs text-text/55" title={item.fileName || hostLabel}>
+              {item.fileName || hostLabel || "Preparing mirror"}
+            </div>
+          </div>
+        </div>
+        <div
+          key={item.status}
+          className={`atlas-badge-enter shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${meta.tone}`}
+        >
+          {meta.label}
+        </div>
+      </div>
+
+      <div className="mt-3 text-sm text-text/80">{item.text || "Waiting"}</div>
+
+      <div
+        className={`mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10 ${
+          isIndeterminate && isActive
+            ? "atlas-progress-indeterminate atlas-keep-motion"
+            : ""
+        }`}
+      >
+        <div
+          className={`atlas-progress-fill h-full rounded-full ${meta.bar} ${
+            item.status === "downloading" && !isIndeterminate
+              ? "atlas-progress-fill--active atlas-keep-motion"
+              : ""
+          }`}
+          style={{
+            width: `${
+              isIndeterminate && isActive
+                ? 0
+                : item.status === "completed"
+                  ? 100
+                  : percent
+            }%`,
+          }}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums text-text/60">
+        {!isIndeterminate && <div>{percent}%</div>}
+        {hasTransferStats && (
+          <div>
+            {formatDownloadBytes(receivedBytes)} /{" "}
+            {formatDownloadBytes(totalBytes)}
+          </div>
+        )}
+        {item.status === "downloading" && (
+          <div>{formatDownloadSpeed(item.speedBytesPerSecond)}</div>
+        )}
+        {eta && <div className="text-text/75">{eta}</div>}
+        {hostLabel && <div>{hostLabel}</div>}
+        {!isActive && item.updatedAt && (
+          <div>{formatDownloadTimestamp(item.updatedAt)}</div>
+        )}
+      </div>
+
+      {item.error && (
+        <div
+          className="atlas-rise-enter mt-3 flex items-start gap-1.5 text-xs text-red-200/90"
+          role="alert"
+        >
+          <span className="material-symbols-outlined shrink-0 text-[15px]" aria-hidden>
+            info
+          </span>
+          <span className="min-w-0 break-words">{item.error}</span>
+        </div>
+      )}
+
+      {showManualHelp && (
+        <div
+          className={`atlas-rise-enter mt-3 rounded-xl border p-3 transition-colors duration-500 ${
+            waitingForFile
+              ? "border-amber-400/40 bg-amber-500/10"
+              : "border-border bg-white/[0.03]"
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            <span
+              className={`material-symbols-outlined mt-0.5 shrink-0 text-[18px] ${
+                waitingForFile ? "text-amber-200 atlas-pop" : "text-text/45"
+              }`}
+              aria-hidden
+            >
+              {waitingForFile ? "folder_zip" : "open_in_browser"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text">
+                {waitingForFile
+                  ? "Waiting for your file"
+                  : "Stuck on this page?"}
+              </div>
+              <div className="mt-0.5 text-xs leading-relaxed text-text/60">
+                {waitingForFile
+                  ? "When the browser finishes downloading, pick the file and the install starts right away."
+                  : "Open it in your own browser, download the file there, then pick it here. The install continues as usual."}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleInstallFromFile}
+                  disabled={Boolean(pendingAction)}
+                  className={`inline-flex items-center gap-1 border px-2.5 py-1 text-xs transition disabled:opacity-50 ${
+                    waitingForFile
+                      ? "border-amber-400/50 bg-amber-400/20 text-amber-50 hover:bg-amber-400/30"
+                      : "border-border bg-white/5 text-text hover:bg-white/10"
+                  }`}
+                >
+                  {pendingAction === "file" ? (
+                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                  ) : (
+                    <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                      upload_file
+                    </span>
+                  )}
+                  Pick downloaded file
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenInBrowser}
+                  disabled={Boolean(pendingAction)}
+                  className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+                >
+                  {pendingAction === "browser" ? (
+                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                  ) : (
+                    <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                      open_in_new
+                    </span>
+                  )}
+                  {waitingForFile ? "Open the link again" : "Open in my browser"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(canCancel || canRetry || item.status === "completed" || item.actionUrl) && (
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          {item.actionUrl && !waitingForFile && (item.status === "error" || item.status === "action") && (
+            <button
+              type="button"
+              onClick={handleSolveCaptcha}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-100 transition hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                verified_user
+              </span>
+              {item.status === "action" ? "Show browser window" : "Finish in browser"}
+            </button>
+          )}
+          {canCancel && (
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-red-500/35 bg-red-500/10 px-2.5 py-1 text-xs text-red-100 transition hover:bg-red-500/20 disabled:opacity-50"
+            >
+              {pendingAction === "cancel" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                  close
+                </span>
+              )}
+              Cancel
+            </button>
+          )}
+          {canRetry && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={Boolean(pendingAction)}
+              className="group inline-flex items-center gap-1 border border-accent/45 bg-accent/15 px-2.5 py-1 text-xs text-text transition hover:bg-accent/25 disabled:opacity-50"
+            >
+              {pendingAction === "retry" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none transition-transform duration-700 group-hover:-rotate-180" aria-hidden>
+                  refresh
+                </span>
+              )}
+              Retry
+            </button>
+          )}
+          {canInstallFromFile && !showManualHelp && (
+            <button
+              type="button"
+              onClick={handleInstallFromFile}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+              title="Install from a file you downloaded yourself"
+            >
+              {pendingAction === "file" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                  upload_file
+                </span>
+              )}
+              Install from file
+            </button>
+          )}
+          {item.status === "completed" && item.recordId && onOpenLibraryRecord && (
+            <button
+              type="button"
+              onClick={() => onOpenLibraryRecord(item.recordId)}
+              className="inline-flex items-center gap-1 border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-100 transition hover:bg-emerald-500/20"
+            >
+              <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                sports_esports
+              </span>
+              Show in library
+            </button>
+          )}
+          {!isActive && (
+            <button
+              type="button"
+              onClick={handleShowInFolder}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                folder_open
+              </span>
+              Folder
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DownloadsPanel = (liveProps) => {
+  const layer = useDownloadsLayer(liveProps.isOpen, liveProps, {
+    onClose: () => liveProps.onClose?.(),
+    manageFocus: false,
+  });
+  const [isClearing, setIsClearing] = React.useState(false);
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("atlas-downloads-open", Boolean(liveProps.isOpen));
+    return () => root.classList.remove("atlas-downloads-open");
+  }, [liveProps.isOpen]);
+
+  if (!layer.isMounted) {
     return null;
   }
+
+  const { items = [], activeCount = 0, onClose, onOpenLibraryRecord } =
+    layer.props;
+  const finishedCount = items.filter(
+    (item) => !ACTIVE_DOWNLOAD_STATUSES.has(item.status),
+  ).length;
+
+  const clearHistory = async () => {
+    if (isClearing) {
+      return;
+    }
+    setIsClearing(true);
+    try {
+      const result = await callDownloadsApi("clearF95DownloadHistory");
+      if (result && result.success === false) {
+        throw new Error(result.error || "History could not be cleared.");
+      }
+    } catch (error) {
+      downloadsToast()?.error(
+        window.AtlasUI?.errorMessage(error, "History could not be cleared.") ||
+          String(error),
+        { title: "Downloads" },
+      );
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   return (
     <>
       <div
-        className="fixed inset-0 z-[1650] bg-black/20"
+        className="atlas-overlay fixed inset-0 z-[1650] bg-black/20"
+        data-state={layer.state}
         onClick={onClose}
         role="presentation"
       />
-      <div className="fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div
+        className="atlas-popover fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl"
+        data-state={layer.state}
+        role="dialog"
+        aria-label="Downloads"
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-accent/80">
               Downloads
             </div>
-            <div className="mt-1 text-sm font-medium text-text">
+            <div
+              key={activeCount}
+              className="atlas-fade-enter mt-1 text-sm font-medium text-text"
+            >
               {activeCount > 0
                 ? `${activeCount} active`
                 : "No active downloads"}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            {finishedCount > 0 && (
+              <button
+                type="button"
+                onClick={clearHistory}
+                disabled={isClearing}
+                className="atlas-fade-enter inline-flex items-center gap-1 rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+                title="Remove finished, failed and cancelled entries"
+              >
+                {isClearing ? (
+                  <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                ) : (
+                  <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                    delete_sweep
+                  </span>
+                )}
+                Clear history
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
+              title="Close (Esc)"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
         {items.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm text-text/65">
+          <div className="atlas-fade-enter flex flex-col items-center gap-2 px-4 py-10 text-center text-sm text-text/65">
+            <span className="material-symbols-outlined text-[36px] text-text/30" aria-hidden>
+              download_done
+            </span>
             Background downloads will appear here.
           </div>
         ) : (
           <div className="max-h-[420px] overflow-y-auto px-3 py-3">
             <div className="space-y-3">
-              {items.map((item) => {
-                const percent = Math.max(
-                  0,
-                  Math.min(100, Number(item.percent) || 0),
-                );
-                const totalBytes = Number(item.totalBytes) || 0;
-                const receivedBytes = Number(item.receivedBytes) || 0;
-                const hasTransferStats = totalBytes > 0;
-
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-border bg-black/20 px-4 py-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-text">
-                          {item.title || item.fileName || "Unnamed download"}
-                        </div>
-                        <div className="mt-1 text-xs text-text/55">
-                          {item.fileName || item.sourceLabel || item.sourceHost}
-                        </div>
-                      </div>
-                      <div
-                        className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${getDownloadStatusTone(item.status)}`}
-                      >
-                        {getDownloadStatusLabel(item.status)}
-                      </div>
-                    </div>
-
-                    <div className="mt-3 text-sm text-text/80">
-                      {item.text || "Waiting"}
-                    </div>
-
-                    {item.status === "waiting" ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10">
-                          <div className="h-full w-full animate-atlas-pulse-soft bg-amber-400/60" />
-                        </div>
-                        {onCancelWaiting && (
-                          <button
-                            type="button"
-                            onClick={() => onCancelWaiting(item)}
-                            className="rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10"
-                          >
-                            Stop waiting
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10">
-                        <div
-                          className={`h-full rounded-full transition-[width] duration-300 ${
-                            item.status === "error"
-                              ? "bg-red-500"
-                              : item.status === "completed"
-                                ? "bg-emerald-500"
-                                : item.status === "installing"
-                                  ? "bg-sky-500"
-                                  : "bg-gradient-to-r from-accent to-accentBar"
-                          }`}
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                    )}
-
-                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text/60">
-                      {item.status !== "waiting" && <div>{percent}%</div>}
-                      {hasTransferStats && (
-                        <div>
-                          {formatDownloadBytes(receivedBytes)} /{" "}
-                          {formatDownloadBytes(totalBytes)}
-                        </div>
-                      )}
-                      {item.status !== "waiting" && (
-                        <div>
-                          {formatDownloadSpeed(item.speedBytesPerSecond)}
-                        </div>
-                      )}
-                      {item.sourceHost && <div>{item.sourceHost}</div>}
-                      {item.updatedAt && (
-                        <div>{formatDownloadTimestamp(item.updatedAt)}</div>
-                      )}
-                    </div>
-
-                    {item.error && (
-                      <div className="mt-3 text-xs text-red-200/90">
-                        {item.error}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {items.map((item, index) => (
+                <DownloadItemRow
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  onOpenLibraryRecord={onOpenLibraryRecord}
+                />
+              ))}
             </div>
           </div>
         )}

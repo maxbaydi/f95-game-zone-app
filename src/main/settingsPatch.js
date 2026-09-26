@@ -30,11 +30,17 @@ function normalizeExtensionList(value, fallback) {
   return extensions.length > 0 ? extensions.join(",") : fallback;
 }
 
+const MOTION_LEVELS = new Set(["auto", "full", "reduced", "off"]);
+
 const SETTINGS_SCHEMA = {
   Interface: {
     minimizeToTray: toBoolean,
     showGameList: toBoolean,
     showDebugConsole: toBoolean,
+    motion: (value) => {
+      const motion = toText(value).toLowerCase();
+      return MOTION_LEVELS.has(motion) ? motion : "auto";
+    },
   },
   Library: {
     gameFolder: toText,

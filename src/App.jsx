@@ -1,6 +1,32 @@
-const { useState, useEffect, useRef, useCallback, useMemo } = window.React;
+const { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } =
+  window.React;
 const { createRoot } = window.ReactDOM;
 const { AutoSizer, Grid } = window.ReactVirtualized;
+
+// Motion/toast runtime from core/ui/atlas-react.js and core/ui/atlas-ui.js.
+// The fallbacks keep the app usable if either script failed to load.
+const appMotion = window.AtlasMotion || {
+  usePresence: (isOpen) => ({
+    isMounted: Boolean(isOpen),
+    state: isOpen ? "open" : "closed",
+  }),
+  useSnapshot: (value) => value,
+  useEscape: () => {},
+};
+const appToast = window.AtlasToast || {
+  show: (options) => console.info(options),
+  update: () => {},
+  dismiss: () => {},
+  success: (message) => console.info(message),
+  info: (message) => console.info(message),
+  warning: (message) => console.warn(message),
+  error: (message) => window.alert(message),
+  loading: (message) => console.info(message),
+};
+const AppSafe =
+  window.AtlasSafe || (({ children }) => (children === undefined ? null : children));
+const CARD_STAGGER_LIMIT = 18;
+const LIST_STAGGER_LIMIT = 24;
 
 const SECTION_LIBRARY = "library";
 const SECTION_UPDATES = "updates";
@@ -30,8 +56,6 @@ const createDefaultF95UpdateModalState = () => ({
   isInstalling: false,
   error: "",
   captchaUrl: "",
-  actionKind: "",
-  handoff: null,
   game: null,
   thread: null,
   selectedLinkUrl: "",
@@ -80,6 +104,32 @@ const getRendererErrorMessage = (error, fallbackMessage) => {
   }
 
   return fallbackMessage;
+};
+
+// Subscribes to a preload event without assuming the bridge has it (older
+// builds, the browser preview). Returns an unsubscribe function.
+const subscribeElectronEvent = (method, channel, callback) => {
+  const api = window.electronAPI;
+  if (!api || typeof api[method] !== "function") {
+    console.warn(`[app] electronAPI.${method} is unavailable; skipping.`);
+    return () => {};
+  }
+
+  try {
+    const unsubscribe = api[method](callback);
+    if (typeof unsubscribe === "function") {
+      return unsubscribe;
+    }
+  } catch (error) {
+    console.error(`[app] Failed to subscribe via ${method}:`, error);
+    return () => {};
+  }
+
+  return () => {
+    if (channel && typeof api.removeAllListeners === "function") {
+      api.removeAllListeners(channel);
+    }
+  };
 };
 
 const getDisplayTitle = (game) =>
@@ -227,8 +277,96 @@ const countActiveFilters = (filters) => {
   return count;
 };
 
+const clampPercent = (value) => Math.max(0, Math.min(100, Number(value) || 0));
+
+// Floating progress bar above the footer. Stays mounted while it animates out
+// so the last message fades instead of vanishing.
+const StatusDockBar = ({ status, counterLabel }) => {
+  const isOpen = Boolean(status?.text);
+  const presence = appMotion.usePresence(isOpen);
+  const snapshot = appMotion.useSnapshot(status, isOpen);
+
+  if (!presence.isMounted || !snapshot?.text) {
+    return null;
+  }
+
+  const total = Number(snapshot.total) || 0;
+  const progress = Number(snapshot.progress) || 0;
+  const percent = total > 0 ? clampPercent((progress / total) * 100) : 0;
+  const isError = /error|failed/i.test(snapshot.text);
+  const isFinished =
+    !isError && total > 0 && progress >= total && /complete|finished|done/i.test(snapshot.text);
+  const isIndeterminate = !isError && !isFinished && (total <= 1 || progress <= 0);
+
+  return (
+    <div
+      className="atlas-rise pointer-events-auto flex w-full items-center justify-center border border-border bg-primary/85 p-2 shadow-glass backdrop-blur-xl"
+      data-state={presence.state}
+      role="status"
+    >
+      <div className="flex w-full items-center gap-3">
+        <span
+          className={`material-symbols-outlined shrink-0 text-[18px] ${
+            isError ? "text-red-300" : isFinished ? "text-emerald-300" : "text-accent"
+          }`}
+          aria-hidden
+        >
+          {isError ? "error" : isFinished ? "check_circle" : "sync"}
+        </span>
+        <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
+          {snapshot.text}
+        </span>
+        <div className="relative w-[min(300px,40%)] shrink-0">
+          <div
+            className={`h-4 overflow-hidden bg-black/40 ring-1 ring-inset ring-border ${
+              isIndeterminate ? "atlas-progress-indeterminate atlas-keep-motion" : ""
+            }`}
+          >
+            <div
+              className={`atlas-progress-fill h-full ${
+                isError
+                  ? "bg-red-500/80"
+                  : isFinished
+                    ? "bg-emerald-500/80"
+                    : "atlas-progress-fill--active atlas-keep-motion bg-gradient-to-r from-accent to-accentBar shadow-glow-accent"
+              }`}
+              style={{ width: `${isIndeterminate ? 0 : percent}%` }}
+            ></div>
+          </div>
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium tabular-nums text-text">
+            {total > 0 ? `${counterLabel} ${progress}/${total}` : counterLabel}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LibrarySkeleton = () => (
+  <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-3 pb-3">
+    <div className="atlas-skeleton h-4 w-40" />
+    <div className="flex flex-wrap gap-4 px-1">
+      {Array.from({ length: 12 }).map((_, index) => (
+        <div
+          key={index}
+          className="atlas-card-enter border border-border/60 bg-black/20"
+          style={{ width: 252, height: 208, "--atlas-index": index }}
+        >
+          <div className="atlas-skeleton h-[108px] w-full" />
+          <div className="space-y-2 p-2.5">
+            <div className="atlas-skeleton h-3 w-24" />
+            <div className="atlas-skeleton h-4 w-44" />
+            <div className="atlas-skeleton mt-6 h-5 w-full" />
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 const App = () => {
   const [games, setGames] = useState([]);
+  const [isGamesLoading, setIsGamesLoading] = useState(true);
   const [selectedGame, setSelectedGame] = useState(null);
   const [version, setVersion] = useState("0.0.0");
   const [importStatus, setImportStatus] = useState({
@@ -311,7 +449,6 @@ const App = () => {
     page: "general",
     nonce: 0,
   });
-  const [hasLoadedGames, setHasLoadedGames] = useState(false);
   const [deleteGameModal, setDeleteGameModal] = useState(
     createDefaultDeleteGameModalState,
   );
@@ -327,6 +464,10 @@ const App = () => {
   const f95UpdateModalRef = useRef(createDefaultF95UpdateModalState());
   const f95CaptchaRetryKeyRef = useRef("");
   const deleteGameModalRef = useRef(createDefaultDeleteGameModalState());
+  const isLibraryScanRunningRef = useRef(false);
+  const showDiscoveryRef = useRef(false);
+  const downloadStatusRef = useRef(null);
+  const deferredLibraryQuery = useDeferredValue(libraryQuery);
 
   const refreshLibraryGrid = useCallback(() => {
     if (!gridRef.current) {
@@ -399,6 +540,14 @@ const App = () => {
   }, [deleteGameModal]);
 
   useEffect(() => {
+    isLibraryScanRunningRef.current = isLibraryScanRunning;
+  }, [isLibraryScanRunning]);
+
+  useEffect(() => {
+    showDiscoveryRef.current = showDiscovery;
+  }, [showDiscovery]);
+
+  useEffect(() => {
     return () => {
       if (resizeGridFrameRef.current === null) {
         return;
@@ -411,13 +560,58 @@ const App = () => {
   useEffect(() => {
     let mounted = true;
 
+    const announceDownloadTransitions = (items) => {
+      const previousStatuses = downloadStatusRef.current;
+      const nextStatuses = new Map(
+        items.map((item) => [item.id, String(item.status || "")]),
+      );
+      downloadStatusRef.current = nextStatuses;
+
+      // The first snapshot only seeds the map; history is not re-announced.
+      if (!previousStatuses) {
+        return;
+      }
+
+      for (const item of items) {
+        const previousStatus = previousStatuses.get(item.id);
+        const nextStatus = String(item.status || "");
+        if (!previousStatus || previousStatus === nextStatus) {
+          continue;
+        }
+
+        const title = item.title || item.fileName || "Download";
+        if (nextStatus === "completed") {
+          appToast.success(`${title} is installed and ready to play.`, {
+            title: "Install complete",
+          });
+        } else if (nextStatus === "error") {
+          appToast.error(item.error || item.text || "The download failed.", {
+            title: `${title} failed`,
+            actions: [
+              {
+                label: "Open downloads",
+                onClick: () => setDownloadsPanelOpen(true),
+              },
+            ],
+          });
+        } else if (nextStatus === "installing") {
+          appToast.info(`Unpacking ${title} into your library…`, {
+            title: "Download finished",
+            duration: 3000,
+          });
+        }
+      }
+    };
+
     const applyDownloadsSnapshot = (payload) => {
       if (!mounted || !payload) {
         return;
       }
 
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      announceDownloadTransitions(items);
       setF95Downloads({
-        items: Array.isArray(payload.items) ? payload.items : [],
+        items,
         activeCount: Number(payload.activeCount) || 0,
       });
     };
@@ -429,51 +623,49 @@ const App = () => {
         console.error("Failed to load F95 downloads:", error);
       });
 
-    window.electronAPI.onF95DownloadsChanged((payload) => {
-      applyDownloadsSnapshot(payload);
-    });
+    const unsubscribeDownloads = subscribeElectronEvent(
+      "onF95DownloadsChanged",
+      "f95-downloads-changed",
+      (payload) => {
+        applyDownloadsSnapshot(payload);
+      },
+    );
 
     return () => {
       mounted = false;
-      window.electronAPI.removeAllListeners("f95-downloads-changed");
+      unsubscribeDownloads();
     };
   }, []);
 
   useEffect(() => {
-    const handoffId = f95UpdateModal.handoff?.id;
-    if (!f95UpdateModal.isOpen || !handoffId) {
-      return;
-    }
-
-    const handoffItem = f95Downloads.items.find(
-      (item) => item.id === handoffId,
-    );
-    if (handoffItem && handoffItem.status !== "waiting") {
-      setDownloadsPanelOpen(true);
-      closeF95UpdateModal();
-    }
-  }, [f95Downloads.items, f95UpdateModal.isOpen, f95UpdateModal.handoff]);
-
-  useEffect(() => {
-    if (activeSection !== SECTION_LIBRARY || !hasLoadedGames || games.length > 0) {
+    if (
+      activeSection !== SECTION_LIBRARY ||
+      isGamesLoading ||
+      games.length > 0
+    ) {
       return;
     }
     window.electronAPI
       .getScanSources()
       .then((result) => result?.success && setScanSources(result.sources || []))
       .catch(() => {});
-  }, [activeSection, hasLoadedGames, games.length]);
+  }, [activeSection, isGamesLoading, games.length]);
 
-  useEffect(() => {
-    const unsubscribe = window.electronAPI.onSettingsChanged?.((config) => {
-      if (!config) {
-        return;
-      }
-      setShowGameList(config.Interface?.showGameList !== false);
-      setDefaultGameFolder(String(config.Library?.gameFolder || "").trim());
-    });
-    return () => unsubscribe?.();
-  }, []);
+  useEffect(
+    () =>
+      subscribeElectronEvent(
+        "onSettingsChanged",
+        "settings-changed",
+        (config) => {
+          if (!config) {
+            return;
+          }
+          setShowGameList(config.Interface?.showGameList !== false);
+          setDefaultGameFolder(String(config.Library?.gameFolder || "").trim());
+        },
+      ),
+    [],
+  );
 
   const handleSiteFilterChange = (filters) => {
     setSiteSearchFilters(filters);
@@ -593,22 +785,30 @@ const App = () => {
 
       closeDeleteGameModal();
 
+      const removedTitle = getDisplayTitle(deleteGameModal.game);
       if (result.warnings?.length) {
-        window.alert(result.warnings.join("\n"));
+        appToast.warning(result.warnings.join("\n"), {
+          title: `${removedTitle} removed with warnings`,
+        });
       } else if (
         deleteGameModal.mode === DELETE_GAME_MODES.LIBRARY_ONLY
       ) {
-        window.alert(
-          "The game was removed from your library. Nothing on this PC was deleted.",
+        appToast.success(
+          "It was removed from your library. Nothing on this PC was deleted.",
+          { title: `${removedTitle} removed` },
         );
       } else if (
         deleteGameModal.mode === DELETE_GAME_MODES.DELETE_FILES_KEEP_SAVES
       ) {
-        window.alert("The game files were removed. Your progress was kept.");
+        appToast.success("The game files were removed. Your progress was kept.", {
+          title: `${removedTitle} deleted`,
+        });
       } else if (
         deleteGameModal.mode === DELETE_GAME_MODES.DELETE_FILES_AND_SAVES
       ) {
-        window.alert("The game files and saves were removed.");
+        appToast.success("The game files and saves were removed.", {
+          title: `${removedTitle} deleted`,
+        });
       }
     } catch (error) {
       console.error("Failed to delete game:", error);
@@ -634,10 +834,14 @@ const App = () => {
     }
 
     setF95UpdateModal({
-      ...createDefaultF95UpdateModalState(),
       isOpen: true,
       isLoading: true,
+      isInstalling: false,
+      error: "",
+      captchaUrl: "",
       game,
+      thread: null,
+      selectedLinkUrl: "",
     });
 
     try {
@@ -647,37 +851,45 @@ const App = () => {
 
       if (!payload?.success) {
         setF95UpdateModal({
-          ...createDefaultF95UpdateModalState(),
           isOpen: true,
+          isLoading: false,
+          isInstalling: false,
           error: payload?.error || "Failed to inspect the live F95 thread.",
+          captchaUrl: "",
           game,
+          thread: null,
+          selectedLinkUrl: "",
         });
         return;
       }
 
+      const selectedLinkUrl =
+        payload.preferredLinkUrl || payload.links?.[0]?.url || "";
+
       setF95UpdateModal({
-        ...createDefaultF95UpdateModalState(),
         isOpen: true,
+        isLoading: false,
+        isInstalling: false,
+        error: "",
+        captchaUrl: "",
         game,
         thread: payload,
-        selectedLinkUrl:
-          payload.preferredLinkUrl || payload.links?.[0]?.url || "",
+        selectedLinkUrl,
       });
     } catch (error) {
       console.error("Failed to prepare F95 update:", error);
       setF95UpdateModal({
-        ...createDefaultF95UpdateModalState(),
         isOpen: true,
+        isLoading: false,
+        isInstalling: false,
         error: error.message || "Failed to prepare the update.",
+        captchaUrl: "",
         game,
+        thread: null,
+        selectedLinkUrl: "",
       });
     }
   };
-
-  const getSelectedF95UpdateLink = (modalState) =>
-    modalState.thread?.links?.find(
-      (link) => link.url === modalState.selectedLinkUrl,
-    ) || null;
 
   const buildF95UpdateInstallPayload = (modalState, link) => {
     const variant = window.f95MirrorUi?.findVariant?.(
@@ -704,84 +916,12 @@ const App = () => {
     };
   };
 
-  const openF95BrowserHandoffWindow = async (hostName, actionUrl) => {
-    const result = await window.electronAPI.openF95BrowserUrl({
-      url: actionUrl,
-      title: `${hostName} download`,
-    });
-
-    if (!result?.success) {
-      setF95UpdateModal((previous) => ({
-        ...previous,
-        error:
-          result?.error || "F95Launcher could not open the mirror page.",
-      }));
-    }
-  };
-
-  const startF95UpdateBrowserHandoff = async () => {
-    const modalState = f95UpdateModalRef.current;
-    const selectedLink = getSelectedF95UpdateLink(modalState);
-    if (!selectedLink || !modalState.thread || !modalState.game) {
-      return;
-    }
-
-    const hostName =
-      window.getF95MirrorDisplayName?.(selectedLink) || "the mirror";
-    setF95UpdateModal((previous) => ({
-      ...previous,
-      isInstalling: true,
-      error: "",
-      captchaUrl: "",
-      actionKind: "",
-    }));
-
-    try {
-      const result = await window.electronAPI.startF95BrowserHandoff(
-        buildF95UpdateInstallPayload(modalState, selectedLink),
-      );
-      if (!result?.success) {
-        setF95UpdateModal((previous) => ({
-          ...previous,
-          isInstalling: false,
-          error: result?.error || "Failed to open the mirror page.",
-        }));
-        return;
-      }
-
-      setF95UpdateModal((previous) => ({
-        ...previous,
-        isInstalling: false,
-        handoff: {
-          id: result.handoffId,
-          hostName,
-          actionUrl: result.actionUrl || selectedLink.url,
-        },
-      }));
-      await openF95BrowserHandoffWindow(
-        hostName,
-        result.actionUrl || selectedLink.url,
-      );
-    } catch (error) {
-      console.error("Failed to start browser download:", error);
-      setF95UpdateModal((previous) => ({
-        ...previous,
-        isInstalling: false,
-        error: error.message || "Failed to open the mirror page.",
-      }));
-    }
-  };
-
-  const reopenF95UpdateHandoff = () => {
-    const handoff = f95UpdateModalRef.current.handoff;
-    if (handoff?.actionUrl) {
-      void openF95BrowserHandoffWindow(handoff.hostName, handoff.actionUrl);
-    }
-  };
-
   const queueF95UpdateInstall = async (downloadUrlOverride = "") => {
     const modalState = f95UpdateModalRef.current;
-    const selectedLink = getSelectedF95UpdateLink(modalState);
+    const selectedLink =
+      modalState.thread?.links?.find(
+        (link) => link.url === modalState.selectedLinkUrl,
+      ) || null;
 
     if (!selectedLink || !modalState.thread || !modalState.game) {
       setF95UpdateModal((previous) => ({
@@ -791,21 +931,11 @@ const App = () => {
       return;
     }
 
-    if (
-      !downloadUrlOverride &&
-      window.f95MirrorUi?.isBrowserOnly?.(selectedLink)
-    ) {
-      await startF95UpdateBrowserHandoff();
-      return;
-    }
-
     setF95UpdateModal((previous) => ({
       ...previous,
       isInstalling: true,
       error: "",
       captchaUrl: "",
-      actionKind: "",
-      handoff: null,
     }));
     beginF95UpdateAttempts(modalState.thread.threadUrl);
 
@@ -813,18 +943,16 @@ const App = () => {
       const result = await window.electronAPI.installF95Thread({
         ...buildF95UpdateInstallPayload(modalState, selectedLink),
         downloadUrl: downloadUrlOverride || selectedLink.url,
-        fallbackLinks:
-          window.f95MirrorUi?.buildFallbackLinks?.(
-            modalState.thread,
-            selectedLink,
-          ) || [],
+        fallbackLinks: downloadUrlOverride
+          ? []
+          : window.f95MirrorUi?.buildFallbackLinks?.(
+              modalState.thread,
+              selectedLink,
+            ) || [],
       });
 
       if (!result?.success) {
         if (result?.code === "captcha_required") {
-          const actionHostName = window.getF95MirrorDisplayName?.({
-            host: result?.actionHost || selectedLink.host,
-          });
           setF95UpdateModal((previous) => ({
             ...previous,
             isInstalling: false,
@@ -832,15 +960,6 @@ const App = () => {
               result?.error ||
               "This mirror needs captcha confirmation before F95Launcher can continue.",
             captchaUrl: result?.actionUrl || selectedLink.url,
-            actionKind: result?.actionKind || "captcha",
-            handoff: result?.handoffId
-              ? {
-                  id: result.handoffId,
-                  hostName: actionHostName || "the mirror",
-                  actionUrl: result?.actionUrl || selectedLink.url,
-                  passive: true,
-                }
-              : null,
           }));
           return;
         }
@@ -853,21 +972,42 @@ const App = () => {
         return;
       }
 
+      const requestedHostName =
+        window.getF95MirrorDisplayName?.(selectedLink) ||
+        selectedLink.label ||
+        "The selected mirror";
+      const usedHostName =
+        window.getF95MirrorDisplayName?.({
+          host: result.usedHost || selectedLink.host,
+          label: result.usedLabel || selectedLink.label,
+        }) ||
+        result.hostLabel ||
+        requestedHostName;
+      const fallbackNote = result.fellBack
+        ? `${requestedHostName} did not return the file, so F95Launcher switched to ${usedHostName}. `
+        : "";
+
       setDownloadsPanelOpen(true);
-      if (result.fellBack) {
-        // Keep the attempt log visible for a moment so the switch is visible.
-        setF95UpdateModal((previous) => ({
-          ...previous,
-          isInstalling: false,
-        }));
-        window.setTimeout(() => {
-          if (f95UpdateModalRef.current.thread === modalState.thread) {
-            closeF95UpdateModal();
-          }
-        }, 1600);
-        return;
-      }
       closeF95UpdateModal();
+      if (result?.awaitingAction) {
+        appToast.info(
+          `${fallbackNote}${result.hostLabel || usedHostName} needs a quick step in the browser window that just opened. Finish it there and the download continues by itself.`,
+          {
+            title: "Your turn in the browser",
+            duration: 8000,
+          },
+        );
+      } else {
+        appToast.info(
+          `${fallbackNote}${usedHostName} is being prepared. Progress is shown in Downloads.`,
+          {
+            title: `Queued ${
+              modalState.thread.title || getDisplayTitle(modalState.game)
+            }`,
+            duration: result.fellBack ? 7000 : undefined,
+          },
+        );
+      }
     } catch (error) {
       console.error("Failed to queue game update:", error);
       setF95UpdateModal((previous) => ({
@@ -883,26 +1023,49 @@ const App = () => {
   };
 
   const openGameFolder = (targetPath) => {
-    if (targetPath) {
-      window.electronAPI.openDirectory(targetPath);
+    if (!targetPath) {
+      return;
     }
+
+    Promise.resolve(window.electronAPI.openDirectory(targetPath)).catch(
+      (error) => {
+        appToast.error(
+          getRendererErrorMessage(error, "The folder could not be opened."),
+          { title: "Open folder failed" },
+        );
+      },
+    );
   };
 
   const launchInstalledVersion = async (version, game) => {
+    if (typeof window.launchAtlasGame === "function") {
+      return window.launchAtlasGame({
+        execPath: version?.exec_path || "",
+        recordId: game?.record_id || null,
+        title: getDisplayTitle(game),
+      });
+    }
+
     const extension = version?.exec_path
       ? version.exec_path.split(".").pop().toLowerCase()
       : "";
-    const result = await window.electronAPI.launchGame({
-      execPath: version?.exec_path || "",
-      extension,
-      recordId: game?.record_id || null,
-    });
+    try {
+      const result = await window.electronAPI.launchGame({
+        execPath: version?.exec_path || "",
+        extension,
+        recordId: game?.record_id || null,
+      });
 
-    if (!result?.success) {
-      window.alert(
-        result?.error ||
-          "Could not start this game. Check the installed files and try again.",
-      );
+      if (!result?.success) {
+        appToast.error(
+          result?.error ||
+            "Could not start this game. Check the installed files and try again.",
+        );
+      }
+      return result;
+    } catch (error) {
+      appToast.error(getRendererErrorMessage(error, "Could not start this game."));
+      return { success: false };
     }
   };
 
@@ -1033,7 +1196,7 @@ const App = () => {
 
     const result = await window.electronAPI.openF95BrowserUrl({
       url: targetUrl,
-      title: "Mirror verification",
+      title: "F95 Mirror Verification",
     });
 
     if (!result?.success) {
@@ -1060,11 +1223,20 @@ const App = () => {
     const newVisible = !showGameList;
     setShowGameList(newVisible);
 
-    window.electronAPI
-      .updateSettings("Interface", { showGameList: newVisible })
-      .catch((err) =>
-        console.error("Failed to save game list visibility:", err),
-      );
+    Promise.resolve(
+      window.electronAPI.updateSettings("Interface", {
+        showGameList: newVisible,
+      }),
+    )
+      .then((result) => {
+        if (result && result.success === false) {
+          throw new Error(result.error || "Settings could not be saved.");
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to save game list visibility:", err);
+        appToast.warning("The title list preference could not be saved.");
+      });
   };
 
   const isOnboardingCompleted = (config) => {
@@ -1237,6 +1409,10 @@ const App = () => {
             "[library.favorite] Failed to set favorite:",
             result?.error || "unknown error",
           );
+          appToast.error(
+            getRendererErrorMessage(result?.error, "Favorites could not be updated."),
+            { title: "Favorites" },
+          );
           return;
         }
 
@@ -1248,6 +1424,10 @@ const App = () => {
         refreshGame(recordId);
       } catch (error) {
         console.error("[library.favorite] Failed to set favorite:", error);
+        appToast.error(
+          getRendererErrorMessage(error, "Favorites could not be updated."),
+          { title: "Favorites" },
+        );
       }
     },
     [applyUpdatedGameToState, refreshGame],
@@ -1299,19 +1479,31 @@ const App = () => {
         setTotalVersions(
           gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
         );
-        setHasLoadedGames(true);
         void decideOnboarding(gamesArray.length);
       })
       .catch((error) => {
         console.error("Failed to fetch games:", error);
         setGames([]);
         setTotalVersions(0);
-        setHasLoadedGames(true);
+        appToast.error(
+          getRendererErrorMessage(error, "The library database could not be read."),
+          {
+            title: "Library failed to load",
+            actions: [
+              { label: "Reload", onClick: () => window.location.reload() },
+            ],
+          },
+        );
+      })
+      .finally(() => {
+        setIsGamesLoading(false);
       });
 
     window.electronAPI
       .getScanSources()
-      .then((result) => setScanSources(result?.success ? result.sources || [] : []))
+      .then((result) =>
+        setScanSources(result?.success ? result.sources || [] : []),
+      )
       .catch(() => {});
 
     // Load banner size from template
@@ -1329,7 +1521,10 @@ const App = () => {
         console.error("Failed to load template:", error);
       });
 
-    window.electronAPI.getVersion().then((v) => setVersion(v));
+    window.electronAPI
+      .getVersion()
+      .then((v) => setVersion(v || "0.0.0"))
+      .catch((error) => console.error("Failed to read app version:", error));
     window.electronAPI
       .getAppUpdateState()
       .then((state) => {
@@ -1532,11 +1727,25 @@ const App = () => {
       refreshLibraryGrid();
     };
 
-    window.electronAPI.onGameDeleted(handleGameDeleted);
-    window.electronAPI.onWindowStateChanged(handleWindowStateChanged);
-    window.electronAPI.onDbUpdateProgress(handleDbUpdateProgress);
-    window.electronAPI.onImportProgress(handleImportProgress);
-    window.electronAPI.onGameImported(handleGameImported);
+    const unsubscribers = [
+      subscribeElectronEvent("onGameDeleted", "game-deleted", handleGameDeleted),
+      subscribeElectronEvent(
+        "onWindowStateChanged",
+        "window-state-changed",
+        handleWindowStateChanged,
+      ),
+      subscribeElectronEvent(
+        "onDbUpdateProgress",
+        "db-update-progress",
+        handleDbUpdateProgress,
+      ),
+      subscribeElectronEvent(
+        "onImportProgress",
+        "import-progress",
+        handleImportProgress,
+      ),
+      subscribeElectronEvent("onGameImported", "game-imported", handleGameImported),
+    ];
     const handleGamesLibrarySynced = () => {
       window.electronAPI
         .getGames()
@@ -1554,17 +1763,32 @@ const App = () => {
           );
         });
     };
-    const unsubscribeGamesLibrarySynced =
-      typeof window.electronAPI.onGamesLibrarySynced === "function"
-        ? window.electronAPI.onGamesLibrarySynced(handleGamesLibrarySynced)
-        : null;
-    window.electronAPI.onGameUpdated(handleGameUpdated);
-    window.electronAPI.onImportComplete(handleImportComplete);
-    window.electronAPI.onUpdateStatus(handleUpdateStatus);
-    window.electronAPI.onF95BrowserNavigation(handleF95BrowserNavigation);
+    unsubscribers.push(
+      subscribeElectronEvent(
+        "onGamesLibrarySynced",
+        "games-library-synced",
+        handleGamesLibrarySynced,
+      ),
+      subscribeElectronEvent("onGameUpdated", "game-updated", handleGameUpdated),
+      subscribeElectronEvent(
+        "onImportComplete",
+        "import-complete",
+        handleImportComplete,
+      ),
+      subscribeElectronEvent("onUpdateStatus", "update-status", handleUpdateStatus),
+      subscribeElectronEvent(
+        "onF95BrowserNavigation",
+        "f95-browser-navigation",
+        handleF95BrowserNavigation,
+      ),
+    );
 
     //banner context menu
-    window.electronAPI.onContextMenuCommand((event, data) => {
+    const handleContextMenuCommand = (event, data) => {
+      if (!data?.action) {
+        return;
+      }
+
       if (data.action === "properties") {
         window.electronAPI
           .getGame(data.recordId)
@@ -1627,6 +1851,11 @@ const App = () => {
       }
 
       if (data.action === "refreshLibraryPreviews") {
+        if (isLibraryScanRunningRef.current) {
+          appToast.info("Wait for the current library task to finish.");
+          return;
+        }
+        isLibraryScanRunningRef.current = true;
         setIsLibraryScanRunning(true);
         setImportProgress({
           text: "Starting screenshot refresh...",
@@ -1670,10 +1899,18 @@ const App = () => {
             });
           })
           .finally(() => {
+            isLibraryScanRunningRef.current = false;
             setIsLibraryScanRunning(false);
           });
       }
-    });
+    };
+    unsubscribers.push(
+      subscribeElectronEvent(
+        "onContextMenuCommand",
+        "context-menu-command",
+        handleContextMenuCommand,
+      ),
+    );
 
     // Set up layout sync: window resize + container resize during details-panel drag
     window.addEventListener("resize", runResizeSync);
@@ -1687,18 +1924,15 @@ const App = () => {
 
     // Cleanup
     return () => {
-      window.electronAPI.removeUpdateStatusListener?.();
       window.removeEventListener("resize", runResizeSync);
       gameGridResizeObserver?.disconnect();
-      window.electronAPI.onWindowStateChanged(() => {});
-      window.electronAPI.onDbUpdateProgress(() => {});
-      window.electronAPI.onImportProgress(() => {});
-      window.electronAPI.onGameImported(() => {});
-      window.electronAPI.onGameUpdated(() => {});
-      window.electronAPI.onImportComplete(() => {});
-      window.electronAPI.onUpdateStatus(() => {});
-      window.electronAPI.removeAllListeners("f95-browser-navigation");
-      unsubscribeGamesLibrarySynced?.();
+      unsubscribers.forEach((unsubscribe) => {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error("[app] Failed to unsubscribe:", error);
+        }
+      });
     };
   }, [scheduleGridResizeSync]);
 
@@ -1738,9 +1972,13 @@ const App = () => {
         });
       });
 
-    const unsubscribe = window.electronAPI.onCloudAuthChanged((state) => {
-      applyCloudAuthState(state);
-    });
+    const unsubscribe = subscribeElectronEvent(
+      "onCloudAuthChanged",
+      "cloud-auth-changed",
+      (state) => {
+        applyCloudAuthState(state);
+      },
+    );
 
     return () => {
       mounted = false;
@@ -1771,12 +2009,16 @@ const App = () => {
   };
 
   const rescanLibrary = async (options = {}) => {
-    if (isLibraryScanRunning) {
+    // Read the ref: this is also invoked from the context-menu listener that
+    // was registered on mount and would otherwise see a stale state value.
+    if (isLibraryScanRunningRef.current) {
+      appToast.info("A library scan is already running.");
       return;
     }
 
     const isResetRescan = Boolean(options?.resetCache);
 
+    isLibraryScanRunningRef.current = true;
     setIsLibraryScanRunning(true);
     setImportProgress({
       text: isResetRescan
@@ -1820,15 +2062,17 @@ const App = () => {
         total: 1,
       });
     } finally {
-      if (showDiscovery) {
+      if (showDiscoveryRef.current) {
         loadDiscoveryCandidates();
       }
+      isLibraryScanRunningRef.current = false;
       setIsLibraryScanRunning(false);
     }
   };
 
   const openRescanLibraryMenu = () => {
     if (isLibraryScanRunning) {
+      appToast.info("A library scan is already running.");
       return;
     }
 
@@ -1902,6 +2146,9 @@ const App = () => {
         status: "error",
         error: error.message,
       }));
+      appToast.error(getRendererErrorMessage(error, "The app update failed."), {
+        title: "App update",
+      });
     }
   };
 
@@ -1914,12 +2161,12 @@ const App = () => {
       sortLibraryGames(
         filterLocalGames(
           games,
-          libraryQuery,
+          deferredLibraryQuery,
           activeSection === SECTION_UPDATES,
         ),
         librarySortMode,
       ),
-    [games, libraryQuery, activeSection, librarySortMode],
+    [games, deferredLibraryQuery, activeSection, librarySortMode],
   );
   const favoriteLibraryGames = useMemo(
     () =>
@@ -2137,10 +2384,6 @@ const App = () => {
       return;
     }
     const onKey = (e) => {
-      if (e.key === "Escape") {
-        closePreviewModal();
-        return;
-      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         showPreviousPreview();
@@ -2252,6 +2495,37 @@ const App = () => {
     scheduleGridResizeSync,
   ]);
 
+  const isPreviewOpen =
+    previewModalIndex !== null && selectedGamePreviews.length > 0;
+  const previewPresence = appMotion.usePresence(isPreviewOpen);
+  const previewSnapshot = appMotion.useSnapshot(
+    { index: previewModalIndex ?? 0, previews: selectedGamePreviews },
+    isPreviewOpen,
+  );
+  appMotion.useEscape(isPreviewOpen, closePreviewModal);
+
+  const isDetailsOpen =
+    activeSection !== SECTION_SEARCH &&
+    activeSection !== SECTION_SETTINGS &&
+    Boolean(selectedGame || isSelectedGameLoading);
+  const detailsPresence = appMotion.usePresence(isDetailsOpen);
+  const detailsSnapshot = appMotion.useSnapshot(
+    {
+      game: selectedGameDetails,
+      previews: selectedGamePreviews,
+      isLoading: isSelectedGameLoading,
+    },
+    isDetailsOpen,
+  );
+  appMotion.useEscape(isDetailsOpen, closeSelectedGamePanel);
+
+  const isScanActionVisible = canCancelLibraryScan;
+  const cancelScanPresence = appMotion.usePresence(isScanActionVisible);
+
+  const selectGame = useCallback((game) => {
+    setSelectedGame(game);
+  }, []);
+
   const cellRenderer = ({ columnIndex, rowIndex, style }) => {
     const index = rowIndex * columnCount + columnIndex;
     if (index >= visibleLibraryGames.length) return null;
@@ -2259,17 +2533,19 @@ const App = () => {
     return (
       <div
         key={game.record_id}
+        className="atlas-card-enter"
         style={{
           ...style,
           display: "flex",
           justifyContent: "center",
           padding: "8px 4px",
           maxWidth: "100%",
+          "--atlas-index": Math.min(columnIndex, CARD_STAGGER_LIMIT),
         }}
       >
         <window.GameBanner
           game={game}
-          onSelect={() => setSelectedGame(game)}
+          onSelect={() => selectGame(game)}
           onUpdateGame={handleGameUpdate}
           onToggleFavorite={toggleGameFavorite}
         />
@@ -2279,14 +2555,15 @@ const App = () => {
 
   const renderGameCardList = (gamesList, sectionKey) => (
     <div className="flex flex-wrap justify-start gap-y-4">
-      {gamesList.map((game) => (
+      {gamesList.map((game, index) => (
         <div
           key={`${sectionKey}-${game.record_id}`}
-          className="flex justify-start px-1"
+          className="atlas-card-enter flex justify-start px-1"
+          style={{ "--atlas-index": Math.min(index, CARD_STAGGER_LIMIT) }}
         >
           <window.GameBanner
             game={game}
-            onSelect={() => setSelectedGame(game)}
+            onSelect={() => selectGame(game)}
             onUpdateGame={handleGameUpdate}
             onToggleFavorite={toggleGameFavorite}
           />
@@ -2297,13 +2574,13 @@ const App = () => {
 
   const renderSectionControls = (resultsCount) => (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
-      <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md">
+      <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md transition-colors hover:border-accent/40">
         <span className="uppercase tracking-[0.14em] text-text/60">Sort</span>
         <select
           value={librarySortMode}
           onChange={(event) => setLibrarySortMode(event.target.value)}
           title={librarySortDescription}
-          className="min-w-[196px] bg-transparent text-xs text-text outline-none"
+          className="min-w-[196px] cursor-pointer bg-transparent text-xs text-text outline-none"
         >
           {LIBRARY_SORT_OPTIONS.map((option) => (
             <option
@@ -2319,51 +2596,258 @@ const App = () => {
       <button
         type="button"
         onClick={toggleGameList}
-        className="border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
+        className="flex items-center gap-1.5 border border-border bg-white/5 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 hover:shadow-glass"
       >
+        <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+          {showGameList ? "left_panel_close" : "left_panel_open"}
+        </span>
         {showGameList ? "Hide titles" : "Show titles"}
       </button>
-      <div className="border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] text-text/90 backdrop-blur-sm">
+      <div
+        key={resultsCount}
+        className="atlas-fade-enter border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] tabular-nums text-text/90 backdrop-blur-sm"
+      >
         {`${resultsCount} results`}
       </div>
     </div>
   );
 
+  const hasLibraryQuery = Boolean(libraryQuery.trim());
   const sectionMeta =
     activeSection === SECTION_UPDATES
       ? {
+          icon: "task_alt",
           eyebrow: "Update Inbox",
-          emptyTitle: "No pending updates",
-          emptyDescription:
-            "Current library entries are already on their latest known version.",
+          emptyTitle: hasLibraryQuery ? "No matching updates" : "No pending updates",
+          emptyDescription: hasLibraryQuery
+            ? `Nothing in the update inbox matches “${libraryQuery.trim()}”.`
+            : "Current library entries are already on their latest known version.",
         }
       : activeSection === SECTION_SEARCH
         ? {
+            icon: "travel_explore",
             eyebrow: "F95 Workspace",
             emptyTitle: "F95 session required",
             emptyDescription:
               "Log in to F95 to unlock the live search workspace, direct downloads and install-to-library flow.",
           }
         : {
+            icon: hasLibraryQuery ? "search_off" : "library_add",
             eyebrow: "User Library",
-            emptyTitle: hasLoadedGames ? "No games match your search" : "Loading your library...",
-            emptyDescription: hasLoadedGames
-              ? "Try another title or creator, or clear the search box."
-              : "",
+            emptyTitle: hasLibraryQuery ? "No games match your search" : "Library is empty",
+            emptyDescription: hasLibraryQuery
+              ? `Nothing in your library matches “${libraryQuery.trim()}”.`
+              : "Scan your configured sources to populate the library and discovery queue.",
           };
 
   const renderEmptyState = () => (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text">
-      <div className="atlas-glass-panel motion-reduce:animate-none max-w-lg animate-atlas-fade-up rounded-2xl px-10 py-12 shadow-glow-accent">
-        <div className="text-lg font-semibold tracking-tight text-text">
+      <div className="atlas-glass-panel max-w-lg animate-atlas-fade-up px-10 py-12 shadow-glow-accent motion-reduce:animate-none">
+        <span
+          className="material-symbols-outlined atlas-pop text-[44px] text-accent/80"
+          aria-hidden
+        >
+          {sectionMeta.icon}
+        </span>
+        <div className="mt-2 text-lg font-semibold tracking-tight text-text">
           {sectionMeta.emptyTitle}
         </div>
         <div className="mt-3 max-w-md text-sm text-text/70">
           {sectionMeta.emptyDescription}
         </div>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          {hasLibraryQuery ? (
+            <button
+              type="button"
+              onClick={() => setLibraryQuery("")}
+              className="border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-accent/25"
+            >
+              Clear search
+            </button>
+          ) : activeSection === SECTION_LIBRARY ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowDiscovery(true)}
+                className="border border-accent/60 bg-accent px-3 py-1.5 text-xs font-semibold text-onAccent transition hover:brightness-110"
+              >
+                Open Scan Hub
+              </button>
+              <button
+                type="button"
+                onClick={openSearchWorkspace}
+                className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
+              >
+                Find games on F95
+              </button>
+              <button
+                type="button"
+                onClick={addGame}
+                className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
+              >
+                Add a game manually
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setActiveSection(SECTION_LIBRARY)}
+              className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
+            >
+              Back to library
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
+
+  const sectionTitle =
+    activeSection === SECTION_UPDATES
+      ? "Updates"
+      : activeSection === SECTION_SEARCH
+        ? "Search"
+        : activeSection === SECTION_SETTINGS
+          ? "Settings"
+          : "Games";
+
+  const renderSectionContent = () => {
+    if (activeSection === SECTION_SETTINGS) {
+      return (
+        <AppSafe name="settings" title="Settings failed to load">
+          <window.SettingsPanel
+            initialPage={settingsPageRequest.page}
+            pageRequest={settingsPageRequest.nonce}
+            onRunSetup={() => openOnboarding("folder")}
+            onScanNow={() => rescanLibrary()}
+            isScanRunning={isLibraryScanRunning}
+          />
+        </AppSafe>
+      );
+    }
+
+    if (activeSection === SECTION_SEARCH) {
+      return (
+        <AppSafe name="search" title="The F95 workspace failed to load">
+          <window.F95BrowserWorkspace />
+        </AppSafe>
+      );
+    }
+
+    if (isGamesLoading && games.length === 0) {
+      return <LibrarySkeleton />;
+    }
+
+    if (activeSection === SECTION_LIBRARY && games.length === 0) {
+      return (
+        <AppSafe name="getting-started" title="The setup guide failed to load">
+          <window.LibraryGettingStarted
+            gameFolder={defaultGameFolder}
+            hasScanSources={scanSources.some((source) => source.isEnabled)}
+            isScanRunning={isLibraryScanRunning}
+            onFindGames={() => openOnboarding("scan")}
+            onScanNow={() => rescanLibrary()}
+            onBrowseF95={openSearchWorkspace}
+            onAddGame={addGame}
+            onOpenLibrarySettings={() => openSettingsPage("library")}
+          />
+        </AppSafe>
+      );
+    }
+
+    if (visibleLibraryGames.length === 0) {
+      return renderEmptyState();
+    }
+
+    if (activeSection === SECTION_LIBRARY) {
+      return (
+        <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-1 pb-3">
+          {favoriteLibraryGames.length > 0 && (
+            <section className="atlas-rise-enter space-y-3 px-2">
+              <div className="flex items-center gap-3 px-1">
+                <span
+                  className="material-symbols-outlined text-[16px] text-amber-300"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                  aria-hidden
+                >
+                  star
+                </span>
+                <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+                  {`Favorites (${favoriteLibraryGames.length})`}
+                </div>
+                <div className="h-px flex-1 bg-border/80" />
+              </div>
+              {renderGameCardList(favoriteLibraryGames, "favorites")}
+            </section>
+          )}
+
+          <section className="space-y-3 px-2">
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+                {`All Games (${nonFavoriteLibraryGames.length})`}
+              </div>
+              <div className="h-px min-w-[20px] flex-1 bg-border/80" />
+              {renderSectionControls(nonFavoriteLibraryGames.length)}
+            </div>
+            {nonFavoriteLibraryGames.length > 0 &&
+              renderGameCardList(nonFavoriteLibraryGames, "library")}
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col gap-3 px-1 pb-3">
+        <section className="space-y-3 px-2">
+          <div className="flex flex-wrap items-center gap-2 px-1">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
+              {`Updates (${visibleLibraryGames.length})`}
+            </div>
+            <div className="h-px min-w-[20px] flex-1 bg-border/80" />
+            {renderSectionControls(visibleLibraryGames.length)}
+          </div>
+        </section>
+
+        <div className="min-h-0 flex-1">
+          <AutoSizer>
+            {({ height, width }) => {
+              const adjustedWidth = Math.max(
+                0,
+                width - GRID_SCROLLBAR_GUTTER_PX,
+              );
+              return (
+                <Grid
+                  ref={gridRef}
+                  columnCount={columnCount}
+                  columnWidth={() => {
+                    if (columnCount > 1) {
+                      return adjustedWidth / columnCount - 8;
+                    } else {
+                      return adjustedWidth / columnCount - 14;
+                    }
+                  }}
+                  rowCount={Math.ceil(
+                    visibleLibraryGames.length / columnCount,
+                  )}
+                  rowHeight={bannerSize.bannerHeight + 16}
+                  height={height}
+                  width={adjustedWidth}
+                  cellRenderer={cellRenderer}
+                  style={{ overflowX: "hidden" }}
+                />
+              );
+            }}
+          </AutoSizer>
+        </div>
+      </div>
+    );
+  };
+
+  const appUpdateBusy =
+    appUpdateState.status === "checking" ||
+    appUpdateState.status === "downloading";
+  const previewIndex = previewSnapshot.index ?? 0;
+  const previewList = previewSnapshot.previews || [];
 
   return (
     <div className="atlas-app flex h-screen min-h-0 flex-col font-sans text-[13px] antialiased">
@@ -2372,22 +2856,19 @@ const App = () => {
           <img
             src="./assets/images/logo.png"
             alt="F95Launcher"
-            className="h-[48px] w-[48px] object-contain"
+            className="atlas-fade-enter h-[48px] w-[48px] object-contain"
             draggable={false}
           />
         </div>
         <div className="relative flex-1 [-webkit-app-region:drag] h-[70px] bg-primary">
           <div className="absolute left-[48px] right-[200px] top-0 h-px bg-gradient-to-r from-transparent via-accent/35 to-transparent"></div>
           <div className="flex h-[70px] w-full items-center">
-            <div className="ml-5 flex shrink-0 items-center">
-              <div className="cursor-pointer font-semibold text-text [-webkit-app-region:no-drag]">
-                {activeSection === SECTION_UPDATES
-                  ? "Updates"
-                  : activeSection === SECTION_SEARCH
-                    ? "Search"
-                    : activeSection === SECTION_SETTINGS
-                      ? "Settings"
-                      : "Games"}
+            <div className="ml-5 flex min-w-[72px] shrink-0 items-center">
+              <div
+                key={sectionTitle}
+                className="atlas-list-enter cursor-default font-semibold text-text [-webkit-app-region:no-drag]"
+              >
+                {sectionTitle}
               </div>
             </div>
             <div className="flex min-w-0 flex-1 justify-center">
@@ -2399,7 +2880,9 @@ const App = () => {
                 placeholder={
                   activeSection === SECTION_SEARCH
                     ? "Use the embedded F95 page below for live search"
-                    : "Search library"
+                    : activeSection === SECTION_UPDATES
+                      ? "Search updates"
+                      : "Search library"
                 }
               />
             </div>
@@ -2423,13 +2906,17 @@ const App = () => {
                     : "border-border bg-white/5 hover:bg-white/10"
               }`}
             >
-              <span className="material-symbols-outlined text-[20px] leading-none">
+              <span
+                key={cloudAuthButtonIcon}
+                className="material-symbols-outlined atlas-pop text-[20px] leading-none"
+              >
                 {cloudAuthButtonIcon}
               </span>
             </button>
             <button
               type="button"
               aria-label="Minimize window"
+              title="Minimize"
               onClick={() => window.electronAPI.minimizeWindow()}
               className="flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-transparent text-text transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
@@ -2438,20 +2925,23 @@ const App = () => {
             <button
               type="button"
               aria-label={isMaximized ? "Restore window" : "Maximize window"}
+              title={isMaximized ? "Restore" : "Maximize"}
               onClick={() => window.electronAPI.maximizeWindow()}
               className="flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-transparent text-text transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               <i
-                className={
+                key={isMaximized ? "restore" : "maximize"}
+                className={`atlas-pop ${
                   isMaximized
                     ? "fas fa-window-restore fa-sm"
                     : "fas fa-window-maximize fa-sm"
-                }
+                }`}
               ></i>
             </button>
             <button
               type="button"
               aria-label="Close window"
+              title="Close"
               onClick={() => window.electronAPI.closeWindow()}
               className="flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg bg-transparent text-text transition-colors hover:bg-red-900/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-400"
             >
@@ -2471,30 +2961,80 @@ const App = () => {
           {activeSection !== SECTION_SEARCH &&
             activeSection !== SECTION_SETTINGS &&
             showGameList &&
-            !(hasLoadedGames && games.length === 0) && (
-            <div className="atlas-glass-subtle w-[220px] shrink-0 overflow-y-auto border-r border-border">
-              <div className="sticky top-0 z-10 flex min-h-[5rem] items-center border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
-                {activeSection === SECTION_UPDATES
-                  ? "Update Titles"
-                  : "Library Titles"}
+            !(!isGamesLoading && games.length === 0) && (
+            <div className="atlas-glass-subtle atlas-list-enter w-[220px] shrink-0 overflow-y-auto border-r border-border">
+              <div className="sticky top-0 z-10 flex min-h-[5rem] items-center justify-between gap-2 border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
+                <span>
+                  {activeSection === SECTION_UPDATES
+                    ? "Update Titles"
+                    : "Library Titles"}
+                </span>
+                <span
+                  key={visibleLibraryGames.length}
+                  className="atlas-fade-enter tabular-nums tracking-normal text-text/40"
+                >
+                  {visibleLibraryGames.length}
+                </span>
               </div>
-              {visibleLibraryGames.length === 0 ? (
-                <div className="p-4 text-center text-sm text-text/65">
+              {isGamesLoading && games.length === 0 ? (
+                <div className="space-y-2 p-3">
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <div key={index} className="space-y-1.5 py-1">
+                      <div className="atlas-skeleton h-3 w-4/5" />
+                      <div className="atlas-skeleton h-2.5 w-1/2" />
+                    </div>
+                  ))}
+                </div>
+              ) : visibleLibraryGames.length === 0 ? (
+                <div className="atlas-fade-enter p-4 text-center text-sm text-text/65">
                   No games found
                 </div>
               ) : (
-                visibleLibraryGames.map((game) => (
+                visibleLibraryGames.map((game, index) => (
                   <div
                     key={game.record_id}
-                    className={`cursor-pointer border-b border-white/14 p-3 transition-all duration-200 hover:bg-white/5 ${
+                    role="button"
+                    tabIndex={0}
+                    aria-current={
                       selectedGame?.record_id === game.record_id
-                        ? "border-l-2 border-l-accent bg-selected shadow-glow-accent"
+                        ? "true"
+                        : undefined
+                    }
+                    className={`atlas-list-enter cursor-pointer border-b border-white/14 p-3 outline-none transition-[background-color,border-color,box-shadow,padding] duration-500 hover:bg-white/5 hover:pl-4 focus-visible:bg-white/10 ${
+                      selectedGame?.record_id === game.record_id
+                        ? "border-l-2 border-l-accent bg-selected pl-4 shadow-glow-accent"
                         : "border-l-2 border-l-transparent"
                     }`}
-                    onClick={() => setSelectedGame(game)}
+                    style={{
+                      "--atlas-index": Math.min(index, LIST_STAGGER_LIMIT),
+                    }}
+                    onClick={() => selectGame(game)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectGame(game);
+                      }
+                    }}
                   >
-                    <div className="truncate font-medium text-text">
-                      {getDisplayTitle(game)}
+                    <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1 truncate font-medium text-text">
+                        {getDisplayTitle(game)}
+                      </div>
+                      {game.isFavorite && (
+                        <span
+                          className="material-symbols-outlined shrink-0 text-[13px] text-amber-300"
+                          style={{ fontVariationSettings: "'FILL' 1" }}
+                          aria-label="Favorite"
+                        >
+                          star
+                        </span>
+                      )}
+                      {game.isUpdateAvailable && (
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 bg-glam shadow-glow-glam"
+                          title="Update available"
+                        />
+                      )}
                     </div>
                     <div className="truncate text-xs text-text/55">
                       {getDisplayCreator(game)}
@@ -2512,113 +3052,30 @@ const App = () => {
                 className="relative z-0 flex-1 overflow-y-auto overflow-x-hidden bg-transparent px-0.5 pt-6 pb-3"
                 ref={gameGridRef}
               >
-                {activeSection === SECTION_SETTINGS ? (
-                  <window.SettingsPanel
-                    initialPage={settingsPageRequest.page}
-                    pageRequest={settingsPageRequest.nonce}
-                    onRunSetup={() => openOnboarding("folder")}
-                    onScanNow={() => rescanLibrary()}
-                    isScanRunning={isLibraryScanRunning}
-                  />
-                ) : activeSection === SECTION_SEARCH ? (
-                  <window.F95BrowserWorkspace />
-                ) : activeSection === SECTION_LIBRARY &&
-                  hasLoadedGames &&
-                  games.length === 0 ? (
-                  <window.LibraryGettingStarted
-                    gameFolder={defaultGameFolder}
-                    hasScanSources={scanSources.some(
-                      (source) => source.isEnabled,
-                    )}
-                    isScanRunning={isLibraryScanRunning}
-                    onFindGames={() => openOnboarding("scan")}
-                    onScanNow={() => rescanLibrary()}
-                    onBrowseF95={() => setActiveSection(SECTION_SEARCH)}
-                    onAddGame={addGame}
-                    onOpenLibrarySettings={() => openSettingsPage("library")}
-                  />
-                ) : visibleLibraryGames.length === 0 ? (
-                  renderEmptyState()
-                ) : activeSection === SECTION_LIBRARY ? (
-                  <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-1 pb-3">
-                    {favoriteLibraryGames.length > 0 && (
-                      <section className="space-y-3 px-2">
-                        <div className="flex items-center gap-3 px-1">
-                          <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
-                            {`Favorites (${favoriteLibraryGames.length})`}
-                          </div>
-                          <div className="h-px flex-1 bg-border/80" />
-                        </div>
-                        {renderGameCardList(favoriteLibraryGames, "favorites")}
-                      </section>
-                    )}
-
-                    <section className="space-y-3 px-2">
-                      <div className="flex flex-wrap items-center gap-2 px-1">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
-                          {`All Games (${nonFavoriteLibraryGames.length})`}
-                        </div>
-                        <div className="h-px min-w-[20px] flex-1 bg-border/80" />
-                        {renderSectionControls(nonFavoriteLibraryGames.length)}
-                      </div>
-                      {nonFavoriteLibraryGames.length > 0 &&
-                        renderGameCardList(nonFavoriteLibraryGames, "library")}
-                    </section>
-                  </div>
-                ) : (
-                  <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col gap-3 px-1 pb-3">
-                    <section className="space-y-3 px-2">
-                      <div className="flex flex-wrap items-center gap-2 px-1">
-                        <div className="text-[11px] uppercase tracking-[0.18em] text-text/85">
-                          {`Updates (${visibleLibraryGames.length})`}
-                        </div>
-                        <div className="h-px min-w-[20px] flex-1 bg-border/80" />
-                        {renderSectionControls(visibleLibraryGames.length)}
-                      </div>
-                    </section>
-
-                    <div className="min-h-0 flex-1">
-                      <AutoSizer>
-                        {({ height, width }) => {
-                          const adjustedWidth = Math.max(
-                            0,
-                            width - GRID_SCROLLBAR_GUTTER_PX,
-                          );
-                          return (
-                            <Grid
-                              ref={gridRef}
-                              columnCount={columnCount}
-                              columnWidth={() => {
-                                if (columnCount > 1) {
-                                  return adjustedWidth / columnCount - 8;
-                                } else {
-                                  return adjustedWidth / columnCount - 14;
-                                }
-                              }}
-                              rowCount={Math.ceil(
-                                visibleLibraryGames.length / columnCount,
-                              )}
-                              rowHeight={bannerSize.bannerHeight + 16}
-                              height={height}
-                              width={adjustedWidth}
-                              cellRenderer={cellRenderer}
-                              style={{ overflowX: "hidden" }}
-                            />
-                          );
-                        }}
-                      </AutoSizer>
-                    </div>
-                  </div>
-                )}
+                <div
+                  key={activeSection}
+                  className={`h-full ${
+                    activeSection === SECTION_SEARCH
+                      ? "atlas-fade-enter"
+                      : "atlas-view-enter"
+                  }`}
+                >
+                  {renderSectionContent()}
+                </div>
               </div>
             </div>
 
-            {activeSection !== SECTION_SEARCH && activeSection !== SECTION_SETTINGS &&
-              (selectedGame || isSelectedGameLoading) && (
+            {detailsPresence.isMounted && (
+              <AppSafe
+                name="library-details"
+                title="Game details failed to load"
+                resetKey={selectedGame?.record_id}
+              >
                 <window.LibraryDetailsPanel
-                  game={selectedGameDetails}
-                  previews={selectedGamePreviews}
-                  isLoading={isSelectedGameLoading}
+                  presenceState={detailsPresence.state}
+                  game={detailsSnapshot.game}
+                  previews={detailsSnapshot.previews || []}
+                  isLoading={detailsSnapshot.isLoading}
                   onClose={closeSelectedGamePanel}
                   onOpenPage={openSelectedGamePage}
                   onPlayGame={launchInstalledVersion}
@@ -2629,46 +3086,53 @@ const App = () => {
                   onPreviewSelect={setPreviewModalIndex}
                   onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
                 />
-              )}
+              </AppSafe>
+            )}
           </div>
         </div>
       </div>
 
-      <window.ScanHubPanel
-        isVisible={showDiscovery}
-        isLoading={isDiscoveryLoading}
-        sources={scanSources}
-        jobs={scanJobs}
-        candidates={discoveryCandidates}
-        isScanRunning={canCancelLibraryScan}
-        defaultGameFolder={defaultGameFolder}
-        onRefresh={loadScanHubData}
-        onClose={() => setShowDiscovery(false)}
-        onRescan={rescanLibrary}
-        onCancelScan={cancelLibraryScan}
-        onOpenFolder={openGameFolder}
-        onAddSource={addScanSource}
-        onToggleSource={toggleScanSource}
-        onReplaceSource={replaceScanSource}
-        onRemoveSource={removeScanSource}
-        onSaveLibraryFolder={saveLibraryFolder}
-      />
+      <AppSafe name="scan-hub" variant="silent">
+        <window.ScanHubPanel
+          isVisible={showDiscovery}
+          isLoading={isDiscoveryLoading}
+          sources={scanSources}
+          jobs={scanJobs}
+          candidates={discoveryCandidates}
+          isScanRunning={canCancelLibraryScan}
+          defaultGameFolder={defaultGameFolder}
+          onRefresh={loadScanHubData}
+          onClose={() => setShowDiscovery(false)}
+          onRescan={rescanLibrary}
+          onCancelScan={cancelLibraryScan}
+          onOpenFolder={openGameFolder}
+          onAddSource={addScanSource}
+          onToggleSource={toggleScanSource}
+          onReplaceSource={replaceScanSource}
+          onRemoveSource={removeScanSource}
+          onSaveLibraryFolder={saveLibraryFolder}
+        />
+      </AppSafe>
 
-      <window.OnboardingWizard
-        isOpen={onboarding.isOpen}
-        initialStep={onboarding.step}
-        cloudAuthState={cloudAuthState}
-        onOpenCloud={() => setIsCloudAuthOpen(true)}
-        onFinish={finishOnboarding}
-      />
+      <AppSafe name="onboarding" variant="silent">
+        <window.OnboardingWizard
+          isOpen={onboarding.isOpen}
+          initialStep={onboarding.step}
+          cloudAuthState={cloudAuthState}
+          onOpenCloud={() => setIsCloudAuthOpen(true)}
+          onFinish={finishOnboarding}
+        />
+      </AppSafe>
 
-      <window.CloudAuthPanel
-        layout="modal"
-        isOpen={isCloudAuthOpen}
-        onClose={() => setIsCloudAuthOpen(false)}
-      />
+      <AppSafe name="cloud-auth" variant="silent">
+        <window.CloudAuthPanel
+          layout="modal"
+          isOpen={isCloudAuthOpen}
+          onClose={() => setIsCloudAuthOpen(false)}
+        />
+      </AppSafe>
 
-      {previewModalIndex !== null && selectedGamePreviews.length > 0 && (
+      {previewPresence.isMounted && previewList.length > 0 && (
         <div
           className="fixed inset-0 z-[1600]"
           role="dialog"
@@ -2677,21 +3141,29 @@ const App = () => {
         >
           <button
             type="button"
-            className="absolute inset-0 block h-full w-full cursor-default border-0 bg-black/90 p-0 backdrop-blur-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
+            data-no-ripple
+            className="atlas-overlay absolute inset-0 block h-full w-full cursor-default border-0 bg-black/90 p-0 backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
+            data-state={previewPresence.state}
             onClick={closePreviewModal}
             aria-label="Close screenshot viewer"
           />
-          <div className="pointer-events-none absolute inset-0 flex min-h-0 flex-col">
+          <div
+            className="atlas-dialog pointer-events-none absolute inset-0 flex min-h-0 flex-col"
+            data-state={previewPresence.state}
+          >
             <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch justify-center px-3 pb-20 pt-14 sm:px-5 sm:pb-24 sm:pt-16">
-              <div className="pointer-events-auto absolute left-3 top-3 z-20 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-xs tabular-nums text-white/90 shadow-lg backdrop-blur-md sm:left-4 sm:top-4">
-                {previewModalIndex + 1} / {selectedGamePreviews.length}
+              <div
+                key={`counter-${previewIndex}`}
+                className="atlas-fade-enter pointer-events-auto absolute left-3 top-3 z-20 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-xs tabular-nums text-white/90 shadow-lg backdrop-blur-md sm:left-4 sm:top-4"
+              >
+                {previewIndex + 1} / {previewList.length}
               </div>
               <button
                 type="button"
                 onClick={closePreviewModal}
                 className="pointer-events-auto absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:right-4 sm:top-4"
                 aria-label="Close"
-                title="Close"
+                title="Close (Esc)"
               >
                 <span className="material-symbols-outlined text-[22px] leading-none">
                   close
@@ -2700,32 +3172,37 @@ const App = () => {
 
               <button
                 type="button"
-                className="pointer-events-auto absolute left-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:left-3 sm:h-12 sm:w-12"
+                className="pointer-events-auto absolute left-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 hover:shadow-glow-accent sm:left-3 sm:h-12 sm:w-12"
                 aria-label="Previous screenshot"
-                title="Previous"
+                title="Previous (←)"
                 onClick={showPreviousPreview}
               >
-                ‹
+                <span className="material-symbols-outlined text-[26px] leading-none">
+                  chevron_left
+                </span>
               </button>
               <button
                 type="button"
-                className="pointer-events-auto absolute right-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 sm:right-3 sm:h-12 sm:w-12"
+                className="pointer-events-auto absolute right-1 top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-xl text-white shadow-lg backdrop-blur-md transition hover:bg-black/70 hover:shadow-glow-accent sm:right-3 sm:h-12 sm:w-12"
                 aria-label="Next screenshot"
-                title="Next"
+                title="Next (→)"
                 onClick={showNextPreview}
               >
-                ›
+                <span className="material-symbols-outlined text-[26px] leading-none">
+                  chevron_right
+                </span>
               </button>
 
               <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center">
                 <div
-                  className="pointer-events-auto flex max-h-[min(82vh,920px)] max-w-[min(94vw,1500px)] min-h-0 min-w-0 items-center justify-center overflow-auto motion-safe:animate-atlas-fade-up"
+                  className="pointer-events-auto flex max-h-[min(82vh,920px)] max-w-[min(94vw,1500px)] min-h-0 min-w-0 items-center justify-center overflow-auto"
                   onClick={handlePreviewStageClick}
                 >
                   <img
-                    src={selectedGamePreviews[previewModalIndex]}
-                    alt={`Screenshot ${previewModalIndex + 1} of ${selectedGamePreviews.length}`}
-                    className="max-h-full max-w-full object-contain rounded-lg shadow-2xl ring-1 ring-white/10"
+                    key={previewList[previewIndex]}
+                    src={previewList[previewIndex]}
+                    alt={`Screenshot ${previewIndex + 1} of ${previewList.length}`}
+                    className="atlas-rise-enter max-h-full max-w-full object-contain shadow-2xl ring-1 ring-white/10"
                     draggable={false}
                   />
                 </div>
@@ -2735,14 +3212,15 @@ const App = () => {
                 <button
                   type="button"
                   onClick={() =>
-                    window.electronAPI.openExternalUrl(
-                      selectedGamePreviews[previewModalIndex],
-                    )
+                    window.electronAPI.openExternalUrl(previewList[previewIndex])
                   }
-                  className="rounded-full border border-white/15 bg-black/60 px-4 py-2 text-xs text-white/95 shadow-lg backdrop-blur-md transition hover:border-white/25 hover:bg-black/70"
+                  className="flex items-center gap-1.5 rounded-full border border-white/15 bg-black/60 px-4 py-2 text-xs text-white/95 shadow-lg backdrop-blur-md transition hover:border-white/25 hover:bg-black/70"
                   aria-label="Open original image"
                   title="Open original"
                 >
+                  <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                    open_in_new
+                  </span>
                   Open
                 </button>
               </div>
@@ -2756,167 +3234,109 @@ const App = () => {
         </div>
       )}
 
-      {/* Status / Progress Bars */}
-      {dbUpdateStatus.text && (
-        <div className="absolute bottom-[44px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
-          <div className="flex w-full max-w-[540px] items-center gap-3">
-            <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
-              {dbUpdateStatus.text}
-            </span>
-            <div className="relative w-[min(300px,45%)] shrink-0">
-              <div className="h-4 overflow-hidden rounded-full bg-black/40 ring-1 ring-inset ring-border">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent to-accentBar shadow-glow-accent transition-[width] duration-300"
-                  style={{
-                    width: `${(dbUpdateStatus.progress / (dbUpdateStatus.total || 1)) * 100}%`,
-                  }}
-                ></div>
-              </div>
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium text-text">
-                Update {dbUpdateStatus.progress}/{dbUpdateStatus.total}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Status / Progress dock */}
+      <div className="pointer-events-none fixed bottom-[52px] left-1/2 z-[1500] flex w-[min(800px,calc(100%-2rem))] -translate-x-1/2 flex-col-reverse items-stretch gap-2">
+        <StatusDockBar status={importProgress} counterLabel="Game" />
+        <StatusDockBar status={importStatus} counterLabel="File" />
+        <StatusDockBar status={dbUpdateStatus} counterLabel="Update" />
+      </div>
 
-      {importStatus.text && (
-        <div className="absolute bottom-[52px] left-1/2 z-[1500] flex w-[min(600px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
-          <div className="flex w-full max-w-[540px] items-center gap-3">
-            <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
-              {importStatus.text}
-            </span>
-            <div className="relative w-[min(300px,45%)] shrink-0">
-              <div className="h-4 overflow-hidden rounded-full bg-black/40 ring-1 ring-inset ring-border">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent to-accentBar shadow-glow-accent transition-[width] duration-300"
-                  style={{
-                    width: `${(importStatus.progress / importStatus.total) * 100}%`,
-                  }}
-                ></div>
-              </div>
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium text-text">
-                File {importStatus.progress}/{importStatus.total}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+      <AppSafe name="downloads" variant="silent">
+        <window.DownloadsPanel
+          isOpen={downloadsPanelOpen}
+          items={f95Downloads.items}
+          activeCount={f95Downloads.activeCount}
+          onClose={() => setDownloadsPanelOpen(false)}
+          onOpenLibraryRecord={openLibraryRecord}
+        />
+      </AppSafe>
 
-      {importProgress.text && (
-        <div className="absolute bottom-[56px] left-1/2 z-[1500] flex w-[min(800px,calc(100%-2rem))] -translate-x-1/2 transform items-center justify-center border border-border bg-primary/80 p-2 shadow-glass backdrop-blur-xl">
-          <div className="flex w-full max-w-[760px] items-center gap-3">
-            <span className="min-w-0 flex-1 text-[11px] leading-snug text-text/90">
-              {importProgress.text}
-            </span>
-            <div className="relative w-[min(300px,38%)] shrink-0">
-              <div className="h-4 overflow-hidden rounded-full bg-black/40 ring-1 ring-inset ring-border">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-accent to-accentBar shadow-glow-accent transition-[width] duration-300"
-                  style={{
-                    width: `${(importProgress.progress / (importProgress.total || 1)) * 100}%`,
-                  }}
-                ></div>
-              </div>
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[10px] font-medium text-text">
-                Game {importProgress.progress}/{importProgress.total}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+      <AppSafe name="update-modal" variant="silent">
+        <window.F95UpdateModal
+          isOpen={f95UpdateModal.isOpen}
+          game={f95UpdateModal.game}
+          thread={f95UpdateModal.thread}
+          isLoading={f95UpdateModal.isLoading}
+          isInstalling={f95UpdateModal.isInstalling}
+          error={f95UpdateModal.error}
+          captchaUrl={f95UpdateModal.captchaUrl}
+          attemptEvents={f95UpdateAttemptEvents}
+          selectedLinkUrl={f95UpdateModal.selectedLinkUrl}
+          onSelectLink={(selectedLinkUrl) =>
+            setF95UpdateModal((previous) => ({
+              ...previous,
+              selectedLinkUrl,
+            }))
+          }
+          onSolveCaptcha={openF95CaptchaWindow}
+          onConfirm={confirmF95Update}
+          onClose={closeF95UpdateModal}
+        />
+      </AppSafe>
 
-      <window.DownloadsPanel
-        isOpen={downloadsPanelOpen}
-        items={f95Downloads.items}
-        activeCount={f95Downloads.activeCount}
-        onClose={() => setDownloadsPanelOpen(false)}
-        onCancelWaiting={(item) =>
-          window.electronAPI
-            .cancelF95BrowserHandoff({ id: item.id })
-            .catch((error) =>
-              console.error("Failed to stop waiting for download:", error),
-            )
-        }
-      />
-
-      <window.F95UpdateModal
-        isOpen={f95UpdateModal.isOpen}
-        game={f95UpdateModal.game}
-        thread={f95UpdateModal.thread}
-        isLoading={f95UpdateModal.isLoading}
-        isInstalling={f95UpdateModal.isInstalling}
-        error={f95UpdateModal.error}
-        captchaUrl={f95UpdateModal.captchaUrl}
-        actionKind={f95UpdateModal.actionKind}
-        handoff={
-          f95UpdateModal.handoff?.passive ? null : f95UpdateModal.handoff
-        }
-        attemptEvents={f95UpdateAttemptEvents}
-        selectedLinkUrl={f95UpdateModal.selectedLinkUrl}
-        onSelectLink={(selectedLinkUrl) =>
-          setF95UpdateModal((previous) => ({
-            ...previous,
-            selectedLinkUrl,
-          }))
-        }
-        onSolveCaptcha={openF95CaptchaWindow}
-        onOpenInBrowser={startF95UpdateBrowserHandoff}
-        onReopenHandoff={reopenF95UpdateHandoff}
-        onConfirm={confirmF95Update}
-        onClose={closeF95UpdateModal}
-      />
-
-      <window.DeleteGameModal
-        isOpen={deleteGameModal.isOpen}
-        game={deleteGameModal.game}
-        installPaths={deleteGameModal.installPaths}
-        saveProfiles={deleteGameModal.saveProfiles}
-        mode={deleteGameModal.mode}
-        isLoading={deleteGameModal.isLoading}
-        isDeleting={deleteGameModal.isDeleting}
-        error={deleteGameModal.error}
-        onSelectMode={(mode) =>
-          setDeleteGameModal((previous) => ({
-            ...previous,
-            mode,
-          }))
-        }
-        onConfirm={confirmDeleteGame}
-        onClose={closeDeleteGameModal}
-      />
+      <AppSafe name="delete-modal" variant="silent">
+        <window.DeleteGameModal
+          isOpen={deleteGameModal.isOpen}
+          game={deleteGameModal.game}
+          installPaths={deleteGameModal.installPaths}
+          saveProfiles={deleteGameModal.saveProfiles}
+          mode={deleteGameModal.mode}
+          isLoading={deleteGameModal.isLoading}
+          isDeleting={deleteGameModal.isDeleting}
+          error={deleteGameModal.error}
+          onSelectMode={(mode) =>
+            setDeleteGameModal((previous) => ({
+              ...previous,
+              mode,
+            }))
+          }
+          onConfirm={confirmDeleteGame}
+          onClose={closeDeleteGameModal}
+        />
+      </AppSafe>
 
       <div className="fixed bottom-0 z-50 grid min-h-[40px] w-full grid-cols-1 items-center gap-x-3 gap-y-2 border-t border-border bg-primary/75 px-2 py-1 shadow-glass-sm backdrop-blur-xl sm:h-[40px] sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4 sm:px-4 sm:py-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={addGame}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
+            className="group flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
           >
-            <i className="fas fa-plus mr-2 text-accent"></i>
+            <i className="fas fa-plus mr-2 text-accent transition-transform duration-500 group-hover:rotate-90"></i>
             Add Game
           </button>
           <button
             type="button"
             onClick={() => setShowDiscovery((prev) => !prev)}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
+            aria-pressed={showDiscovery}
+            className={`group flex h-8 items-center px-2 text-xs transition hover:bg-white/10 hover:text-accent ${
+              showDiscovery ? "bg-white/10 text-accent" : "text-text"
+            }`}
           >
-            <i className="fas fa-binoculars mr-2 text-accent"></i>
+            <i className="fas fa-binoculars mr-2 text-accent transition-transform duration-500 group-hover:-translate-y-0.5"></i>
             Scan Hub
           </button>
           <button
             type="button"
             onClick={openRescanLibraryMenu}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
+            disabled={isLibraryScanRunning}
+            className="group flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent disabled:cursor-wait disabled:opacity-70"
           >
-            <i className="fas fa-sync-alt mr-2 text-accent"></i>
-            Rescan Library
+            <i
+              className={`fas fa-sync-alt mr-2 text-accent ${
+                isLibraryScanRunning
+                  ? "animate-spin atlas-keep-motion"
+                  : "transition-transform duration-700 group-hover:rotate-180"
+              }`}
+            ></i>
+            {isLibraryScanRunning ? "Scanning…" : "Rescan Library"}
           </button>
-          {canCancelLibraryScan && (
+          {cancelScanPresence.isMounted && (
             <button
               type="button"
               onClick={cancelLibraryScan}
-              className="flex h-8 items-center px-2 text-xs text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
+              data-state={cancelScanPresence.state}
+              className="atlas-rise flex h-8 items-center px-2 text-xs text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
             >
               <i className="fas fa-ban mr-2"></i>
               Cancel Scan
@@ -2925,62 +3345,81 @@ const App = () => {
         </div>
         <div className="flex min-w-0 items-center justify-center gap-2 text-center text-[11px] text-text/80 sm:text-xs">
           <i className="fas fa-gamepad shrink-0 text-glam/90"></i>
-          <span className="truncate">
-            {`${games.length} in library · ${installedGameCount} installed · ${totalVersions} versions · ${updateAvailableCount} updates`}
+          <span className="truncate tabular-nums">
+            {isGamesLoading && games.length === 0
+              ? "Loading library…"
+              : `${games.length} in library · ${installedGameCount} installed · ${totalVersions} versions · ${updateAvailableCount} updates`}
           </span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           {appUpdateSummary && (
-            <span className="max-w-[min(280px,40vw)] truncate text-[11px] text-text/65">
+            <span
+              key={appUpdateSummary}
+              className="atlas-fade-enter max-w-[min(280px,40vw)] truncate text-[11px] text-text/65"
+              title={appUpdateSummary}
+            >
               {appUpdateSummary}
             </span>
           )}
           <button
             type="button"
             onClick={handleAppUpdateAction}
-            disabled={
-              appUpdateState.status === "checking" ||
-              appUpdateState.status === "downloading"
-            }
-            className={`px-2 py-1 text-[11px] font-medium shadow-glass-sm transition ${
+            disabled={appUpdateBusy}
+            className={`relative flex items-center gap-1.5 overflow-hidden px-2 py-1 text-[11px] font-medium shadow-glass-sm transition ${
               appUpdateState.status === "downloaded"
-                ? "bg-emerald-800/90 text-white hover:bg-emerald-700"
+                ? "atlas-attention bg-emerald-800/90 text-white hover:bg-emerald-700"
                 : appUpdateState.status === "available"
-                  ? "border border-accent/40 bg-accent/90 text-onAccent hover:bg-accent"
+                  ? "atlas-attention border border-accent/40 bg-accent/90 text-onAccent hover:bg-accent"
                   : "border border-border bg-white/5 text-text hover:bg-white/10"
-            } ${
-              appUpdateState.status === "checking" ||
-              appUpdateState.status === "downloading"
-                ? "cursor-not-allowed opacity-60"
-                : ""
-            }`}
+            } ${appUpdateBusy ? "cursor-wait opacity-80" : ""}`}
           >
+            {appUpdateBusy && <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />}
             {appUpdateActionLabel}
+            {appUpdateState.status === "downloading" && (
+              <span
+                className="atlas-progress-fill absolute bottom-0 left-0 h-[2px] bg-accent"
+                style={{ width: `${clampPercent(appUpdateState.percent)}%` }}
+                aria-hidden
+              />
+            )}
           </button>
           <button
             type="button"
             onClick={() => setDownloadsPanelOpen((previous) => !previous)}
-            className="flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent"
+            aria-pressed={downloadsPanelOpen}
+            className={`group flex h-8 items-center px-2 text-xs transition hover:bg-white/10 hover:text-accent ${
+              downloadsPanelOpen ? "bg-white/10 text-accent" : "text-text"
+            }`}
           >
-            <i className="fas fa-download mr-2 text-accent"></i>
+            <i
+              className={`fas fa-download mr-2 text-accent transition-transform duration-500 group-hover:translate-y-0.5 ${
+                f95Downloads.activeCount > 0 ? "animate-pulse atlas-keep-motion" : ""
+              }`}
+            ></i>
             Downloads
             {f95Downloads.activeCount > 0 && (
-              <span className="ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold text-onAccent">
+              <span
+                key={f95Downloads.activeCount}
+                className="atlas-badge-enter ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-onAccent"
+              >
                 {f95Downloads.activeCount}
               </span>
             )}
           </button>
         </div>
       </div>
-
-      {/* Updater placeholder */}
-      <div className="hidden bg-canvas h-full w-full" id="updater">
-        <div className="h-[200px] bg-tertiary"></div>
-        <div className="flex-1 bg-primary border-t border-accent"></div>
-      </div>
     </div>
   );
 };
 
 const root = createRoot(document.getElementById("root"));
-root.render(<App />);
+const RootBoundary = window.AtlasErrorBoundary;
+root.render(
+  RootBoundary ? (
+    <RootBoundary name="app" variant="screen">
+      <App />
+    </RootBoundary>
+  ) : (
+    <App />
+  ),
+);

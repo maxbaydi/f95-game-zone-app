@@ -1,4 +1,14 @@
 const { useState, useEffect } = window.React;
+
+// Non-blocking replacements for window.alert/confirm (core/ui/atlas-ui.js).
+const importerNotice = (message, type = "warning") =>
+  window.AtlasToast
+    ? window.AtlasToast.show({ type, title: "Importer", message })
+    : window.alert(message);
+const importerConfirm = (options) =>
+  window.AtlasUI
+    ? window.AtlasUI.confirm(options)
+    : Promise.resolve(window.confirm(options.message));
 const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
 const DEFAULT_PREVIEW_LIMIT = "20";
@@ -211,7 +221,7 @@ const Importer = () => {
     if (!folder) {
       console.log("No folder selected");
       window.electronAPI.log("No folder selected");
-      return alert("Select a folder");
+      return importerNotice("Select a folder", "warning");
     }
     setView("scan");
     setIsScanRunning(true);
@@ -249,7 +259,7 @@ const Importer = () => {
       console.error(`Scan error: ${result.error}`);
       window.electronAPI.log(`Scan error: ${result.error}`);
       if (!result.games || result.games.length === 0) {
-        alert(`Error: ${result.error}`);
+        importerNotice(`Error: ${result.error}`, "error");
       }
     }
   };
@@ -274,7 +284,7 @@ const Importer = () => {
       })
       .catch((err) => {
         console.error("Steam scan error:", err);
-        alert("Error starting Steam scan");
+        importerNotice("Error starting Steam scan", "error");
       });
   };
 
@@ -284,7 +294,7 @@ const Importer = () => {
     );
 
     if (enabledSources.length === 0) {
-      return alert("No enabled scan sources configured");
+      return importerNotice("No enabled scan sources configured", "warning");
     }
 
     setImportSource("scan-sources");
@@ -321,7 +331,7 @@ const Importer = () => {
       setIsScanRunning(false);
       console.error(`Multi-source scan error: ${result.error}`);
       if (!result.games || result.games.length === 0) {
-        alert(`Error: ${result.error}`);
+        importerNotice(`Error: ${result.error}`, "error");
       }
     }
   };
@@ -330,7 +340,7 @@ const Importer = () => {
     try {
       const result = await window.electronAPI.cancelScan();
       if (!result.success) {
-        alert(result.error || "No active scan to cancel");
+        importerNotice(result.error || "No active scan to cancel", "info");
         return;
       }
 
@@ -340,7 +350,7 @@ const Importer = () => {
       ]);
     } catch (error) {
       console.error("Failed to cancel scan:", error);
-      alert("Failed to cancel scan");
+      importerNotice("Failed to cancel scan", "error");
     }
   };
 
@@ -560,7 +570,7 @@ const Importer = () => {
 
   const importGamesFunc = async () => {
     if (gamesList.length === 0) {
-      alert("No games to import");
+      importerNotice("No games to import", "warning");
       return;
     }
 
@@ -572,9 +582,11 @@ const Importer = () => {
       setAskingForLibraryFolder(false);
 
       if (!selected) {
-        const proceed = confirm(
-          "No library folder selected.\n\nContinue import without moving folders?",
-        );
+        const proceed = await importerConfirm({
+          title: "No library folder selected",
+          message: "Continue the import without moving game folders?",
+          confirmLabel: "Continue",
+        });
         if (!proceed) return;
       } else {
         try {
@@ -585,13 +597,14 @@ const Importer = () => {
             setDefaultLibraryPath(selected);
             console.log("Saved new default library folder:", selected);
           } else {
-            alert(
+            importerNotice(
               "Failed to save default library folder.\nImport continues without moving.",
+              "error",
             );
           }
         } catch (err) {
           console.error("Error saving library path:", err);
-          alert("Error saving library path. Import continues without moving.");
+          importerNotice("Error saving library path. Import continues without moving.", "error");
         }
       }
     }
@@ -649,14 +662,14 @@ const Importer = () => {
         <div className="flex absolute top-1 right-2 h-[70px] -webkit-app-region-no-drag">
           <button
             onClick={() => window.electronAPI.minimizeWindow()}
-            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
             style={{ pointerEvents: "auto", zIndex: 1000 }}
           >
             <i className="fas fa-minus fa-xs text-text"></i>
           </button>
           <button
             onClick={() => window.electronAPI.maximizeWindow()}
-            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-200"
+            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-tertiary transition-colors duration-450"
             style={{ pointerEvents: "auto", zIndex: 1000 }}
           >
             <i
@@ -669,7 +682,7 @@ const Importer = () => {
           </button>
           <button
             onClick={() => window.electronAPI.closeWindow()}
-            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-200"
+            className="w-6 h-6 flex items-center justify-center bg-transparent hover:bg-[DarkRed] transition-colors duration-450"
             style={{ pointerEvents: "auto", zIndex: 1000 }}
           >
             <i className="fas fa-times fa-xs text-text"></i>
@@ -680,7 +693,7 @@ const Importer = () => {
       <div className="flex-1 p-4 bg-secondary overflow-y-auto">
         {view === "source" && (
           <div className="flex items-center justify-center h-full">
-            <div className="flex flex-col space-y-4 max-w-3xl w-full">
+            <div className="atlas-view-enter flex flex-col space-y-4 max-w-3xl w-full">
               <h2 className="text-2xl text-center font-semibold">
                 Choose How To Add Games
               </h2>
@@ -696,11 +709,12 @@ const Importer = () => {
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                   }
-                  className={`text-left rounded border border-border p-4 transition-colors ${
+                  style={{ "--atlas-index": 0 }}
+                  className={`atlas-card-enter text-left rounded border border-border p-4 transition-[background-color,border-color,box-shadow,transform] duration-500 ${
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                       ? "bg-primary/40 opacity-50 cursor-not-allowed"
-                      : "bg-primary hover:bg-selected"
+                      : "bg-primary hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                   }`}
                 >
                   <div className="text-lg font-semibold mb-2">
@@ -721,7 +735,8 @@ const Importer = () => {
 
                 <button
                   onClick={openFolderImportSettings}
-                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                  style={{ "--atlas-index": 1 }}
+                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import From Folder
@@ -737,7 +752,8 @@ const Importer = () => {
 
                 <button
                   onClick={startSteamImport}
-                  className="text-left rounded border border-border p-4 bg-primary hover:bg-selected transition-colors"
+                  style={{ "--atlas-index": 2 }}
+                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import Steam Games
@@ -1332,4 +1348,13 @@ const root = createRoot(document.getElementById("root")) || {
   render: (component) =>
     ReactDOM.render(component, document.getElementById("root")),
 };
-root.render(<Importer />);
+const WindowRootBoundary = window.AtlasErrorBoundary;
+root.render(
+  WindowRootBoundary ? (
+    <WindowRootBoundary name="importer-window" variant="screen">
+      <Importer />
+    </WindowRootBoundary>
+  ) : (
+    <Importer />
+  ),
+);

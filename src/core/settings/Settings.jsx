@@ -2,9 +2,14 @@ const StandaloneSettingsWindow = () => {
   const [isMaximized, setIsMaximized] = React.useState(false);
 
   React.useEffect(() => {
-    window.electronAPI.onWindowStateChanged?.((state) => {
+    if (typeof window.electronAPI?.onWindowStateChanged !== "function") {
+      return undefined;
+    }
+    window.electronAPI.onWindowStateChanged((state) => {
       setIsMaximized(state === "maximized");
     });
+    return () =>
+      window.electronAPI.removeAllListeners?.("window-state-changed");
   }, []);
 
   return (
@@ -18,7 +23,7 @@ const StandaloneSettingsWindow = () => {
             type="button"
             aria-label="Minimize window"
             onClick={() => window.electronAPI.minimizeWindow()}
-            className="flex w-11 items-center justify-center hover:bg-white/10"
+            className="flex w-11 items-center justify-center transition-colors hover:bg-white/10"
           >
             <span className="material-symbols-outlined text-[18px] leading-none">
               remove
@@ -28,7 +33,7 @@ const StandaloneSettingsWindow = () => {
             type="button"
             aria-label={isMaximized ? "Restore window" : "Maximize window"}
             onClick={() => window.electronAPI.maximizeWindow()}
-            className="flex w-11 items-center justify-center hover:bg-white/10"
+            className="flex w-11 items-center justify-center transition-colors hover:bg-white/10"
           >
             <span className="material-symbols-outlined text-[16px] leading-none">
               {isMaximized ? "filter_none" : "crop_square"}
@@ -38,7 +43,7 @@ const StandaloneSettingsWindow = () => {
             type="button"
             aria-label="Close window"
             onClick={() => window.electronAPI.closeWindow()}
-            className="flex w-11 items-center justify-center hover:bg-red-900/80"
+            className="flex w-11 items-center justify-center transition-colors hover:bg-red-900/80"
           >
             <span className="material-symbols-outlined text-[18px] leading-none">
               close
@@ -53,6 +58,13 @@ const StandaloneSettingsWindow = () => {
   );
 };
 
+const SettingsRootBoundary = window.AtlasErrorBoundary;
 window.ReactDOM.createRoot(document.getElementById("root")).render(
-  <StandaloneSettingsWindow />,
+  SettingsRootBoundary ? (
+    <SettingsRootBoundary name="settings-window" variant="screen">
+      <StandaloneSettingsWindow />
+    </SettingsRootBoundary>
+  ) : (
+    <StandaloneSettingsWindow />
+  ),
 );

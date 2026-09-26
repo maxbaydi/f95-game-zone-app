@@ -22,57 +22,75 @@
       label: "Auto*",
       title: "Usually automatic",
       description:
-        "F95Launcher tries it automatically. The host may ask for a quick check in the browser.",
+        "F95Launcher tries it automatically. If the host shows a check, a window opens and the download continues once it passes.",
     },
     [MIRROR_TIERS.MANUAL]: {
       label: "Browser",
-      title: "Download in the browser",
+      title: "Needs you in the browser",
       description:
-        "This host can't be downloaded automatically. F95Launcher opens the page, you press Download there, and the file is installed for you.",
+        "This host asks for a captcha or login. F95Launcher opens the page: finish the step there, or download the file in your own browser and pick it, and the game is installed for you.",
     },
   };
 
-  // Lower rank = tried and recommended first inside the same tier.
+  // Tiers follow the live mirror check (docs/mirror-verification.md) and the
+  // main-process host registry, which marks links as "auto" or "browser".
+  // Lower rank = recommended and tried first inside the same tier.
   const HOST_PROFILES = [
     {
       id: "pixeldrain",
       label: "PIXELDRAIN",
-      pattern: /(^|\.)pixeldrain\.com$/i,
+      pattern: /(^|\.)(?:pixeldrain\.(?:com|net|dev)|pixeldra\.in)$/i,
       tier: MIRROR_TIERS.AUTO,
       rank: 10,
-      note: "Direct download through the official API.",
-    },
-    {
-      id: "buzzheavier",
-      label: "BUZZHEAVIER",
-      pattern: /(^|\.)buzzheavier\.com$/i,
-      tier: MIRROR_TIERS.AUTO,
-      rank: 20,
-      note: "Direct download, no waiting.",
+      note: "Direct download through the official API; interrupted downloads resume.",
     },
     {
       id: "gofile",
       label: "GOFILE",
       pattern: /(^|\.)gofile\.io$/i,
       tier: MIRROR_TIERS.AUTO,
-      rank: 30,
+      rank: 20,
       note: "Fast, but may be rate-limited at peak times.",
-    },
-    {
-      id: "datanodes",
-      label: "DATANODES",
-      pattern: /(^|\.)datanodes\.to$/i,
-      tier: MIRROR_TIERS.AUTO,
-      rank: 40,
-      note: "Countdown page is skipped automatically.",
     },
     {
       id: "google-drive",
       label: "GOOGLE DRIVE",
       pattern: /(^|\.)(?:drive|docs|drive\.usercontent)\.google\.com$/i,
       tier: MIRROR_TIERS.AUTO,
-      rank: 50,
+      rank: 30,
       note: "Popular files can hit Google's daily download quota.",
+    },
+    {
+      id: "mediafire",
+      label: "MEDIAFIRE",
+      pattern: /(^|\.)mediafire\.com$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 40,
+      note: "Direct download.",
+    },
+    {
+      id: "mega",
+      label: "MEGA",
+      pattern: /(^|\.)mega\.(?:nz|io|app|co\.nz)$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 45,
+      note: "Downloaded and decrypted by F95Launcher; interrupted downloads resume.",
+    },
+    {
+      id: "dropbox",
+      label: "DROPBOX",
+      pattern: /(^|\.)(?:dropbox\.com|dropboxusercontent\.com)$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 50,
+      note: "Direct download.",
+    },
+    {
+      id: "yandex-disk",
+      label: "YANDEX DISK",
+      pattern: /(^|\.)(?:disk\.yandex\.[a-z.]+|disk\.360\.yandex\.ru|yadi\.sk)$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 55,
+      note: "Direct download.",
     },
     {
       id: "catbox",
@@ -83,86 +101,101 @@
       note: "Direct file link.",
     },
     {
-      id: "mixdrop",
-      label: "MIXDROP",
-      pattern: /(^|\.)mixdrop\./i,
+      id: "pomf",
+      label: "QU.AX",
+      pattern: /(^|\.)(?:qu\.ax|uguu\.se|0x0\.st|pomf2?\.lain\.la)$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 65,
+      note: "Direct file link.",
+    },
+    {
+      id: "dailyuploads",
+      label: "DAILYUPLOADS",
+      pattern: /(^|\.)dailyuploads\.net$/i,
+      tier: MIRROR_TIERS.AUTO,
+      rank: 70,
+      note: "Includes a one-minute countdown that F95Launcher waits out.",
+    },
+    {
+      id: "buzzheavier",
+      label: "BUZZHEAVIER",
+      pattern:
+        /(^|\.)(?:buzzheavier\.com|bzzhr\.(?:co|to)|flashbang\.sh|trashbytes\.net)$/i,
       tier: MIRROR_TIERS.ASSISTED,
       rank: 110,
-      note: "May show a Cloudflare check first.",
+      note: "May show a Cloudflare check in a window; it usually passes on its own.",
     },
     {
-      id: "uploadhaven",
-      label: "UPLOADHAVEN",
-      pattern: /(^|\.)uploadhaven\.com$/i,
+      id: "filesfm",
+      label: "FILES.FM",
+      pattern: /(^|\.)files\.fm$/i,
       tier: MIRROR_TIERS.ASSISTED,
       rank: 120,
-      note: "Free downloads include a short wait and slower speed.",
+      note: "May show a Cloudflare check in a window; it usually passes on its own.",
     },
     {
-      id: "mediafire",
-      label: "MEDIAFIRE",
-      pattern: /(^|\.)mediafire\.com$/i,
+      id: "onedrive",
+      label: "ONEDRIVE",
+      pattern: /(^|\.)(?:1drv\.ms|onedrive\.live\.com|sharepoint\.com)$/i,
       tier: MIRROR_TIERS.ASSISTED,
-      rank: 130,
-      note: "Usually works automatically.",
+      rank: 150,
+      note: "Microsoft sometimes asks to open the page first.",
     },
     {
-      id: "workupload",
-      label: "WORKUPLOAD",
-      pattern: /(^|\.)workupload\.com$/i,
-      tier: MIRROR_TIERS.ASSISTED,
-      rank: 140,
-      note: "May ask for a browser check.",
+      id: "datanodes",
+      label: "DATANODES",
+      pattern: /(^|\.)datanodes\.to$/i,
+      tier: MIRROR_TIERS.MANUAL,
+      rank: 200,
+      note: "Captcha on the download button; easiest to finish in your own browser.",
+    },
+    {
+      id: "mixdrop",
+      label: "MIXDROP",
+      pattern: /(^|\.)(?:mixdrop|mxdrop|mixdrp|m1xdrop|mixdropjmk)\./i,
+      tier: MIRROR_TIERS.MANUAL,
+      rank: 205,
+      note: "Captcha and bot check; easiest to finish in your own browser.",
     },
     {
       id: "krakenfiles",
       label: "KRAKENFILES",
       pattern: /(^|\.)krakenfiles\.com$/i,
-      tier: MIRROR_TIERS.ASSISTED,
-      rank: 150,
-      note: "May ask for a browser check.",
-    },
-    {
-      id: "vikingfile",
-      label: "VIKINGFILE",
-      pattern: /(^|\.)vikingfile\.com$/i,
-      tier: MIRROR_TIERS.ASSISTED,
-      rank: 160,
-      note: "May ask for a browser check.",
-    },
-    {
-      id: "dropbox",
-      label: "DROPBOX",
-      pattern: /(^|\.)dropbox\.com$/i,
-      tier: MIRROR_TIERS.ASSISTED,
-      rank: 170,
-      note: "May ask for a browser check.",
-    },
-    {
-      id: "onedrive",
-      label: "ONEDRIVE",
-      pattern: /(^|\.)(?:1drv\.ms|onedrive\.live\.com)$/i,
-      tier: MIRROR_TIERS.ASSISTED,
-      rank: 180,
-      note: "May ask for a browser check.",
-    },
-    {
-      id: "mega",
-      label: "MEGA",
-      pattern: /(^|\.)mega\.(?:nz|io|co\.nz)$/i,
       tier: MIRROR_TIERS.MANUAL,
       rank: 210,
-      note: "MEGA decrypts files inside its own page, so the download has to start there.",
+      note: "Captcha on the download button.",
+    },
+    {
+      id: "uploadhaven",
+      label: "UPLOADHAVEN",
+      pattern: /(^|\.)uploadhaven\.com$/i,
+      tier: MIRROR_TIERS.MANUAL,
+      rank: 215,
+      note: "hCaptcha before every free download.",
+    },
+    {
+      id: "workupload",
+      label: "WORKUPLOAD",
+      pattern: /(^|\.)workupload\.com$/i,
+      tier: MIRROR_TIERS.MANUAL,
+      rank: 220,
+      note: "Puzzle check before the download.",
+    },
+    {
+      id: "xfs-captcha",
+      label: "",
+      pattern: /(^|\.)(?:send\.(?:cm|now)|usersdrive\.com|hexload\.com|hexupload\.net)$/i,
+      tier: MIRROR_TIERS.MANUAL,
+      rank: 225,
+      note: "Captcha on the download button.",
     },
     {
       id: "filecrypt",
       label: "FILECRYPT",
       pattern: /(^|\.)filecrypt\.(?:cc|co)$/i,
       tier: MIRROR_TIERS.MANUAL,
-      rank: 220,
+      rank: 240,
       note: "Link container protected by a captcha.",
-      // The file itself is downloaded from whichever host the container links to.
-      redirectsToOtherHosts: true,
     },
   ];
 
@@ -172,6 +205,14 @@
     tier: MIRROR_TIERS.ASSISTED,
     rank: 190,
     note: "Less common host. F95Launcher will try it automatically.",
+  };
+
+  const REGISTRY_AUTO_PROFILE = {
+    id: "",
+    label: "",
+    tier: MIRROR_TIERS.ASSISTED,
+    rank: 180,
+    note: "Supported host; it may ask for a quick check.",
   };
 
   const PLATFORM_IDS = [
@@ -207,37 +248,25 @@
     );
   }
 
-  function parseUrl(value) {
-    try {
-      return new URL(String(value || ""));
-    } catch {
-      return null;
-    }
-  }
-
   function describeMirrorLink(link) {
-    const profile = getMirrorHostProfile(link?.host) || UNKNOWN_HOST_PROFILE;
+    const profile =
+      getMirrorHostProfile(link?.host) ||
+      (link?.support === "auto" ? REGISTRY_AUTO_PROFILE : UNKNOWN_HOST_PROFILE);
     const result = {
       hostId: profile.id,
       tier: profile.tier,
       rank: profile.rank,
       note: profile.note,
-      redirectsToOtherHosts: Boolean(profile.redirectsToOtherHosts),
     };
 
-    // Pixeldrain lists (/l/...) bundle several files and have no single
-    // direct endpoint, so they can only be downloaded from the page.
-    const parsedUrl = parseUrl(link?.url);
-    if (
-      parsedUrl &&
-      normalizeHost(parsedUrl.hostname) === "pixeldrain.com" &&
-      /^\/l\//i.test(parsedUrl.pathname)
-    ) {
+    // The host registry decides per link (folders, password-protected MEGA
+    // links, captcha-only hosts), so "browser" always wins.
+    if (link?.support === "browser" && result.tier !== MIRROR_TIERS.MANUAL) {
       return {
         ...result,
         tier: MIRROR_TIERS.MANUAL,
-        rank: 205,
-        note: "Pixeldrain lists can only be downloaded from the page.",
+        rank: Math.max(result.rank, 230),
+        note: "This link needs a captcha, login or waiting page.",
       };
     }
 
@@ -250,8 +279,13 @@
 
   function getMirrorDisplayName(link) {
     const profile = getMirrorHostProfile(link?.host);
-    if (profile) {
+    if (profile?.label) {
       return profile.label;
+    }
+
+    const registryLabel = String(link?.hostLabel || "").trim();
+    if (registryLabel && registryLabel !== normalizeHost(link?.host)) {
+      return registryLabel.toUpperCase();
     }
 
     const token = normalizeHost(link?.host).split(".").filter(Boolean)[0];
