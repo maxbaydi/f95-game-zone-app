@@ -1751,6 +1751,8 @@ function openF95MirrorActionWindow(url, hostLabel) {
     url,
     title: `${hostLabel}: finish the step in this window`,
     reuseKey: "__atlasF95ActionWindow",
+    // The user has to see the mirror page, not a DevTools pane.
+    openDevTools: false,
     onNavigation: (info) => {
       broadcastF95BrowserNavigation(info);
       for (const listener of [...navigationListeners]) {
