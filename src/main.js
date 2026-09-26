@@ -166,7 +166,7 @@ const {
   checkRecordExist,
   checkPathExist,
   getSteamIDbyRecord,
-  db,
+  getDb,
 } = require("./database");
 const cp = require("child_process");
 const contextMenuData = new Map();
@@ -5665,7 +5665,7 @@ function getFolderSize(dir) {
 
 function getVersionsMissingStoredFolderSize(limit = 200) {
   return new Promise((resolve, reject) => {
-    db.all(
+    getDb().all(
       `
         SELECT record_id, version, game_path
         FROM versions
@@ -5957,7 +5957,7 @@ async function downloadImages(
 
 function getCachedPreviewCount(recordId) {
   return new Promise((resolve, reject) => {
-    db.get(
+    getDb().get(
       `SELECT COUNT(*) as preview_count FROM previews WHERE record_id = ?`,
       [recordId],
       (err, row) => {
