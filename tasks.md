@@ -36,6 +36,7 @@ What was done:
 - Общий парсер лендингов: Referer страницы у финальной цели; pomf-клоны (qu.ax) через парсер; фикстура `test/fixtures/hosts/pomf`.
 - `src/main/f95/mirrorActionFlow.js` + main.js: капча/Cloudflare открываются в окне, после прохождения загрузка стартует сама; загрузка, начатая в окне, усыновляется; статус `action` в сторе и панели.
 - Документация: `docs/check-mirrors.md`, `docs/mirror-browser-step.md`, `docs/mirror-verification.md`, индекс `docs/README.md`.
+- Попутно (найдено при smoke-запуске Electron): импорт метаданных Atlas падал uncaught exception из-за новой колонки `external_ids` — `insertJsonData` теперь отбрасывает неизвестные колонки и отдаёт ошибки через promise; `db` в main.js брался до инициализации (undefined) — заменён на `getDb()`. Тест: `test/databaseInsertJsonData.test.js`.
 
 How:
 
