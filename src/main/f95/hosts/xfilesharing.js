@@ -653,6 +653,21 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
   let currentUrl = rawUrl;
   let response = await ctx.fetch(rawUrl, { method: "GET", redirect: "follow" });
 
+  /**
+   * Links scraped from a page must be fetched the way a browser would: with
+   * the page as Referer (qu.ax and several XFS hosts bounce back to the
+   * landing page otherwise). Known-host links keep resolving instead.
+   * @param {string} fileUrl
+   * @param {string} pageUrl
+   */
+  const finalizeFromPage = (fileUrl, pageUrl) => {
+    const next = ctx.continueOrFinal(fileUrl);
+    if (typeof next === "string" || fileUrl === pageUrl) {
+      return next;
+    }
+    return { ...next, headers: { ...(next.headers || {}), referer: pageUrl } };
+  };
+
   for (let step = 0; step < MAX_LANDING_STEPS; step += 1) {
     const pageUrl = response.url || currentUrl;
 
@@ -702,7 +717,7 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
         countdownConfig,
         hostLabel,
       );
-      return ctx.continueOrFinal(downloadUrl);
+      return finalizeFromPage(downloadUrl, pageUrl);
     }
 
     const xfsForm = pickXfsForm(extractHtmlForms(html, pageUrl));
@@ -715,7 +730,7 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
 
     const directLink = extractXfsDirectLink(html, pageUrl, rawUrl);
     if (directLink) {
-      return ctx.continueOrFinal(directLink);
+      return finalizeFromPage(directLink, pageUrl);
     }
 
     if (looksLikeCloudflareChallenge(html)) {
@@ -729,7 +744,7 @@ async function resolveGenericLandingTarget(ctx, rawUrl, options = {}) {
 
     const candidateUrl = await findFileViaCandidates(ctx, pageUrl, html, seenUrls);
     if (candidateUrl) {
-      return ctx.continueOrFinal(candidateUrl);
+      return finalizeFromPage(candidateUrl, pageUrl);
     }
 
     const captchaKind = detectCaptchaKind(html);
