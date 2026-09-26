@@ -98,3 +98,30 @@ test("action entries sort with the other waiting entries, before history", () =>
   assert.equal(ids.indexOf("dl-2") < ids.indexOf("done"), true);
   assert.equal(ids.indexOf("dl-3") < ids.indexOf("done"), true);
 });
+
+test("waiting for a file from the user's own browser is a distinct action mode", () => {
+  const store = seed(createDownloadsStore());
+  const inWindow = store.awaitingAction("dl-1", { actionUrl: "https://mixdrop.ag/f/x" });
+  assert.equal(inWindow.actionMode, "window");
+
+  const forFile = store.awaitingAction("dl-1", { mode: "file", text: "Pick the file" });
+  assert.equal(forFile.status, "action");
+  assert.equal(forFile.actionMode, "file");
+  assert.equal(forFile.actionUrl, "https://mixdrop.ag/f/x", "the link is kept for 'open again'");
+  assert.equal(forFile.canCancel, true);
+
+  store.installing("dl-1", { text: "Preparing Game.zip", actionUrl: "", actionMode: "" });
+  assert.equal(store.get("dl-1").actionMode, "");
+  store.fail("dl-1", { error: "boom" });
+  assert.equal(store.get("dl-1").actionMode, "");
+  assert.equal(store.get("dl-1").actionUrl, "");
+  assert.equal(store.get("dl-1").status, "error");
+});
+
+test("a fresh attempt clears the file-wait mode", () => {
+  const store = seed(createDownloadsStore());
+  store.awaitingAction("dl-1", { mode: "file" });
+  const resolving = store.resolving({ id: "dl-1", title: "Game", hostLabel: "Mixdrop" });
+  assert.equal(resolving.actionMode, "");
+  assert.equal(resolving.status, "resolving");
+});

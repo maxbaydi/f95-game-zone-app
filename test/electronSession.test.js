@@ -158,6 +158,7 @@ test("a cookie store that throws does not break the fetch", async () => {
 });
 
 test("cookies Chromium matches on its own are not duplicated in the explicit header", async () => {
+  /** @type {any} */
   let seenInit = null;
   const session = {
     cookies: {

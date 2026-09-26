@@ -48,6 +48,11 @@ const { buildDirectTransferOptions } = require("./main/f95/transferOptions");
 const { createMirrorActionFlow } = require("./main/f95/mirrorActionFlow");
 const { createElectronResolverSession } = require("./main/f95/electronSession");
 const {
+  describeManualPackageError,
+  inspectManualPackage,
+  stageManualPackage,
+} = require("./main/f95/manualInstall");
+const {
   DownloadCancelledError,
   DownloadValidationError,
   getMirrorHostInfo,
@@ -2576,6 +2581,84 @@ async function startDirectF95Download(context, prepared) {
   });
 }
 
+/**
+ * Fallback for mirrors that cannot be finished inside the embedded window
+ * (Cloudflare Turnstile answers error 600010 there, Adscore flags the window
+ * as a bot): the user downloads the package in their own browser and hands
+ * the file over. It is copied into the downloads folder, so the user's copy
+ * stays untouched whatever happens next, and then goes through the regular
+ * install path.
+ * @param {any} context
+ * @param {{sourcePath: string, fileName: string, totalBytes: number}} inspected
+ */
+async function installF95PackageFromFile(context, inspected) {
+  stopF95MirrorActionFlow(context);
+  const controller = new AbortController();
+  context.abortController = controller;
+  context.cancelled = false;
+  context.downloadItem = null;
+  context.prepared = null;
+  context.targetPath = "";
+  releaseF95DownloadPath(context);
+
+  const title = context.metadata.title;
+  const preparingText = `Preparing ${inspected.fileName}`;
+  f95DownloadsStore.installing(context.id, {
+    title,
+    fileName: inspected.fileName,
+    text: preparingText,
+    percent: 100,
+    totalBytes: inspected.totalBytes,
+    receivedBytes: inspected.totalBytes,
+    error: "",
+    errorCode: "",
+    actionUrl: "",
+    actionMode: "",
+  });
+  broadcastF95Downloads();
+  sendF95DownloadProgress({
+    phase: "installing",
+    text: preparingText,
+    percent: 100,
+    totalBytes: inspected.totalBytes,
+    receivedBytes: inspected.totalBytes,
+    fileName: inspected.fileName,
+  });
+
+  let staged;
+  try {
+    await fs.promises.mkdir(downloadsDir, { recursive: true });
+    staged = await stageManualPackage({
+      sourcePath: inspected.sourcePath,
+      downloadsDir,
+      keepOriginal: true,
+      reservePath: (candidatePath) => {
+        const reservedPath = reserveF95DownloadPath(candidatePath);
+        context.reservedPath = reservedPath;
+        return reservedPath;
+      },
+    });
+  } catch (error) {
+    releaseF95DownloadPath(context);
+    context.abortController = null;
+    console.error("[f95.download] Failed to stage the user's package:", error);
+    if (error && typeof error === "object" && !error.userMessage) {
+      error.userMessage = describeManualPackageError(error);
+    }
+    markF95DownloadFailed(context, error, "install");
+    return;
+  }
+
+  context.targetPath = staged.targetPath;
+  await finalizeF95DownloadedPackage({
+    context,
+    targetPath: staged.targetPath,
+    totalBytes: staged.totalBytes,
+    receivedBytes: staged.totalBytes,
+    mimeType: "",
+  });
+}
+
 async function persistF95InstalledGame(payload) {
   const atlasMetadata =
     payload.atlasMetadata ||
@@ -4015,6 +4098,121 @@ ipcMain.handle("open-f95-download-action", async (event, id) => {
       error: getErrorMessage(error, "The browser window could not be opened."),
     };
   }
+});
+
+const MANUAL_INSTALL_STATUSES = new Set(["error", "action"]);
+const MANUAL_PACKAGE_EXTENSIONS = [
+  "zip", "7z", "rar", "exe", "apk", "tar", "gz", "tgz", "bz2", "xz", "zst",
+  "jar", "swf", "msi",
+];
+
+function findF95DownloadForManualStep(id) {
+  const downloadId = String(id || "").trim();
+  const entry = f95DownloadsStore.get(downloadId);
+  const context = f95DownloadContexts.get(downloadId);
+  if (!entry || !context?.request?.downloadUrl) {
+    return {
+      error:
+        "This download can no longer be resumed. Start it again from the game thread.",
+    };
+  }
+  if (!MANUAL_INSTALL_STATUSES.has(entry.status)) {
+    return { error: "This download is still running." };
+  }
+  return { entry, context };
+}
+
+/**
+ * The mirror cannot be finished in the embedded window (bot detection such
+ * as Cloudflare Turnstile or Adscore): open its page in the user's own
+ * browser and wait for the downloaded file (`install-f95-download-from-file`).
+ */
+ipcMain.handle("open-f95-download-in-browser", async (event, id) => {
+  const found = findF95DownloadForManualStep(id);
+  if (!found.context) {
+    return { success: false, error: found.error };
+  }
+  const { entry, context } = found;
+  const targetUrl =
+    entry.actionUrl ||
+    context.actionFlow?.actionUrl ||
+    context.request.downloadUrl;
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    return { success: false, error: "This mirror link cannot be opened in a browser." };
+  }
+  const hostLabel = describeF95DownloadHost(context);
+  try {
+    stopF95MirrorActionFlow(context);
+    context.abortController = null;
+    await shell.openExternal(targetUrl);
+  } catch (error) {
+    console.error(
+      "[f95.download] Failed to open the mirror in the system browser:",
+      error,
+    );
+    return {
+      success: false,
+      error: getErrorMessage(error, "The link could not be opened in your browser."),
+    };
+  }
+
+  f95DownloadsStore.awaitingAction(context.id, {
+    mode: "file",
+    actionUrl: targetUrl,
+    hostLabel,
+    text: `Download the file from ${hostLabel} in your browser, then pick it here and it gets installed.`,
+  });
+  broadcastF95Downloads();
+  return { success: true, id: context.id, actionUrl: targetUrl, hostLabel };
+});
+
+/**
+ * Let the user pick the package they downloaded themselves; the install
+ * then continues in the background exactly like an app download.
+ */
+ipcMain.handle("install-f95-download-from-file", async (event, id) => {
+  const found = findF95DownloadForManualStep(id);
+  if (!found.context) {
+    return { success: false, error: found.error };
+  }
+  const { context } = found;
+  const dialogOptions = {
+    title: `Pick the file you downloaded for ${context.metadata.title}`,
+    defaultPath: app.getPath("downloads"),
+    buttonLabel: "Install",
+    properties: /** @type {Array<"openFile">} */ (["openFile"]),
+    filters: [
+      { name: "Game archives and installers", extensions: MANUAL_PACKAGE_EXTENSIONS },
+      { name: "All files", extensions: ["*"] },
+    ],
+  };
+  const picked = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+  if (picked.canceled || !picked.filePaths?.length) {
+    return { success: false, cancelled: true };
+  }
+
+  // The entry may have moved on while the dialog was open.
+  const recheck = findF95DownloadForManualStep(id);
+  if (!recheck.context) {
+    return { success: false, error: recheck.error };
+  }
+
+  let inspected;
+  try {
+    inspected = await inspectManualPackage(picked.filePaths[0]);
+  } catch (error) {
+    return { success: false, error: describeManualPackageError(error) };
+  }
+
+  void installF95PackageFromFile(context, inspected);
+  return {
+    success: true,
+    queued: true,
+    id: context.id,
+    fileName: inspected.fileName,
+  };
 });
 
 ipcMain.handle("clear-f95-download-history", async () => {

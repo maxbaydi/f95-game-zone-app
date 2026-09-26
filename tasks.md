@@ -21,10 +21,34 @@ Last updated: 2026-09-26
 | Stage 5. Quality hardening       | partial     |      63% | CI/check foundation, migration tests, scan-source store tests, Ren'Py and multi-engine save-detector tests, scan-session tests, scan-candidate store tests, scan matcher/identity tests, scan auto-import policy tests, library cleanup tests, shared version-comparison tests, import-metadata tests, scan-title parser tests, cloud error rendering regression tests, F95 download resolver tests including masked-link, countdown-host, gofile and Google Drive coverage, app-updater tests, archive safety tests, a dedicated tray controller, and system-notification coverage for app/tray flows now exist. Manual packaged smoke and longer-running desktop lifecycle validation are still pending.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | MVP total                        | in_progress |      84% | Honest estimate relative to the full ТЗ, not relative to Atlas baseline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
+### 2026-09-27 — Установка из файла, скачанного в своём браузере (обход Turnstile/Adscore)
+
+- Status: in_progress
+- Progress: 90%
+- ТЗ coverage: закрывает установку/обновление игр из интерфейса для зеркал, которые не проходятся во встроенном окне
+
+What was done:
+
+- Жалобы из приложения разобраны в отдельном профиле Electron с реальными кликами: DataNodes 404 «file no longer exists» — терялись cookies промежуточного редиректа в `net.request` (исправлено в `electronSession.js`, теперь ACTION_REQUIRED, как и ожидалось); Mixdrop — клик по DOWNLOAD открывает рекламный попап, Adscore помечает окно как бота; DataNodes шаг 2 — Turnstile отвечает 600010 и с sandbox, и без, и с UA Chrome. Вывод: такие зеркала во встроенном окне не завершить.
+- Новый модуль `src/main/f95/manualInstall.js`: проверка выбранного файла (расширение пакета, не `.crdownload`/`.part`, непустой), копирование в папку загрузок под уникальным именем, тексты ошибок.
+- main.js: `installF95PackageFromFile` (копия → обычный `finalizeF95DownloadedPackage`), IPC `open-f95-download-in-browser` (shell.openExternal, только http(s), запись в `action` с `actionMode: "file"`) и `install-f95-download-from-file` (системный диалог, проверка до смены состояния, установка в фоне).
+- Стор: публичное поле `actionMode` (`window` | `file`), сбрасывается при `fail`/`resolving`/`start`/`cancel`/`complete`.
+- Панель загрузок: блок «Stuck on this page?» (Open in my browser / Pick downloaded file) для статуса Your turn и для Failed со ссылкой; режим «Waiting for your file» после открытия в браузере; кнопка «Install from file» у любой неудавшейся загрузки; тосты.
+- Документация: `docs/mirror-manual-install.md`, обновлены `mirror-browser-step.md`, `mirror-verification.md`, индекс.
+
+How:
+
+- Копия вместо переноса: файл выбирал пользователь, а обработанный пакет после установки удаляется — перенос уничтожил бы пользовательскую копию. Проверка файла выполняется до смены статуса, чтобы неверный выбор не ломал карточку.
+- Тесты: `test/manualInstall.test.js` (9), `test/downloadsStoreAction.test.js` (+2); `npm run lint`, `npm run typecheck`, `npm test` (370) — зелёные; JSX панели проверен Babel (react+env).
+
+What is left:
+
+- Ручная проверка в приложении: Mixdrop/DataNodes → Open in my browser → скачать → Pick downloaded file → Installed; ошибки выбора (`.txt`, `.crdownload`); Cancel в режиме ожидания файла.
+
 ### 2026-09-26 — Живая проверка зеркал, Gofile, шаг в браузере с автопродолжением
 
 - Status: in_progress
-- Progress: 80%
+- Progress: 85%
 - ТЗ coverage: закрывает «загрузка через зеркала F95» на реальных серверах; UX капчи/Cloudflare; сессия Electron для загрузчика
 
 What was done:
