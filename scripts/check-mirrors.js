@@ -71,6 +71,7 @@ const { createCookieJarSession, parseNetscapeCookies } = require(
 );
 const { MIRROR_HOSTS } = require(path.join(ROOT, "src/main/f95/hosts"));
 const {
+  BROWSER_USER_AGENT,
   extractAnchors,
   isHtmlLikeContentType,
   looksLikeCloudflareChallenge,
@@ -540,179 +541,23 @@ function hostInfoFor(url) {
   };
 }
 
-async function checkLink(entry, options, session, state) {
-  const startedAt = Date.now();
-  const host = hostInfoFor(entry.url);
-  state.currentHost = host;
-  const row = {
-    host: host.id || "?",
-    label: host.label,
-    supported: host.supported,
-    masked: host.masked,
-    url: entry.url,
-    note: entry.note || "",
-    expect: entry.expect || "",
-    status: "FAIL",
-    fileName: "",
-    size: 0,
-    announcedSize: 0,
-    sha256: "",
-    archive: "",
-    error: "",
-    actionUrl: "",
-    resolvedUrl: "",
-    transfer: "",
-    resumed: null,
-    elapsedMs: 0,
-    log: [],
-  };
-  const log = (text) => {
-    row.log.push(text);
-    console.log(`    ${text}`);
-  };
-
-  console.log(`\n▶ ${host.label} (${row.host}${host.masked ? ", masked" : ""}) ${entry.url}`);
-
-  const controller = new AbortController();
-  let prepared = null;
-  try {
-    prepared = await prepareF95DownloadUrl(session, entry.url, {
-      signal: controller.signal,
-      platformHint: options.platform,
-      requestTimeoutMs: options.timeout,
-      onStatus: (text) => log(text),
-    });
-  } catch (error) {
-    row.elapsedMs = Date.now() - startedAt;
-    if (error instanceof MirrorActionRequiredError) {
-      row.status = "ACTION_REQUIRED";
-      row.actionUrl = error.actionUrl || entry.url;
-      row.error = errorSummary(error);
-      row.unexpected = host.supported !== "browser";
-      log(`ACTION_REQUIRED → ${row.actionUrl}`);
-      return row;
-    }
-    row.error = `resolve: ${errorSummary(error)}`;
-    log(`FAIL ${row.error}`);
-    return row;
-  }
-
-  row.resolvedUrl = prepared.resolvedUrl;
-  row.transfer = prepared.transfer;
-  row.announcedSize = prepared.size || 0;
-  row.host = prepared.hostId || row.host;
-  row.label = prepared.hostLabel || row.label;
-  log(
-    `resolved → ${prepared.resolvedUrl}${prepared.fileName ? ` (${prepared.fileName}` : ""}${prepared.size ? `${prepared.fileName ? ", " : " ("}${formatBytes(prepared.size)}` : ""}${prepared.fileName || prepared.size ? ")" : ""} transfer=${prepared.transfer} range=${prepared.rangeMode}`,
-  );
-  row.fileName = prepared.fileName || "";
-  row.size = prepared.size || 0;
-
-  if (options.resolveOnly) {
-    row.elapsedMs = Date.now() - startedAt;
-    row.status = "RESOLVED";
-    log(`RESOLVED (no transfer requested)`);
-    return row;
-  }
-  if (options.maxSize > 0 && prepared.size > options.maxSize) {
-    row.elapsedMs = Date.now() - startedAt;
-    row.status = "SKIPPED";
-    row.error = `announced size ${formatBytes(prepared.size)} exceeds --max-size ${formatBytes(options.maxSize)}`;
-    log(`SKIPPED ${row.error}`);
-    return row;
-  }
-
-  // Transfer with the exact options the app uses.
-  let dropped = false;
-  let resumeRequested = false;
-  let resumeAccepted = false;
-  const fetchImpl = async (url, init) => {
-    const response = await session.fetch(url, init);
-    const rangeHeader = new Headers(init?.headers || {}).get("range");
-    if (dropped && rangeHeader) {
-      resumeRequested = true;
-      if (response.status === 206) {
-        resumeAccepted = true;
-      }
-    }
-    if (options.simulateDrop > 0 && !dropped && response.ok && response.body) {
-      dropped = true;
-      log(`simulating a connection drop after ${formatBytes(options.simulateDrop)}`);
-      return cutResponseBody(response, options.simulateDrop);
-    }
-    return response;
-  };
-
-  let lastPercent = -1;
-  let result = null;
-  try {
-    result = await downloadToFile(
-      buildDirectTransferOptions({
-        prepared,
-        fetchImpl,
-        signal: controller.signal,
-        hostLabel: prepared.hostLabel,
-        fallbackFileName: `${sanitizeDownloadFileName(row.host, "mirror")}-download.bin`,
-        resolveTargetPath: (fileName) => {
-          const safeName = sanitizeDownloadFileName(fileName, "download.bin");
-          let candidate = path.join(options.out, safeName);
-          let attempt = 1;
-          while (fs.existsSync(candidate) || fs.existsSync(`${candidate}.part`)) {
-            const extension = path.extname(safeName);
-            const stem = path.basename(safeName, extension);
-            candidate = path.join(options.out, `${stem} (${attempt++})${extension}`);
-          }
-          return candidate;
-        },
-        onTarget: ({ fileName, totalBytes, mimeType }) => {
-          log(`file: ${fileName} ${totalBytes ? formatBytes(totalBytes) : "(unknown size)"} ${mimeType}`);
-        },
-        onProgress: ({ percent, speedBytesPerSecond, receivedBytes, totalBytes }) => {
-          const bucket = Math.floor(percent / 10) * 10;
-          if (bucket !== lastPercent && (bucket >= lastPercent + 10 || totalBytes === 0)) {
-            lastPercent = bucket;
-            if (totalBytes > 0) {
-              process.stdout.write(
-                `    ${String(percent).padStart(3)}% ${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)} @ ${formatBytes(speedBytesPerSecond)}/s\r`,
-              );
-            }
-          }
-        },
-        onRetry: ({ attempt, maxAttempts, delayMs, error, resumeFrom }) => {
-          log(
-            `retry ${attempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s${resumeFrom > 0 ? ` (resume from ${formatBytes(resumeFrom)})` : ""}: ${errorSummary(error)}`,
-          );
-        },
-        progressIntervalMs: 500,
-      }),
-    );
-  } catch (error) {
-    row.elapsedMs = Date.now() - startedAt;
-    if (error instanceof MirrorActionRequiredError) {
-      row.status = "ACTION_REQUIRED";
-      row.actionUrl = error.actionUrl || entry.url;
-      row.error = errorSummary(error);
-      row.unexpected = host.supported !== "browser";
-      log(`ACTION_REQUIRED (transfer) → ${row.actionUrl}`);
-      return row;
-    }
-    row.error = `transfer: ${errorSummary(error)}`;
-    log(`FAIL ${row.error}`);
-    return row;
-  }
-  process.stdout.write("\n");
-
+/**
+ * Verify a downloaded file the way the app's installer would: SHA-256, size
+ * against Content-Length / the host's announcement, package sniffing and a
+ * 7-Zip integrity test for archives.
+ */
+async function verifyDownloadedFile(row, result, options, log, resume) {
+  const problems = [];
   row.fileName = result.fileName;
   row.size = result.receivedBytes;
-  const problems = [];
 
-  if (options.simulateDrop > 0) {
-    row.resumed = resumeRequested && resumeAccepted;
-    if (!dropped) {
+  if (resume && options.simulateDrop > 0) {
+    row.resumed = resume.requested && resume.accepted;
+    if (!resume.dropped) {
       log("drop simulation did not trigger (empty body?)");
     } else if (row.resumed) {
-      log("resume: Range request accepted with HTTP 206");
-    } else if (resumeRequested) {
+      log("resume: ranged request accepted (HTTP 206 / MEGA path range)");
+    } else if (resume.requested) {
       problems.push("resume: host ignored the Range request (restarted from 0)");
     } else {
       problems.push("resume: pipeline restarted from 0 instead of resuming");
@@ -767,16 +612,260 @@ async function checkLink(entry, options, session, state) {
     log(`kept ${result.targetPath}`);
   }
 
-  row.elapsedMs = Date.now() - startedAt;
   if (problems.length > 0) {
     row.error = problems.join("; ");
     log(`FAIL ${row.error}`);
+    row.status = "FAIL";
     return row;
   }
 
   row.status = "PASS";
   log(`PASS ${row.fileName} ${formatBytes(row.size)} sha256=${row.sha256}`);
   return row;
+}
+
+function markActionRequired(row, error, entry, host, log, phase = "") {
+  row.status = "ACTION_REQUIRED";
+  row.actionUrl = error.actionUrl || entry.url;
+  row.error = errorSummary(error);
+  row.unexpected = host.supported !== "browser";
+  log(`ACTION_REQUIRED${phase ? ` (${phase})` : ""} → ${row.actionUrl}`);
+  return row;
+}
+
+/**
+ * Give the browser-step hook (Electron runner) a chance to finish the step.
+ * Returns {prepared} | {adopted} | null (no hook / resolve-only).
+ */
+async function tryBrowserStep(error, entry, host, options, session, adapters, log) {
+  const hook = adapters?.hooks?.awaitBrowserStep;
+  if (typeof hook !== "function" || options.resolveOnly) {
+    return null;
+  }
+  log(`browser step: ${errorSummary(error)}`);
+  return hook({
+    entry,
+    actionUrl: error.actionUrl || entry.url,
+    hostLabel: error.hostLabel || host.label,
+    error,
+    outDir: options.out,
+    log,
+    resolveMirror: (signal) =>
+      prepareF95DownloadUrl(session, entry.url, {
+        signal,
+        platformHint: options.platform,
+        requestTimeoutMs: options.timeout,
+        retry: { attempts: 1 },
+        onStatus: (text) => log(text),
+      }),
+  });
+}
+
+async function checkLink(entry, options, session, state, adapters = {}) {
+  const startedAt = Date.now();
+  const host = hostInfoFor(entry.url);
+  state.currentHost = host;
+  const row = {
+    host: host.id || "?",
+    label: host.label,
+    supported: host.supported,
+    masked: host.masked,
+    url: entry.url,
+    note: entry.note || "",
+    expect: entry.expect || "",
+    status: "FAIL",
+    fileName: "",
+    size: 0,
+    announcedSize: 0,
+    sha256: "",
+    archive: "",
+    error: "",
+    actionUrl: "",
+    resolvedUrl: "",
+    transfer: "",
+    resumed: null,
+    browserStep: false,
+    elapsedMs: 0,
+    log: [],
+  };
+  const log = (text) => {
+    row.log.push(text);
+    console.log(`    ${text}`);
+  };
+  const finish = (result) => {
+    row.elapsedMs = Date.now() - startedAt;
+    return result;
+  };
+
+  console.log(`\n▶ ${host.label} (${row.host}${host.masked ? ", masked" : ""}) ${entry.url}`);
+
+  const controller = new AbortController();
+  let prepared = null;
+  try {
+    prepared = await prepareF95DownloadUrl(session, entry.url, {
+      signal: controller.signal,
+      platformHint: options.platform,
+      requestTimeoutMs: options.timeout,
+      onStatus: (text) => log(text),
+    });
+  } catch (error) {
+    if (!(error instanceof MirrorActionRequiredError)) {
+      row.error = `resolve: ${errorSummary(error)}`;
+      log(`FAIL ${row.error}`);
+      return finish(row);
+    }
+    let outcome = null;
+    try {
+      outcome = await tryBrowserStep(error, entry, host, options, session, adapters, log);
+    } catch (stepError) {
+      if (stepError instanceof MirrorActionRequiredError) {
+        return finish(markActionRequired(row, stepError, entry, host, log, "browser step"));
+      }
+      row.error = `browser step: ${errorSummary(stepError)}`;
+      log(`FAIL ${row.error}`);
+      return finish(row);
+    }
+    if (!outcome) {
+      return finish(markActionRequired(row, error, entry, host, log));
+    }
+    row.browserStep = true;
+    if (outcome.adopted) {
+      row.transfer = "browser";
+      return finish(await verifyDownloadedFile(row, outcome.adopted, options, log, null));
+    }
+    prepared = outcome.prepared;
+  }
+
+  row.resolvedUrl = prepared.resolvedUrl;
+  row.transfer = prepared.transfer;
+  row.announcedSize = prepared.size || 0;
+  row.host = prepared.hostId || row.host;
+  row.label = prepared.hostLabel || row.label;
+  log(
+    `resolved → ${prepared.resolvedUrl}${prepared.fileName ? ` (${prepared.fileName}` : ""}${prepared.size ? `${prepared.fileName ? ", " : " ("}${formatBytes(prepared.size)}` : ""}${prepared.fileName || prepared.size ? ")" : ""} transfer=${prepared.transfer} range=${prepared.rangeMode}`,
+  );
+  row.fileName = prepared.fileName || "";
+  row.size = prepared.size || 0;
+
+  if (options.resolveOnly) {
+    row.status = "RESOLVED";
+    log(`RESOLVED (no transfer requested)`);
+    return finish(row);
+  }
+  if (options.maxSize > 0 && prepared.size > options.maxSize) {
+    row.status = "SKIPPED";
+    row.error = `announced size ${formatBytes(prepared.size)} exceeds --max-size ${formatBytes(options.maxSize)}`;
+    log(`SKIPPED ${row.error}`);
+    return finish(row);
+  }
+
+  // Transfer with the exact options the app uses.
+  const resume = { dropped: false, requested: false, accepted: false };
+  const fetchImpl = async (url, init) => {
+    const response = await session.fetch(url, init);
+    // HTTP hosts resume with a Range header; MEGA appends "/<offset>-<end>"
+    // to the path (rangeMode "mega-path") and answers 200.
+    const rangeHeader = new Headers(init?.headers || {}).get("range");
+    const megaRange = /\/\d+-\d*$/.test(String(url));
+    if (resume.dropped && (rangeHeader || megaRange)) {
+      resume.requested = true;
+      if (response.status === 206 || (megaRange && response.ok)) {
+        resume.accepted = true;
+      }
+    }
+    if (options.simulateDrop > 0 && !resume.dropped && response.ok && response.body) {
+      resume.dropped = true;
+      log(`simulating a connection drop after ${formatBytes(options.simulateDrop)}`);
+      return cutResponseBody(response, options.simulateDrop);
+    }
+    return response;
+  };
+
+  const transfer = (target) => {
+    let lastPercent = -1;
+    return downloadToFile(
+      buildDirectTransferOptions({
+        prepared: target,
+        fetchImpl,
+        signal: controller.signal,
+        hostLabel: target.hostLabel,
+        userAgent: adapters.userAgent || options.userAgent || BROWSER_USER_AGENT,
+        fallbackFileName: `${sanitizeDownloadFileName(row.host, "mirror")}-download.bin`,
+        resolveTargetPath: (fileName) => {
+          const safeName = sanitizeDownloadFileName(fileName, "download.bin");
+          let candidate = path.join(options.out, safeName);
+          let attempt = 1;
+          while (fs.existsSync(candidate) || fs.existsSync(`${candidate}.part`)) {
+            const extension = path.extname(safeName);
+            const stem = path.basename(safeName, extension);
+            candidate = path.join(options.out, `${stem} (${attempt++})${extension}`);
+          }
+          return candidate;
+        },
+        onTarget: ({ fileName, totalBytes, mimeType }) => {
+          log(`file: ${fileName} ${totalBytes ? formatBytes(totalBytes) : "(unknown size)"} ${mimeType}`);
+        },
+        onProgress: ({ percent, speedBytesPerSecond, receivedBytes, totalBytes }) => {
+          const bucket = Math.floor(percent / 10) * 10;
+          if (bucket !== lastPercent && (bucket >= lastPercent + 10 || totalBytes === 0)) {
+            lastPercent = bucket;
+            if (totalBytes > 0) {
+              process.stdout.write(
+                `    ${String(percent).padStart(3)}% ${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)} @ ${formatBytes(speedBytesPerSecond)}/s\r`,
+              );
+            }
+          }
+        },
+        onRetry: ({ attempt, maxAttempts, delayMs, error, resumeFrom }) => {
+          log(
+            `retry ${attempt}/${maxAttempts} in ${Math.ceil(delayMs / 1000)}s${resumeFrom > 0 ? ` (resume from ${formatBytes(resumeFrom)})` : ""}: ${errorSummary(error)}`,
+          );
+        },
+        progressIntervalMs: 500,
+      }),
+    );
+  };
+
+  let result = null;
+  try {
+    result = await transfer(prepared);
+  } catch (error) {
+    if (!(error instanceof MirrorActionRequiredError)) {
+      row.error = `transfer: ${errorSummary(error)}`;
+      log(`FAIL ${row.error}`);
+      return finish(row);
+    }
+    // A wall on the CDN itself: same browser step, then one more transfer.
+    let outcome = null;
+    try {
+      outcome = await tryBrowserStep(error, entry, host, options, session, adapters, log);
+    } catch (stepError) {
+      if (stepError instanceof MirrorActionRequiredError) {
+        return finish(markActionRequired(row, stepError, entry, host, log, "browser step"));
+      }
+      row.error = `browser step: ${errorSummary(stepError)}`;
+      log(`FAIL ${row.error}`);
+      return finish(row);
+    }
+    if (!outcome) {
+      return finish(markActionRequired(row, error, entry, host, log, "transfer"));
+    }
+    row.browserStep = true;
+    if (outcome.adopted) {
+      row.transfer = "browser";
+      return finish(await verifyDownloadedFile(row, outcome.adopted, options, log, null));
+    }
+    try {
+      result = await transfer(outcome.prepared);
+    } catch (secondError) {
+      row.error = `transfer after browser step: ${errorSummary(secondError)}`;
+      log(`FAIL ${row.error}`);
+      return finish(row);
+    }
+  }
+  process.stdout.write("\n");
+
+  return finish(await verifyDownloadedFile(row, result, options, log, resume));
 }
 
 function truncate(value, width) {
@@ -791,7 +880,7 @@ function renderTable(rows) {
   const columns = [
     { title: "host", width: 14, value: (row) => row.host },
     { title: "URL", width: 58, value: (row) => row.url },
-    { title: "status", width: 16, value: (row) => row.status + (row.unexpected ? "!" : "") },
+    { title: "status", width: 16, value: (row) => row.status + (row.unexpected ? "!" : "") + (row.browserStep ? " (browser)" : "") },
     { title: "file", width: 34, value: (row) => row.fileName },
     { title: "size", width: 11, value: (row) => (row.size ? formatBytes(row.size) : "") },
     { title: "sha256", width: 64, value: (row) => row.sha256 },
@@ -807,8 +896,30 @@ function renderTable(rows) {
   return [header, separator, ...body].join("\n");
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+function createNodeSession(options, state) {
+  const persistedCookies =
+    options.jar && fs.existsSync(options.jar)
+      ? JSON.parse(fs.readFileSync(options.jar, "utf8"))
+      : [];
+  return createCookieJarSession({
+    cookies: [
+      ...(Array.isArray(persistedCookies) ? persistedCookies : []),
+      ...(options.cookies ? loadCookies(options.cookies, options.cookieDomains) : []),
+    ],
+    userAgent: options.userAgent || undefined,
+    onResponse: options.capture
+      ? createCaptureObserver(options.capture, () => state.currentHost)
+      : undefined,
+  });
+}
+
+/**
+ * Run the checks described by \`options\` (from parseArgs).
+ * @param {ReturnType<typeof parseArgs>} options
+ * @param {{session?: any, userAgent?: string, hooks?: {awaitBrowserStep?: Function}}} [adapters]
+ * @returns {Promise<number>} exit code
+ */
+async function run(options, adapters = {}) {
   if (options.help) {
     printHelp();
     return 0;
@@ -840,20 +951,7 @@ async function main() {
   }
 
   const state = { currentHost: { id: "", label: "" } };
-  const persistedCookies =
-    options.jar && fs.existsSync(options.jar)
-      ? JSON.parse(fs.readFileSync(options.jar, "utf8"))
-      : [];
-  const session = createCookieJarSession({
-    cookies: [
-      ...(Array.isArray(persistedCookies) ? persistedCookies : []),
-      ...(options.cookies ? loadCookies(options.cookies, options.cookieDomains) : []),
-    ],
-    userAgent: options.userAgent || undefined,
-    onResponse: options.capture
-      ? createCaptureObserver(options.capture, () => state.currentHost)
-      : undefined,
-  });
+  const session = adapters.session || createNodeSession(options, state);
 
   for (const threadUrl of options.threads) {
     state.currentHost = { id: "f95-thread", label: "F95zone thread" };
@@ -888,12 +986,12 @@ async function main() {
   }
 
   console.log(
-    `check-mirrors: ${entries.length} link(s), out=${options.out}${options.cookies ? ", cookies loaded" : ""}${options.simulateDrop ? `, drop after ${options.simulateDrop} bytes` : ""}${options.capture ? `, capture=${options.capture}` : ""}`,
+    `check-mirrors: ${entries.length} link(s), out=${options.out}${options.cookies ? ", cookies loaded" : ""}${options.simulateDrop ? `, drop after ${options.simulateDrop} bytes` : ""}${options.capture ? `, capture=${options.capture}` : ""}${adapters.hooks?.awaitBrowserStep ? ", browser steps enabled" : ""}`,
   );
 
   const rows = [];
   for (const entry of entries) {
-    const row = await checkLink(entry, options, session, state);
+    const row = await checkLink(entry, options, session, state, adapters);
     if (row.expect && row.expect !== row.status) {
       row.error = `${row.error ? `${row.error}; ` : ""}expected ${row.expect} but got ${row.status}`;
       row.status = "FAIL";
@@ -901,7 +999,7 @@ async function main() {
     rows.push(row);
   }
 
-  if (options.jar) {
+  if (options.jar && typeof session.cookies?.list === "function") {
     fs.writeFileSync(options.jar, JSON.stringify(session.cookies.list(), null, 2));
   }
 
@@ -934,12 +1032,24 @@ async function main() {
   return counts.FAIL || unexpected.length ? 1 : 0;
 }
 
-main().then(
-  (code) => {
-    process.exitCode = code;
-  },
-  (error) => {
-    console.error("check-mirrors crashed:", error);
-    process.exitCode = 1;
-  },
-);
+module.exports = {
+  checkLink,
+  hostInfoFor,
+  loadCookies,
+  parseArgs,
+  readLinksFile,
+  renderTable,
+  run,
+};
+
+if (require.main === module) {
+  run(parseArgs(process.argv.slice(2))).then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (error) => {
+      console.error("check-mirrors crashed:", error);
+      process.exitCode = 1;
+    },
+  );
+}

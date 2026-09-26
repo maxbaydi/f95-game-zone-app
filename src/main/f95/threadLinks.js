@@ -393,6 +393,17 @@ function describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint) {
   return getMirrorHostInfo(parsedUrl.href);
 }
 
+/**
+ * "uploaded to catbox.moe" links point at a host home page, not a file.
+ * @param {URL} parsedUrl
+ */
+function isBareHostUrl(parsedUrl) {
+  const pathname = String(parsedUrl.pathname || "/").replace(/\/+$/, "");
+  const search = String(parsedUrl.search || "").replace(/^\?$/, "");
+  const hash = String(parsedUrl.hash || "").replace(/^#$/, "");
+  return !pathname && !search && !hash;
+}
+
 function classifyThreadDownloadLink(rawLink) {
   const url = cleanText(rawLink?.url);
   if (!url) {
@@ -407,6 +418,9 @@ function classifyThreadDownloadLink(rawLink) {
   }
 
   const hostname = parsedUrl.hostname;
+  if (!/(^|\.)f95zone\.to$/i.test(hostname) && isBareHostUrl(parsedUrl)) {
+    return null;
+  }
   const label = cleanText(rawLink?.label || hostname);
   const lineText = cleanText(rawLink?.lineText || "");
   const contextText = cleanText(rawLink?.contextText || "");
