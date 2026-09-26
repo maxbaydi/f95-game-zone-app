@@ -991,18 +991,23 @@ test("resolveGoogleDriveUrl retries resourcekey-aware candidates after an unsupp
   ]);
 });
 
-test("prepareF95DownloadUrl blocks unsupported MEGA mirrors with a clear error", async () => {
+test("prepareF95DownloadUrl asks for the browser when a MEGA link has no decryption key", async () => {
   await assert.rejects(
     () =>
       prepareF95DownloadUrl(
         {
           fetch() {
-            throw new Error("Fetch must not be called for MEGA guards.");
+            throw new Error("Fetch must not be called for MEGA links without a key.");
           },
         },
-        "https://mega.nz/file/u1AjAI4L#key",
+        "https://mega.nz/file/u1AjAI4L",
       ),
-    /MEGA mirrors are not supported/,
+    (error) => {
+      assert.ok(error instanceof MirrorActionRequiredError);
+      assert.equal(error.actionUrl, "https://mega.nz/file/u1AjAI4L");
+      assert.match(error.userMessage, /decryption key/);
+      return true;
+    },
   );
 });
 
@@ -1103,10 +1108,12 @@ test("prepareF95DownloadUrl resolves F95 masked links through the host landing p
     "https://buzzheavier.com/ub5ewcwwl2xa/download",
   );
   assert.equal(prepared.sourceHost, "buzzheavier.com");
+  assert.equal(prepared.hostLabel, "Buzzheavier");
+  assert.equal(prepared.mirrorHost, "buzzheavier.com");
+  // The dedicated Buzzheavier resolver goes straight to the htmx download
+  // endpoint instead of scraping the landing page.
   assert.deepEqual(calls, [
     { url: "https://f95zone.to/masked/example", method: "POST" },
-    { url: "https://buzzheavier.com/ub5ewcwwl2xa", method: "GET" },
-    { url: "https://buzzheavier.com/ub5ewcwwl2xa", method: "GET" },
     {
       url: "https://buzzheavier.com/ub5ewcwwl2xa/download",
       method: "GET",
@@ -1448,6 +1455,7 @@ test("resolveUploadhavenUrl submits the free download form and follows the redir
   const resolvedUrl = await resolveUploadhavenUrl(
     session,
     "https://uploadhaven.com/download/abc123",
+    { delayMs: 0 },
   );
 
   assert.equal(
@@ -1526,6 +1534,7 @@ test("resolveUploadhavenUrl extracts the download link from the post-submit HTML
   const resolvedUrl = await resolveUploadhavenUrl(
     session,
     "https://uploadhaven.com/download/xyz789",
+    { delayMs: 0 },
   );
 
   assert.equal(
@@ -1582,6 +1591,7 @@ test("resolveUploadhavenUrl throws MirrorActionRequiredError when POST returns H
       resolveUploadhavenUrl(
         session,
         "https://uploadhaven.com/download/abc123",
+        { delayMs: 0 },
       ),
     (error) => {
       assert.ok(error instanceof MirrorActionRequiredError);
