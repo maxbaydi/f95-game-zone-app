@@ -94,7 +94,9 @@ const DetailPill = ({ children, tone = "neutral" }) => {
       ? "border-accent/45 bg-accent/25 text-text shadow-glow-accent"
       : tone === "warning"
         ? "border-amber-500/40 bg-amber-500/15 text-amber-50"
-        : "border-border/85 bg-white/5 text-text backdrop-blur-sm";
+        : tone === "danger"
+          ? "border-red-500/45 bg-red-500/15 text-red-100"
+          : "border-border/85 bg-white/5 text-text backdrop-blur-sm";
 
   return (
     <span
@@ -164,7 +166,15 @@ const LibraryDetailsPanel = ({
   const tags = useMemo(() => splitGameTags(game?.f95_tags), [game?.f95_tags]);
   const displayTitle = game?.displayTitle || game?.title || "No game selected";
   const displayCreator = game?.displayCreator || game?.creator || "";
-  const hasInstalledVersions = versionList.length > 0;
+  // Install state on this PC (see shared/libraryInstallState): only games whose
+  // folder still exists are "installed"; a vanished folder is "missing".
+  const installState = window.libraryInstallState?.getLibraryInstallState
+    ? window.libraryInstallState.getLibraryInstallState(game)
+    : versionList.length > 0
+      ? "installed"
+      : "not_installed";
+  const hasInstalledVersions = installState === "installed";
+  const hasMissingFiles = installState === "missing";
   const isFavorite = Boolean(game?.isFavorite);
 
   const [panelWidthPx, setPanelWidthPx] = useState(
@@ -450,7 +460,9 @@ const LibraryDetailsPanel = ({
                         ? game.isUpdateAvailable
                           ? "Update available"
                           : "Installed version is current"
-                        : "Not installed on this PC"}
+                        : hasMissingFiles
+                          ? "Installed files are missing"
+                          : "Not installed on this PC"}
                     </div>
                     {hasInstalledVersions ? (
                       <>
@@ -459,6 +471,18 @@ const LibraryDetailsPanel = ({
                         </div>
                         <div className="text-xs opacity-70">
                           Site latest: {game.latestVersion || "Unknown"}
+                        </div>
+                      </>
+                    ) : hasMissingFiles ? (
+                      <>
+                        <div className="mt-1 text-xs opacity-70">
+                          Last installed: {game.lastKnownVersion || "Unknown"}
+                          {game.latestVersion ? ` · Site latest: ${game.latestVersion}` : ""}
+                        </div>
+                        <div className="text-xs opacity-70">
+                          The game folder was deleted, moved or is on a
+                          disconnected drive. Install it again to play, or
+                          remove it from the library.
                         </div>
                       </>
                     ) : (
@@ -471,6 +495,8 @@ const LibraryDetailsPanel = ({
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         {hasInstalledVersions ? (
                           <DetailPill tone="warning">Needs update</DetailPill>
+                        ) : hasMissingFiles ? (
+                          <DetailPill tone="danger">Files missing</DetailPill>
                         ) : (
                           <DetailPill tone="accent">Ready to install</DetailPill>
                         )}
@@ -488,7 +514,9 @@ const LibraryDetailsPanel = ({
                             ? game.latestVersion
                               ? `Update to ${game.latestVersion}`
                               : "Update now"
-                            : "Install"}
+                            : game.latestVersion
+                              ? `Install ${game.latestVersion}`
+                              : "Install"}
                         </button>
                       </div>
                     )}
@@ -503,6 +531,7 @@ const LibraryDetailsPanel = ({
                       {versionList.map((version, versionIndex) => {
                         const versionKey = `${version.version}-${version.game_path}`;
                         const isLaunching = launchingVersionKey === versionKey;
+                        const isVersionMissing = version.isPresent === false;
                         return (
                         <div
                           key={versionKey}
@@ -515,12 +544,20 @@ const LibraryDetailsPanel = ({
                                 <span className="font-medium text-text">
                                   {version.version || "Unknown"}
                                 </span>
-                                {version.version ===
-                                  game.newestInstalledVersion && (
+                                {!isVersionMissing &&
+                                  version.version ===
+                                    game.newestInstalledVersion && (
                                   <DetailPill tone="accent">Current</DetailPill>
                                 )}
+                                {isVersionMissing && (
+                                  <DetailPill tone="danger">Folder missing</DetailPill>
+                                )}
                               </div>
-                              <div className="mt-1 break-all text-xs opacity-60">
+                              <div
+                                className={`mt-1 break-all text-xs ${
+                                  isVersionMissing ? "line-through opacity-45" : "opacity-60"
+                                }`}
+                              >
                                 {version.game_path}
                               </div>
                             </div>
@@ -529,8 +566,18 @@ const LibraryDetailsPanel = ({
                                 type="button"
                                 onClick={() => handlePlayVersion(version, versionKey)}
                                 className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-60"
-                                disabled={!version.exec_path || Boolean(launchingVersionKey)}
-                                title={version.exec_path ? `Play ${version.version || ""}`.trim() : "No executable selected for this version"}
+                                disabled={
+                                  isVersionMissing ||
+                                  !version.exec_path ||
+                                  Boolean(launchingVersionKey)
+                                }
+                                title={
+                                  isVersionMissing
+                                    ? "The install folder no longer exists"
+                                    : version.exec_path
+                                      ? `Play ${version.version || ""}`.trim()
+                                      : "No executable selected for this version"
+                                }
                               >
                                 {isLaunching ? (
                                   <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
@@ -544,8 +591,13 @@ const LibraryDetailsPanel = ({
                               <button
                                 type="button"
                                 onClick={() => onOpenFolder(version.game_path)}
-                                className="inline-flex items-center gap-1 bg-secondary px-2 py-0.5 text-xs transition hover:bg-selected"
-                                title="Open install folder"
+                                className="inline-flex items-center gap-1 bg-secondary px-2 py-0.5 text-xs transition hover:bg-selected disabled:opacity-50"
+                                disabled={isVersionMissing}
+                                title={
+                                  isVersionMissing
+                                    ? "The install folder no longer exists"
+                                    : "Open install folder"
+                                }
                               >
                                 <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                                   folder_open

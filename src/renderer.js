@@ -288,6 +288,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onGameDeleted: (callback) => {
     ipcRenderer.on("game-deleted", (event, recordId) => callback(recordId));
   },
+  onLibraryReset: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("library-reset", listener);
+    return () => ipcRenderer.removeListener("library-reset", listener);
+  },
   onF95AuthChanged: (callback) =>
     ipcRenderer.on("f95-auth-changed", (event, payload) => callback(payload)),
   onF95DownloadsChanged: (callback) =>

@@ -9,6 +9,7 @@ const scanCandidateMatchMetadataMigration = require("./006_scan_candidate_match_
 const f95ZoneMappingSiteUrlMigration = require("./007_f95_zone_mapping_site_url");
 const gameFavoritesMigration = require("./008_game_favorites");
 const cloudLibraryDeleteQueueMigration = require("./009_cloud_library_delete_queue");
+const unescapeSqlQuotesMigration = require("./010_unescape_sql_quotes");
 
 module.exports = [
   initialSchemaMigration,
@@ -20,4 +21,5 @@ module.exports = [
   f95ZoneMappingSiteUrlMigration,
   gameFavoritesMigration,
   cloudLibraryDeleteQueueMigration,
+  unescapeSqlQuotesMigration,
 ];

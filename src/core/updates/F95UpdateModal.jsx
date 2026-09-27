@@ -40,8 +40,15 @@ const F95UpdateModal = (liveProps) => {
     links.find((link) => link.url === recommendedLinkUrl) ||
     links[0] ||
     null;
-  const hasInstalledVersions =
-    Array.isArray(game?.versions) && game.versions.length > 0;
+  // "Update" only when the files are really on this PC; a record whose folder
+  // vanished gets a fresh install (the old folder cannot be updated in place).
+  const installState = window.libraryInstallState?.getLibraryInstallState
+    ? window.libraryInstallState.getLibraryInstallState(game)
+    : Array.isArray(game?.versions) && game.versions.length > 0
+      ? "installed"
+      : "not_installed";
+  const hasInstalledVersions = installState === "installed";
+  const hasMissingFiles = installState === "missing";
   const selectedIsBrowserOnly = Boolean(
     selectedLink && mirrorUi.isBrowserOnly?.(selectedLink),
   );
@@ -102,6 +109,13 @@ const F95UpdateModal = (liveProps) => {
             {thread?.creator &&
               `${thread?.version || (hasInstalledVersions && game?.newestInstalledVersion) ? " • " : ""}Creator: ${thread.creator}`}
           </div>
+          {hasMissingFiles && (
+            <div className="mt-2 text-xs text-amber-200/85">
+              The folder of this game is missing on this PC
+              {game?.lastKnownVersion ? ` (last installed: ${game.lastKnownVersion})` : ""}
+              , so it will be installed fresh into your library folder.
+            </div>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">

@@ -272,6 +272,7 @@
     deleteGameCompletely: p({ success: false }),
     deleteFolderRecursive: p({ success: false }),
     onGameDeleted: listen,
+    onLibraryReset: listenUnsub,
     onF95AuthChanged: listen,
     onF95DownloadsChanged: listen,
     onCloudAuthChanged: listenUnsub,

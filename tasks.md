@@ -4714,3 +4714,36 @@ What was done:
 Release path:
 
 - pushing to `main` triggers `.github/workflows/main.yml`, which builds Windows (NSIS) and Linux (deb, AppImage) packages and publishes the GitHub release `v1.3.1`; installed 1.3.0 apps pick it up through electron-updater
+
+## 2026-09-27 — Install presence, rescan modes, library reset, data-layer fixes
+
+What was done:
+
+- library records now carry an on-disk install state: `installed`, `missing` (folder deleted/moved/disconnected drive) or `not_installed` (cloud/thread stub). Cards show "Files missing"/"Not installed" badges, the details panel explains the state, the "Show" filter (All / Installed / Files missing / Not installed) and the status line count them
+- a game whose folder is gone is offered **Install** instead of **Update**: the package is installed into a fresh folder under the library root (the old flow tried to move the extracted archive into the dead path and failed), and the dead version rows are retired after the new version is written; `moveDirectoryIntoPlace` creates the parent folder first
+- `isUpdateAvailable`, the Updates section and the update notification only consider folders that exist; the F95 workspace reports "Files missing" for such threads
+- rescan menu now has four modes: Find New Games (incremental), Refresh Installed Games (force rescan; known folders are refreshed even without a confident catalog match and stored metadata is never downgraded), Reset Scan Cache & Rescan, Rebuild Library From Scratch… (confirmation modal, `VACUUM INTO` backup under `backups/library_index`, atomic wipe of library tables, catalog/scan folders/save vault preserved)
+- scan summary reports added / refreshed / need review / missing-files counts and warns about games with missing files
+- data layer: removed the manual `'` → `''` escaping that stored doubled apostrophes in titles, versions, paths and image paths (paths with apostrophes never existed on disk, version lookups failed); migration 010 repairs legacy rows. Folder size is computed asynchronously (the sync walker froze the window during large installs). Legacy `remove-game` IPC performs a complete removal instead of leaving orphaned versions/mappings
+
+How it was implemented:
+
+- `src/main/libraryPresence.js` (probe with timeout, cache, drive-root short-circuit; `annotateLibraryPresence`), `src/shared/libraryInstallState.js` (states, filter, labels for main + renderer), `src/main/install/installTarget.js` (`chooseInstallDirectory`, `sanitizePathSegment`), `src/main/libraryScanRequest.js` (modes, legacy flags, confirmation), `src/main/libraryReset.js` (`resetLibraryIndex`), `src/main/folderSize.js`, `src/main/db/migrations/010_unescape_sql_quotes.js`
+- `src/main.js`: `loadLibraryGames`/`loadLibraryGame` for every renderer-facing read, `resolveF95InstallTarget` via `chooseInstallDirectory`, `retireStaleVersionRows`, rewritten `scan-library` handler, `library-reset` event, `mergeRefreshedGameMetadata` in `importGamesInternal`
+- renderer: `App.jsx` (filter, modes, reset modal, missing-files guard on launch), `GameBanner.js`, `LibraryDetailsPanel.jsx`, `F95UpdateModal.jsx`, `F95BrowserWorkspace.jsx`, new `LibraryResetModal.jsx`, `renderer.js`/`web-preview-api.js` (`onLibraryReset`)
+- docs: `docs/library-install-presence.md`, `docs/library-rescan-modes.md`, `docs/library-database-integrity.md`, ADR 0008
+
+Checks:
+
+- `npm run lint`, `npm run typecheck`: clean
+- `npm test`: 456 pass, 0 fail (tests written first: libraryPresence, installTarget, libraryScanRequest, libraryInstallState, libraryReset with a real SQLite file, databaseQuoteEscaping incl. a schema-v9 database, folderSize, extended scanCandidateImportPolicy/importMetadata/migrations)
+- browser smoke (dev preview with four sample games): badges, Install vs Update, details panel for a missing game, install dialog wording, Show filter, rescan menu, rebuild confirmation calling `scanLibrary({ mode: "reset_library", confirm: true })`
+
+What remains / manual verification steps:
+
+- in Electron: delete an installed game's folder, refresh the library, confirm the card shows "Files missing" and Install reinstalls into the library folder while the old version row disappears
+- run "Rebuild Library From Scratch…" on a real profile and check `backups/library_index/*.db` and that scan folders/catalog survive
+- a library on a disconnected network share should load with the games shown as installed (unknown presence) after a single 1.5 s timeout per share
+- not committed: changes are in the working tree on `main`
+
+Current stage progress: this slice 100%; overall roadmap estimate 97% → 98% (library integrity and rescan flows closed).

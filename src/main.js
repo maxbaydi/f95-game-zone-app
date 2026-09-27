@@ -26,8 +26,23 @@ const {
 const { extractArchiveSafely } = require("./main/archive/extractArchive");
 const { toStoredImagePath } = require("./main/assetPaths");
 const { createAppUpdaterController } = require("./main/appUpdater");
-const { mergeImportedGameMetadata } = require("./main/importMetadata");
+const {
+  mergeImportedGameMetadata,
+  mergeRefreshedGameMetadata,
+} = require("./main/importMetadata");
 const { resolveArchiveContentRoot } = require("./main/install/archiveLayout");
+const {
+  chooseInstallDirectory,
+  sanitizePathSegment,
+} = require("./main/install/installTarget");
+const { annotateLibraryPresence } = require("./main/libraryPresence");
+const { normalizeLibraryScanRequest } = require("./main/libraryScanRequest");
+const { resetLibraryIndex } = require("./main/libraryReset");
+const { getFolderSizeAsync } = require("./main/folderSize");
+const {
+  LIBRARY_INSTALL_STATES,
+  countLibraryInstallStates,
+} = require("./shared/libraryInstallState");
 const {
   selectPreferredExecutable,
 } = require("./main/install/selectExecutable");
@@ -158,7 +173,6 @@ const {
   addAtlasMapping,
   getGame,
   getGames,
-  removeGame,
   checkDbUpdates,
   updateFolderSize,
   getBannerUrl,
@@ -544,7 +558,7 @@ async function runLibraryUpdateRefresh(reason = "manual") {
           Number(result?.total || 0) > 0 &&
           config?.Notifications?.libraryUpdates !== false;
         await libraryUpdateNotificationController.syncFromAllGames({
-          getGames: () => getGames(appPaths, 0, null),
+          getGames: () => loadLibraryGames(),
           allowNotify,
           reason,
         });
@@ -585,18 +599,6 @@ function resolveEngineLabel(...values) {
   }
 
   return "Unknown";
-}
-
-function sanitizePathSegment(value, fallback = "Unknown") {
-  const normalized = String(value || "")
-    .split("")
-    .filter((character) => character.charCodeAt(0) >= 32)
-    .join("")
-    .replace(/[<>:"/\\|?*]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return normalized || fallback;
 }
 
 function ensureUniquePath(basePath) {
@@ -647,11 +649,37 @@ function getConfiguredLibraryFolder() {
   return libraryFolder;
 }
 
+/**
+ * Library games with on-disk presence: `installState`, `versions[].isPresent`
+ * and an `isUpdateAvailable` that ignores folders that no longer exist.
+ * Every renderer-facing read of the library goes through here.
+ */
+async function loadLibraryGames() {
+  return annotateLibraryPresence(await getGames(appPaths, 0, null));
+}
+
+async function loadLibraryGame(recordId) {
+  const game = await getGame(recordId, appPaths);
+  if (!game) {
+    return null;
+  }
+  const [annotated] = await annotateLibraryPresence([game]);
+  return annotated || game;
+}
+
 function getPreferredInstalledPath(game) {
   const versions = Array.isArray(game?.versions) ? [...game.versions] : [];
   versions.sort(
     (left, right) => (right.date_added || 0) - (left.date_added || 0),
   );
+
+  // Prefer a folder that still exists; fall back to the newest recorded one.
+  const presentVersion = versions.find(
+    (version) => version?.game_path && version.isPresent !== false,
+  );
+  if (presentVersion) {
+    return presentVersion.game_path;
+  }
 
   for (const version of versions) {
     if (version?.game_path) {
@@ -726,7 +754,7 @@ function findMatchingLibraryGame(libraryGames, metadata, fallbackName = "") {
 }
 
 async function getF95ThreadInstallState(input) {
-  const libraryGames = await getGames(appPaths, 0, null);
+  const libraryGames = await loadLibraryGames();
   const parsedTitle = parseF95ThreadTitle(input?.rawTitle || "");
   const existingGame = findMatchingLibraryGame(
     libraryGames,
@@ -742,6 +770,7 @@ async function getF95ThreadInstallState(input) {
     return {
       inLibrary: false,
       installed: false,
+      installState: LIBRARY_INSTALL_STATES.NOT_INSTALLED,
       recordId: null,
       title: parsedTitle.title || "",
       creator: parsedTitle.creator || "",
@@ -750,10 +779,15 @@ async function getF95ThreadInstallState(input) {
     };
   }
 
+  const installState =
+    existingGame.installState || LIBRARY_INSTALL_STATES.NOT_INSTALLED;
+
   return {
     inLibrary: true,
-    installed:
-      Array.isArray(existingGame.versions) && existingGame.versions.length > 0,
+    // "Installed" means the files are actually on this PC; a record whose
+    // folder vanished is offered a fresh install instead of an update.
+    installed: installState === LIBRARY_INSTALL_STATES.INSTALLED,
+    installState,
     recordId: existingGame.record_id,
     title:
       existingGame.displayTitle ||
@@ -775,40 +809,46 @@ async function getF95ThreadInstallState(input) {
   };
 }
 
+/**
+ * Where a downloaded package goes. An existing folder of the same library
+ * record is reused only while it still exists; a record whose files are gone
+ * gets a fresh install under the library folder and its dead version rows are
+ * reported as `staleInstallPaths`.
+ */
 async function resolveF95InstallTarget(metadata, fallbackName) {
-  const libraryGames = await getGames(appPaths, 0, null);
+  const libraryGames = await loadLibraryGames();
   const existingGame = findMatchingLibraryGame(
     libraryGames,
     metadata,
     fallbackName,
   );
+  const target = chooseInstallDirectory({
+    existingGame,
+    libraryFolder: getConfiguredLibraryFolder(),
+    folderName: sanitizePathSegment(metadata?.title, fallbackName),
+  });
 
-  const stableFolderName = sanitizePathSegment(metadata?.title, fallbackName);
-  const desiredInstallPath = path.join(
-    getConfiguredLibraryFolder(),
-    stableFolderName,
-  );
-
-  if (existingGame) {
-    const existingPath = getPreferredInstalledPath(existingGame);
-    if (existingPath) {
-      return {
-        installDirectory: existingPath,
-        existingGame,
-      };
-    }
+  if (existingGame && !target.reusedExisting && target.staleInstallPaths.length) {
+    console.log("[f95.install] Recorded install folders are missing, installing fresh:", {
+      recordId: existingGame.record_id,
+      staleInstallPaths: target.staleInstallPaths,
+      installDirectory: target.installDirectory,
+    });
   }
 
   return {
-    installDirectory: fs.existsSync(desiredInstallPath)
-      ? ensureUniquePath(desiredInstallPath)
-      : desiredInstallPath,
+    installDirectory: target.installDirectory,
     existingGame: existingGame || null,
+    reusedExisting: target.reusedExisting,
+    staleInstallPaths: target.staleInstallPaths,
   };
 }
 
 async function moveDirectoryIntoPlace(sourceDirectory, targetDirectory) {
   if (!fs.existsSync(targetDirectory)) {
+    // The parent may be gone too (deleted library folder, drive letter that
+    // changed): rename() does not create it and fails with ENOENT.
+    await fs.promises.mkdir(path.dirname(targetDirectory), { recursive: true });
     try {
       await fs.promises.rename(sourceDirectory, targetDirectory);
       return targetDirectory;
@@ -2813,13 +2853,43 @@ async function installF95PackageFromFile(context, inspected) {
   });
 }
 
+/**
+ * Version rows that point at folders which no longer exist are retired once
+ * the game has been installed into a fresh folder (the old rows would keep
+ * showing a dead install next to the new one).
+ */
+async function retireStaleVersionRows(recordId, staleInstallPaths) {
+  let retired = 0;
+  for (const stalePath of Array.isArray(staleInstallPaths) ? staleInstallPaths : []) {
+    if (!stalePath || fs.existsSync(stalePath)) {
+      continue;
+    }
+    try {
+      retired += await deleteVersionsForRecordPath(recordId, stalePath);
+    } catch (error) {
+      console.warn("[f95.install] Failed to retire a stale version row:", {
+        recordId,
+        stalePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (retired > 0) {
+    console.log("[f95.install] Retired stale version rows after a fresh install:", {
+      recordId,
+      retired,
+    });
+  }
+  return retired;
+}
+
 async function persistF95InstalledGame(payload) {
   const atlasMetadata =
     payload.atlasMetadata ||
     (await prepareDownloadedGameMetadata(payload.metadata));
   const installedFolderSize =
     payload.installDirectory && fs.existsSync(payload.installDirectory)
-      ? getFolderSize(payload.installDirectory)
+      ? await getFolderSizeAsync(payload.installDirectory)
       : 0;
   const gameRecord = {
     title: payload.title,
@@ -2862,6 +2932,12 @@ async function persistF95InstalledGame(payload) {
       },
       payload.existingGame.record_id,
     );
+    if (!payload.reusedExisting) {
+      await retireStaleVersionRows(
+        payload.existingGame.record_id,
+        payload.staleInstallPaths,
+      );
+    }
 
     if (
       gameRecord.atlasId &&
@@ -3144,6 +3220,8 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       detectedEngine,
       executables: executables.map((value) => ({ key: value, value })),
       existingGame: installTarget.existingGame,
+      reusedExisting: installTarget.reusedExisting,
+      staleInstallPaths: installTarget.staleInstallPaths,
       gameExtensions,
       atlasMetadata,
     });
@@ -3182,6 +3260,8 @@ async function importDownloadedF95Package(downloadPath, metadata) {
     detectedEngine,
     executables: [{ key: relativeExecutable, value: relativeExecutable }],
     existingGame: installTarget.existingGame,
+    reusedExisting: installTarget.reusedExisting,
+    staleInstallPaths: installTarget.staleInstallPaths,
     gameExtensions,
     atlasMetadata,
   });
@@ -3624,11 +3704,12 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
 
 ipcMain.handle("get-game", async (event, recordId) => {
   console.log("Resolved writable root", appPaths.root);
-  return await getGame(recordId, appPaths);
+  return await loadLibraryGame(recordId);
 });
 
 ipcMain.handle("get-games", async (event, { offset, limit }) => {
-  return await getGames(appPaths, offset, limit);
+  const games = await getGames(appPaths, offset, limit);
+  return annotateLibraryPresence(games);
 });
 
 ipcMain.handle("set-game-favorite", async (_event, payload) => {
@@ -3644,7 +3725,7 @@ ipcMain.handle("set-game-favorite", async (_event, payload) => {
 
   try {
     await setGameFavorite(recordId, isFavorite);
-    const game = await getGame(recordId, appPaths);
+    const game = await loadLibraryGame(recordId);
 
     if (!game) {
       return {
@@ -3666,8 +3747,14 @@ ipcMain.handle("set-game-favorite", async (_event, payload) => {
   }
 });
 
+// Legacy channel. It used to delete only the games row and left versions,
+// mappings and images orphaned; it now performs the complete removal.
 ipcMain.handle("remove-game", async (event, record_id) => {
-  return removeGame(record_id);
+  const result = await deleteGameCompletely(record_id, appPaths);
+  if (result.success) {
+    broadcastGameDeleted(record_id);
+  }
+  return result;
 });
 
 ipcMain.handle("unzip-game", async (event, { zipPath, extractPath }) => {
@@ -5566,7 +5653,7 @@ const importGamesInternal = async (params) => {
       }
 
       if (scanSize) {
-        size = getFolderSize(gamePath);
+        size = await getFolderSizeAsync(gamePath);
       }
 
       const add = {
@@ -5589,6 +5676,18 @@ const importGamesInternal = async (params) => {
 
       if (existingGame?.record_id) {
         console.log("Updating existing game for imported path");
+        // A rescan must not downgrade a record that already has good
+        // metadata (Atlas match, user edits) just because the folder name
+        // parses badly; the folder's files and version are still refreshed.
+        const refreshed = mergeRefreshedGameMetadata(existingGame, {
+          ...resolvedGame,
+          folder: gamePath,
+        });
+        add.title = refreshed.title;
+        add.creator = refreshed.creator;
+        add.engine = refreshed.engine;
+        versionPayload.version = refreshed.version;
+        resolvedGame.version = refreshed.version;
         await updateGame({
           record_id: existingGame.record_id,
           title: add.title,
@@ -5845,25 +5944,71 @@ function getDefaultLibraryScanParams() {
   };
 }
 
-function normalizeScanLibraryRequest(request) {
-  const normalizedRequest =
-    request && typeof request === "object" ? request : {};
-  const resetCache = Boolean(normalizedRequest.resetCache);
+function sendLibraryScanProgress(text, progress = 0, total = 1) {
+  mainWindow?.webContents.send("import-progress", { text, progress, total });
+}
 
-  return {
-    resetCache,
-    forceRescan: resetCache || Boolean(normalizedRequest.forceRescan),
-  };
+/**
+ * Folders the library already owns: a rescan refreshes them in place instead
+ * of parking them in the review queue when the Atlas match is not confident.
+ */
+function buildKnownLibraryPathLookup(games) {
+  const index = buildLibraryPathIndex(games);
+  return (folder) => index.has(normalizePathKey(folder));
+}
+
+function buildLibraryScanSummaryText(input) {
+  const parts = [];
+  if (input.imported > 0) {
+    parts.push(`${input.imported} new game(s) added`);
+  }
+  if (input.refreshed > 0) {
+    parts.push(`${input.refreshed} installed game(s) refreshed`);
+  }
+  if (input.reviewQueued > 0) {
+    parts.push(`${input.reviewQueued} candidate(s) need review`);
+  }
+  if (input.duplicateRecordsRemoved > 0) {
+    parts.push(`${input.duplicateRecordsRemoved} duplicate(s) cleaned`);
+  }
+  if (input.missingCount > 0) {
+    parts.push(
+      `${input.missingCount} library game(s) have missing files (use the "Files missing" filter)`,
+    );
+  }
+  if (input.warningsCount > 0) {
+    parts.push(`${input.warningsCount} warning(s)`);
+  }
+  if (parts.length === 0) {
+    parts.push(
+      input.scanned > 0
+        ? "everything is already up to date"
+        : "no new games found",
+    );
+  }
+  return `Scan complete. ${parts.join(", ")}.`;
 }
 
 ipcMain.handle("scan-library", async (event, request) => {
+  const scanRequest = normalizeLibraryScanRequest(request);
+
+  if (scanRequest.resetLibrary && !scanRequest.confirmed) {
+    return {
+      success: false,
+      error: "Rebuilding the library needs an explicit confirmation.",
+      errorCode: "LIBRARY_RESET_NOT_CONFIRMED",
+      mode: scanRequest.mode,
+      warningsCount: 0,
+      imported: 0,
+      scanned: 0,
+    };
+  }
+
   const sessionResult = beginScanSession(event.sender, "library_scan");
 
   if (!sessionResult.success) {
     return sessionResult;
   }
-
-  const scanRequest = normalizeScanLibraryRequest(request);
 
   const scanRelay = {
     webContents: {
@@ -5897,32 +6042,65 @@ ipcMain.handle("scan-library", async (event, request) => {
     },
   };
 
-  try {
-    if (scanRequest.resetCache) {
-      mainWindow.webContents.send("import-progress", {
-        text: "Resetting library scan cache...",
-        progress: 0,
-        total: 1,
-      });
+  let libraryReset = null;
 
-      const resetResult = await resetScanCache(appPaths);
+  try {
+    if (scanRequest.resetLibrary) {
+      sendLibraryScanProgress("Backing up and clearing the library index...");
+
+      const resetResult = await resetLibraryIndex({
+        appPaths,
+        db: databaseConnection,
+      });
       if (!resetResult.success) {
         return {
           success: false,
           error: resetResult.error.message,
+          errorCode: resetResult.error.code,
+          mode: scanRequest.mode,
           warningsCount: 0,
           imported: 0,
           scanned: 0,
         };
       }
 
-      mainWindow.webContents.send("import-progress", {
-        text: `Library scan cache reset: ${resetResult.clearedCandidates} candidates and ${resetResult.clearedJobs} jobs cleared`,
-        progress: 0,
-        total: 1,
+      libraryReset = {
+        clearedGames: resetResult.cleared.games || 0,
+        clearedVersions: resetResult.cleared.versions || 0,
+        backupPath: resetResult.backupPath,
+      };
+      console.log("[library.reset] Library index cleared", {
+        ...libraryReset,
+        cleared: resetResult.cleared,
+        removedImageDirectories: resetResult.removedImageDirectories.length,
       });
+      mainWindow?.webContents.send("library-reset", libraryReset);
+      sendLibraryScanProgress(
+        `Library index cleared: ${libraryReset.clearedGames} game(s) removed, backup saved. Scanning from scratch...`,
+      );
+    } else if (scanRequest.resetCache) {
+      sendLibraryScanProgress("Resetting library scan cache...");
+
+      const resetResult = await resetScanCache(appPaths);
+      if (!resetResult.success) {
+        return {
+          success: false,
+          error: resetResult.error.message,
+          mode: scanRequest.mode,
+          warningsCount: 0,
+          imported: 0,
+          scanned: 0,
+        };
+      }
+
+      sendLibraryScanProgress(
+        `Library scan cache reset: ${resetResult.clearedCandidates} candidates and ${resetResult.clearedJobs} jobs cleared`,
+      );
     }
 
+    const knownPathLookup = scanRequest.forceRescan
+      ? buildKnownLibraryPathLookup(await getGames(appPaths, 0, null))
+      : null;
     const defaultLibraryScanParams = getDefaultLibraryScanParams();
     const scanResult = await startEnabledSourcesScan(scanRelay, appPaths, {
       ...defaultLibraryScanParams,
@@ -5932,102 +6110,100 @@ ipcMain.handle("scan-library", async (event, request) => {
 
     if (
       !scanResult.success &&
-      (!scanResult.games || scanResult.games.length === 0)
+      (!scanResult.games || scanResult.games.length === 0) &&
+      !scanResult.cancelled
     ) {
-      return scanResult;
+      return { ...scanResult, mode: scanRequest.mode, libraryReset };
     }
 
     if (scanResult.cancelled) {
-      mainWindow.webContents.send("import-progress", {
-        text: "Library rescan cancelled",
-        progress: 0,
-        total: 1,
-      });
+      sendLibraryScanProgress("Library rescan cancelled");
       return {
         success: false,
         cancelled: true,
+        mode: scanRequest.mode,
         warningsCount: scanResult.warningsCount || 0,
         imported: 0,
         scanned: scanResult.games?.length || 0,
+        libraryReset,
       };
     }
 
-    if (!scanResult.games || scanResult.games.length === 0) {
-      const duplicateCleanup = await runLibraryDuplicateCleanup();
-      mainWindow.webContents.send("import-progress", {
-        text:
-          scanResult.warningsCount > 0
-            ? `Scan complete. No new games found. Warnings: ${scanResult.warningsCount}${duplicateCleanup.removed.length > 0 ? `. Duplicates cleaned: ${duplicateCleanup.removed.length}` : ""}`
-            : `Scan complete. No new games found${duplicateCleanup.removed.length > 0 ? `. Duplicates cleaned: ${duplicateCleanup.removed.length}` : ""}.`,
-        progress: 0,
-        total: 0,
-      });
-      return {
-        success: true,
-        warningsCount: scanResult.warningsCount || 0,
-        imported: 0,
-        scanned: 0,
-        duplicateRecordsRemoved: duplicateCleanup.removed.length,
-      };
-    }
-
+    const scannedGames = Array.isArray(scanResult.games) ? scanResult.games : [];
     const { importableGames, reviewGames } = splitAutoImportableScanGames(
-      scanResult.games,
+      scannedGames,
+      knownPathLookup ? { isKnownPath: knownPathLookup } : {},
     );
 
-    if (importableGames.length === 0) {
-      const duplicateCleanup = await runLibraryDuplicateCleanup();
-      mainWindow.webContents.send("import-progress", {
-        text:
-          reviewGames.length > 0
-            ? `Scan complete. ${reviewGames.length} candidate(s) need review before import.${duplicateCleanup.removed.length > 0 ? ` Duplicates cleaned: ${duplicateCleanup.removed.length}.` : ""}`
-            : `Scan complete. No auto-importable games found.${duplicateCleanup.removed.length > 0 ? ` Duplicates cleaned: ${duplicateCleanup.removed.length}.` : ""}`,
-        progress: 0,
-        total: scanResult.games.length || 0,
-      });
+    let importResults = [];
+    if (importableGames.length > 0) {
+      if (reviewGames.length > 0) {
+        sendLibraryScanProgress(
+          `${reviewGames.length} candidate(s) need review and will not be auto-imported.`,
+          0,
+          scannedGames.length,
+        );
+      }
 
-      return {
-        success: true,
-        warningsCount: scanResult.warningsCount || 0,
-        scanned: scanResult.games.length,
-        imported: 0,
-        reviewQueued: reviewGames.length,
-        errorsCount: scanResult.errorsCount || 0,
-        duplicateRecordsRemoved: duplicateCleanup.removed.length,
-      };
-    }
-
-    if (reviewGames.length > 0) {
-      mainWindow.webContents.send("import-progress", {
-        text: `${reviewGames.length} candidate(s) need review and will not be auto-imported.`,
-        progress: 0,
-        total: scanResult.games.length || 0,
+      importResults = await importGamesInternal({
+        games: importableGames,
+        deleteAfter: false,
+        scanSize: false,
+        downloadBannerImages: defaultLibraryScanParams.downloadBannerImages,
+        downloadPreviewImages: defaultLibraryScanParams.downloadPreviewImages,
+        previewLimit: defaultLibraryScanParams.previewLimit,
+        downloadVideos: false,
+        gameExt: defaultLibraryScanParams.gameExt,
+        moveToDefaultFolder: false,
+        format: "",
       });
     }
 
-    const importResults = await importGamesInternal({
-      games: importableGames,
-      deleteAfter: false,
-      scanSize: false,
-      downloadBannerImages: defaultLibraryScanParams.downloadBannerImages,
-      downloadPreviewImages: defaultLibraryScanParams.downloadPreviewImages,
-      previewLimit: defaultLibraryScanParams.previewLimit,
-      downloadVideos: false,
-      gameExt: defaultLibraryScanParams.gameExt,
-      moveToDefaultFolder: false,
-      format: "",
-    });
     const duplicateCleanup = await runLibraryDuplicateCleanup();
+    const presenceCounts = countLibraryInstallStates(await loadLibraryGames());
 
-    return {
+    let imported = 0;
+    let refreshed = 0;
+    importResults.forEach((result, index) => {
+      if (!result?.success) {
+        return;
+      }
+      if (importableGames[index]?.refreshExisting) {
+        refreshed += 1;
+      } else {
+        imported += 1;
+      }
+    });
+
+    const summary = {
       success: scanResult.success,
+      mode: scanRequest.mode,
       warningsCount: scanResult.warningsCount || 0,
-      scanned: scanResult.games.length,
-      imported: importResults.filter((item) => item.success).length,
+      scanned: scannedGames.length,
+      imported,
+      refreshed,
       reviewQueued: reviewGames.length,
       errorsCount: scanResult.errorsCount || 0,
       duplicateRecordsRemoved: duplicateCleanup.removed.length,
+      installedCount: presenceCounts.installed,
+      missingCount: presenceCounts.missing,
+      notInstalledCount: presenceCounts.not_installed,
+      libraryReset,
     };
+
+    if (summary.missingCount > 0) {
+      console.warn("[library.scan] Library games with missing install folders:", {
+        missingCount: summary.missingCount,
+      });
+    }
+
+    sendLibraryScanProgress(
+      buildLibraryScanSummaryText(summary),
+      imported + refreshed,
+      scannedGames.length || 0,
+    );
+
+    return summary;
   } finally {
     endScanSession(event.sender);
   }
@@ -6197,21 +6373,6 @@ function pickPreferredThreadLink(threadUrl, links) {
   );
 }
 
-function getFolderSize(dir) {
-  let size = 0;
-  const stack = [dir];
-  while (stack.length) {
-    const current = stack.pop();
-    const stat = fs.statSync(current);
-    if (stat.isDirectory()) {
-      fs.readdirSync(current).forEach((f) => stack.push(path.join(current, f)));
-    } else {
-      size += stat.size;
-    }
-  }
-  return size;
-}
-
 function getVersionsMissingStoredFolderSize(limit = 200) {
   return new Promise((resolve, reject) => {
     getDb().all(
@@ -6261,7 +6422,7 @@ async function backfillMissingVersionFolderSizes(limit = 200) {
 
     let size = 0;
     try {
-      size = getFolderSize(gamePath);
+      size = await getFolderSizeAsync(gamePath);
     } catch (error) {
       console.warn("[library.size] Failed to read game folder size:", {
         recordId,
