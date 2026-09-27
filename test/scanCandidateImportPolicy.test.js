@@ -6,10 +6,36 @@ const {
   splitAutoImportableScanGames,
 } = require("../src/main/scanCandidateImportPolicy");
 
-test("shouldAutoImportScanGame only allows matched scan results", () => {
+test("shouldAutoImportScanGame allows matched results and strong unmatched detections", () => {
   assert.equal(shouldAutoImportScanGame({ matchStatus: "matched" }), true);
   assert.equal(shouldAutoImportScanGame({ matchStatus: "ambiguous" }), false);
   assert.equal(shouldAutoImportScanGame({ matchStatus: "unmatched" }), false);
+  assert.equal(shouldAutoImportScanGame({ matchStatus: "unmatched", detectionScore: 39 }), false);
+  assert.equal(shouldAutoImportScanGame({ matchStatus: "unmatched", detectionScore: 40 }), true);
+  assert.equal(shouldAutoImportScanGame({ matchStatus: "ambiguous", detectionScore: 65 }), true);
+  assert.equal(
+    shouldAutoImportScanGame({ matchStatus: "unmatched", detectionScore: 80, isArchive: true }),
+    false,
+    "archives are never imported without a catalog match",
+  );
+  assert.equal(
+    shouldAutoImportScanGame({ matchStatus: "unmatched", detectionScore: 40 }, { minUnmatchedDetectionScore: 50 }),
+    false,
+  );
+});
+
+test("splitAutoImportableScanGames flags unmatched imports so the summary can count them", () => {
+  const result = splitAutoImportableScanGames([
+    { title: "Strong unmatched", matchStatus: "unmatched", detectionScore: 55, folder: "C:\\a" },
+    { title: "Weak unmatched", matchStatus: "unmatched", detectionScore: 25, folder: "C:\\b" },
+    { title: "Matched", matchStatus: "matched", detectionScore: 55, folder: "C:\\c" },
+  ]);
+
+  assert.deepEqual(
+    result.importableGames.map((game) => [game.title, Boolean(game.importUnmatched)]),
+    [["Strong unmatched", true], ["Matched", false]],
+  );
+  assert.deepEqual(result.reviewGames.map((game) => game.title), ["Weak unmatched"]);
 });
 
 test("splitAutoImportableScanGames separates review queue from auto-imports", () => {

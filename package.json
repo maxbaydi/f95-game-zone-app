@@ -1,6 +1,6 @@
 {
   "name": "f95launcher",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
@@ -43,7 +43,6 @@
       "src/index.html",
       "src/settings.html",
       "src/importer.html",
-      "src/gamedetails.html",
       "src/renderer.js",
       "src/App.jsx",
       "src/shared/**/*",
@@ -52,7 +51,6 @@
       "src/core/scanners/**/*",
       "src/core/importer/**/*",
       "src/core/settings/**/*",
-      "src/core/banner/**/*",
       "package.json",
       "node_modules/7zip-bin/**/*",
       "node_modules/sqlite3/**/*",

@@ -470,6 +470,211 @@ const ExtensionChipsEditor = ({
   );
 };
 
+const LIBRARY_BACKUPS_VISIBLE_DEFAULT = 5;
+
+const libraryBackupDateText = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Unknown date"
+    : date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+};
+
+const libraryBackupGamesText = (count) =>
+  typeof count === "number"
+    ? `${count} ${count === 1 ? "game" : "games"}`
+    : "Game count unknown";
+
+const libraryBackupsConfirm = (options) =>
+  window.AtlasUI?.confirm
+    ? window.AtlasUI.confirm(options)
+    : Promise.resolve(window.confirm(options.message));
+
+/**
+ * Library backups: snapshots of the library list that can be restored. One is
+ * saved automatically before "Rebuild Library From Scratch".
+ */
+const LibraryBackupsCard = () => {
+  const [backups, setBackups] = React.useState(null);
+  const [busyKey, setBusyKey] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [notice, setNotice] = React.useState("");
+  const [showAll, setShowAll] = React.useState(false);
+
+  const loadBackups = React.useCallback(async () => {
+    try {
+      const list = await window.electronAPI.listLibraryBackups();
+      setBackups(Array.isArray(list) ? list : []);
+    } catch (loadError) {
+      console.error("[library.backups] Listing backups failed:", loadError);
+      setBackups([]);
+      setError("Couldn't load the list of backups.");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadBackups();
+  }, [loadBackups]);
+
+  const backUpNow = async () => {
+    setBusyKey("create");
+    setError("");
+    setNotice("");
+    try {
+      const result = await window.electronAPI.createLibraryBackup();
+      if (!result?.success) {
+        setError(
+          librarySettingsErrorText(result, "The library could not be backed up."),
+        );
+        return;
+      }
+      setNotice("Backup saved.");
+      await loadBackups();
+    } catch (createError) {
+      console.error("[library.backups] Backup failed:", createError);
+      setError("The library could not be backed up.");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const restoreBackup = async (backup) => {
+    const confirmed = await libraryBackupsConfirm({
+      title: "Restore this backup?",
+      message:
+        `Your current library is backed up first, then replaced with the library from ` +
+        `${libraryBackupDateText(backup.createdAt)} (${libraryBackupGamesText(backup.gameCount).toLowerCase()}).\n\n` +
+        "Game files and saves are not touched.",
+      confirmLabel: "Restore",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyKey(`restore:${backup.path}`);
+    setError("");
+    setNotice("");
+    try {
+      const result = await window.electronAPI.restoreLibraryBackup({
+        backupPath: backup.path,
+      });
+      if (!result?.success) {
+        setError(
+          librarySettingsErrorText(result, "This backup could not be restored."),
+        );
+        return;
+      }
+      const restoredText = libraryBackupGamesText(Number(result.restoredGames) || 0);
+      setNotice(
+        `Library restored: ${restoredText}. Banners are downloaded again in the background.`,
+      );
+      window.AtlasUI?.toast?.success(`${restoredText} restored to your library.`, {
+        title: "Library restored",
+      });
+      await loadBackups();
+    } catch (restoreError) {
+      console.error("[library.backups] Restore failed:", restoreError);
+      setError("This backup could not be restored.");
+    } finally {
+      setBusyKey("");
+    }
+  };
+
+  const visibleBackups = Array.isArray(backups)
+    ? showAll
+      ? backups
+      : backups.slice(0, LIBRARY_BACKUPS_VISIBLE_DEFAULT)
+    : [];
+  const hiddenCount = Array.isArray(backups)
+    ? backups.length - visibleBackups.length
+    : 0;
+  const formatBytes = window.settingsKit?.formatBytes || ((value) => `${value} B`);
+
+  return (
+    <window.SettingsCard
+      icon="settings_backup_restore"
+      title="Library backups"
+      description="Snapshots of your library list: games, versions, favorites and links. One is saved automatically before the library is rebuilt. Game files and saves are not part of it."
+      actions={
+        <window.SettingsButton
+          icon="backup"
+          busy={busyKey === "create"}
+          disabled={Boolean(busyKey)}
+          onClick={backUpNow}
+        >
+          Back up now
+        </window.SettingsButton>
+      }
+    >
+      {error && (
+        <div className="flex items-center gap-2 bg-red-500/10 px-5 py-3 text-xs text-red-100" role="alert">
+          <span className="material-symbols-outlined text-[16px] leading-none">
+            error
+          </span>
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="flex items-center gap-2 bg-emerald-500/10 px-5 py-3 text-xs text-emerald-100" role="status">
+          <span className="material-symbols-outlined text-[16px] leading-none">
+            check_circle
+          </span>
+          {notice}
+        </div>
+      )}
+      {backups === null ? (
+        <div className="px-5 py-4 text-xs text-text/55">Loading backups...</div>
+      ) : backups.length === 0 ? (
+        <div className="px-5 py-4 text-sm text-text/65">
+          No backups yet. Press Back up now to save one; a backup is also made
+          automatically before the library is rebuilt from scratch.
+        </div>
+      ) : (
+        <>
+          {visibleBackups.map((backup) => (
+            <div
+              key={backup.path}
+              className="flex flex-wrap items-center gap-3 px-5 py-3"
+            >
+              <span className="material-symbols-outlined text-[20px] leading-none text-text/60">
+                inventory_2
+              </span>
+              <div className="min-w-[200px] flex-1">
+                <div className="text-sm text-text">
+                  {libraryBackupDateText(backup.createdAt)}
+                </div>
+                <div className="mt-0.5 text-[11px] text-text/55">
+                  {libraryBackupGamesText(backup.gameCount)} ·{" "}
+                  {formatBytes(backup.sizeBytes)}
+                </div>
+              </div>
+              <window.SettingsButton
+                icon="settings_backup_restore"
+                busy={busyKey === `restore:${backup.path}`}
+                disabled={Boolean(busyKey)}
+                onClick={() => restoreBackup(backup)}
+              >
+                Restore…
+              </window.SettingsButton>
+            </div>
+          ))}
+          {(hiddenCount > 0 || showAll) && backups.length > LIBRARY_BACKUPS_VISIBLE_DEFAULT && (
+            <div className="px-5 py-2">
+              <window.SettingsButton
+                variant="ghost"
+                icon={showAll ? "expand_less" : "expand_more"}
+                onClick={() => setShowAll((previous) => !previous)}
+              >
+                {showAll ? "Show fewer" : `Show ${hiddenCount} older`}
+              </window.SettingsButton>
+            </div>
+          )}
+        </>
+      )}
+    </window.SettingsCard>
+  );
+};
+
 const LibrarySettings = ({ settings, appInfo, onScanNow, isScanRunning }) => {
   const library = settings.config?.Library || {};
   const gameFolder = String(library.gameFolder || "").trim();
@@ -555,6 +760,8 @@ const LibrarySettings = ({ settings, appInfo, onScanNow, isScanRunning }) => {
         isScanRunning={isScanRunning}
         markSaved={settings.markSaved}
       />
+
+      <LibraryBackupsCard />
 
       <window.SettingsCard
         icon="data_object"

@@ -379,6 +379,52 @@ async function reconcileLibraryDuplicateGamePaths(input) {
   };
 }
 
+/**
+ * What a duplicate cleanup did, per install folder, in a form the scan summary
+ * can show: which record was kept and which duplicate entries were merged into
+ * it (or could not be merged).
+ *
+ * `cleanup` is the result of `reconcileLibraryDuplicateGamePaths`:
+ * `groups[].winner/losers` carry `recordId` and `title`, `removed[]` and
+ * `failed[]` carry `loserRecordId`.
+ *
+ * @param {{ groups?: any[], removed?: any[], failed?: any[] } | null | undefined} cleanup
+ * @returns {Array<{ gamePath: string, keptRecordId: number, keptTitle: string, mergedTitles: string[], failedTitles: string[] }>}
+ */
+function summarizeDuplicateCleanup(cleanup) {
+  if (!cleanup || !Array.isArray(cleanup.groups)) {
+    return [];
+  }
+
+  const removedIds = new Set(
+    (Array.isArray(cleanup.removed) ? cleanup.removed : []).map((entry) =>
+      Number(entry?.loserRecordId),
+    ),
+  );
+  const failedIds = new Set(
+    (Array.isArray(cleanup.failed) ? cleanup.failed : []).map((entry) =>
+      Number(entry?.loserRecordId),
+    ),
+  );
+
+  return cleanup.groups
+    .map((group) => {
+      const losers = Array.isArray(group?.losers) ? group.losers : [];
+      return {
+        gamePath: String(group?.gamePath || ""),
+        keptRecordId: Number(group?.winner?.recordId),
+        keptTitle: String(group?.winner?.title || ""),
+        mergedTitles: losers
+          .filter((loser) => removedIds.has(Number(loser?.recordId)))
+          .map((loser) => String(loser?.title || "")),
+        failedTitles: losers
+          .filter((loser) => failedIds.has(Number(loser?.recordId)))
+          .map((loser) => String(loser?.title || "")),
+      };
+    })
+    .filter((group) => group.mergedTitles.length > 0 || group.failedTitles.length > 0);
+}
+
 module.exports = {
   buildLibraryPathIndex,
   choosePreferredDuplicateRecord,
@@ -387,4 +433,5 @@ module.exports = {
   normalizePathKey,
   reconcileLibraryDuplicateGamePaths,
   scoreGameForDuplicateResolution,
+  summarizeDuplicateCleanup,
 };

@@ -35,8 +35,6 @@
 │   │   └── themes
 │   │       (empty directory)
 │   ├── core
-│   │   ├── banner
-│   │   │   └── GameDetailsWindow.jsx (44944 bytes)
 │   │   ├── GameBanner.js (11984 bytes)
 │   │   ├── importer
 │   │   │   └── importer.jsx (36483 bytes)
@@ -80,7 +78,6 @@
 │   │       ├── 1769261089.update (954605 bytes)
 │   │       └── 1769282572.update (909584 bytes)
 │   ├── database.js (42584 bytes)
-│   ├── gamedetails.html (762 bytes)
 │   ├── index.html (1282 bytes)
 │   ├── launchers
 │   │   (empty directory)
