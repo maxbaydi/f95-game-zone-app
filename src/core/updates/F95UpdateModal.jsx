@@ -25,6 +25,8 @@ const F95UpdateModal = (liveProps) => {
     captchaUrl,
     attemptEvents,
     selectedLinkUrl,
+    needsLogin,
+    onSignIn,
     onSelectLink,
     onSolveCaptcha,
     onConfirm,
@@ -119,7 +121,27 @@ const F95UpdateModal = (liveProps) => {
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
-          {isLoading ? (
+          {needsLogin ? (
+            <div className="atlas-fade-enter flex flex-col items-center gap-4 rounded-2xl border border-accent/30 bg-accent/10 px-5 py-8 text-center">
+              <span className="material-symbols-outlined text-[36px] leading-none text-accent" aria-hidden>
+                login
+              </span>
+              <div className="max-w-md text-sm text-text/85">
+                Sign in to F95 to see the mirrors for this game. The list opens
+                here by itself once you're signed in.
+              </div>
+              <button
+                type="button"
+                onClick={onSignIn}
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
+              >
+                <span className="material-symbols-outlined text-[18px] leading-none" aria-hidden>
+                  login
+                </span>
+                Sign in to F95
+              </button>
+            </div>
+          ) : isLoading ? (
             <div className="atlas-fade-enter space-y-4 rounded-2xl border border-border bg-white/5 px-5 py-6 text-sm text-text/70">
               <div className="flex items-center justify-center gap-2">
                 <span
@@ -201,11 +223,13 @@ const F95UpdateModal = (liveProps) => {
             key={selectedLink?.url || "none"}
             className="atlas-fade-enter min-w-0 text-xs text-text/55"
           >
-            {selectedLink
-              ? selectedIsBrowserOnly
-                ? `${hostName} opens in a browser window; press Download there and the file is installed for you.`
-                : `${hostName} downloads and installs automatically.`
-              : "No mirror selected"}
+            {needsLogin
+              ? "Mirrors are shown after you sign in to F95."
+              : selectedLink
+                ? selectedIsBrowserOnly
+                  ? `${hostName} opens in a browser window; press Download there and the file is installed for you.`
+                  : `${hostName} downloads and installs automatically.`
+                : "No mirror selected"}
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <button
@@ -219,7 +243,7 @@ const F95UpdateModal = (liveProps) => {
             <button
               type="button"
               onClick={onConfirm}
-              disabled={isLoading || isInstalling || !selectedLink}
+              disabled={needsLogin || isLoading || isInstalling || !selectedLink}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isInstalling ? (

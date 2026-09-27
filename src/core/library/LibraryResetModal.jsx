@@ -88,8 +88,8 @@ const LibraryResetModal = (liveProps) => {
               Keeps your game folders, your saves and the local save backups.
             </LibraryResetFact>
             <LibraryResetFact icon="save" tone="ok">
-              A backup of the library is saved first, so this can be undone by
-              support if something goes wrong.
+              A backup of the library is saved first. You can bring it back
+              any time in Settings → Library &amp; folders → Library backups.
             </LibraryResetFact>
             <LibraryResetFact icon="cloud_sync">
               Games from your account library are added back as "Not installed"

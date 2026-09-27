@@ -131,6 +131,352 @@ const DetailsImage = ({ src, alt, className, fallback }) =>
     fallback
   );
 
+// "5 min ago", "2 h ago", "3 days ago"; "" for missing or invalid values.
+const formatDetailRelativeTime = (value, nowMs = Date.now()) => {
+  const time =
+    typeof value === "number" ? value : Date.parse(String(value || ""));
+  if (!Number.isFinite(time)) {
+    return "";
+  }
+
+  const minutes = Math.round(Math.max(0, nowMs - time) / 60000);
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours} h ago`;
+  }
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+};
+
+window.formatDetailRelativeTime = formatDetailRelativeTime;
+
+const detailsToast = () => window.AtlasUI?.toast || window.AtlasToast || null;
+
+const detailsConfirm = (options) =>
+  window.AtlasUI?.confirm
+    ? window.AtlasUI.confirm(options)
+    : Promise.resolve(window.confirm(options?.message || options?.title || ""));
+
+const DETAILS_EXECUTABLE_LIST_LIMIT = 30;
+const DETAILS_ENGINE_SUGGESTIONS = [
+  "Ren'Py",
+  "RPGM",
+  "Unity",
+  "Unreal Engine",
+  "HTML",
+  "Flash",
+  "Java",
+  "QSP",
+  "RAGS",
+  "Tads",
+  "WebGL",
+  "Wolf RPG",
+  "ADRIFT",
+  "Others",
+];
+
+/**
+ * Inline "Which file starts the game?" picker for a version whose launcher
+ * is unknown: files found in the folder, plus Browse… for anything else.
+ */
+const DetailsExecutablePicker = ({ game, version, onChosen, onClose }) => {
+  const [listState, setListState] = React.useState({
+    isLoading: true,
+    candidates: [],
+    error: "",
+  });
+  const [busyValue, setBusyValue] = React.useState("");
+
+  React.useEffect(() => {
+    let alive = true;
+    setListState({ isLoading: true, candidates: [], error: "" });
+    Promise.resolve(
+      window.electronAPI.listGameExecutables({ gamePath: version.game_path }),
+    )
+      .then((result) => {
+        if (!alive) {
+          return;
+        }
+        setListState(
+          result?.success
+            ? {
+                isLoading: false,
+                candidates: Array.isArray(result.executables)
+                  ? result.executables
+                  : [],
+                error: "",
+              }
+            : {
+                isLoading: false,
+                candidates: [],
+                error: result?.error || "The game folder could not be read.",
+              },
+        );
+      })
+      .catch((error) => {
+        console.error("[library.repair] Listing launchers failed:", error);
+        if (alive) {
+          setListState({
+            isLoading: false,
+            candidates: [],
+            error: "The game folder could not be read.",
+          });
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [version.game_path]);
+
+  const choose = async (executable) => {
+    if (busyValue) {
+      return;
+    }
+    setBusyValue(executable);
+    try {
+      const result = await window.electronAPI.setGameExecutable({
+        recordId: game.record_id,
+        version: version.version,
+        gamePath: version.game_path,
+        executable,
+      });
+      if (!result?.success) {
+        setListState((previous) => ({
+          ...previous,
+          error: result?.error || "This file could not be used. Pick another one.",
+        }));
+        return;
+      }
+      detailsToast()?.success(`${executable} will be used to start the game.`, {
+        title: "Ready to play",
+      });
+      onChosen?.(result.game || null);
+    } catch (error) {
+      console.error("[library.repair] Saving the launcher failed:", error);
+      setListState((previous) => ({
+        ...previous,
+        error: "This file could not be used. Pick another one.",
+      }));
+    } finally {
+      setBusyValue("");
+    }
+  };
+
+  const browse = async () => {
+    try {
+      const picked = await window.electronAPI.pickGameExecutable({
+        gamePath: version.game_path,
+      });
+      if (picked?.cancelled) {
+        return;
+      }
+      if (!picked?.success || !picked.executable) {
+        setListState((previous) => ({
+          ...previous,
+          error: picked?.error || "Pick a file inside this game's folder.",
+        }));
+        return;
+      }
+      await choose(picked.executable);
+    } catch (error) {
+      console.error("[library.repair] Picking a launcher failed:", error);
+    }
+  };
+
+  const shownCandidates = listState.candidates.slice(0, DETAILS_EXECUTABLE_LIST_LIMIT);
+  const hiddenCount = listState.candidates.length - shownCandidates.length;
+
+  return (
+    <div
+      className="atlas-fade-enter mt-3 border border-accent/35 bg-accent/5 p-3"
+      role="group"
+      aria-label="Choose the file that starts the game"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-text">
+          Which file starts the game?
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[11px] text-text/60 transition hover:text-text"
+        >
+          Cancel
+        </button>
+      </div>
+      {listState.error && (
+        <div className="mb-2 text-xs text-red-200" role="alert">
+          {listState.error}
+        </div>
+      )}
+      {listState.isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-text/60">
+          <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+          Looking for launchers in the game folder…
+        </div>
+      ) : shownCandidates.length === 0 ? (
+        <div className="text-xs text-text/60">
+          No launchers were found in this folder. Use Browse… to pick the file.
+        </div>
+      ) : (
+        <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto pr-0.5">
+          {shownCandidates.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              onClick={() => choose(candidate)}
+              disabled={Boolean(busyValue)}
+              className="flex items-center gap-2 border border-border/70 bg-black/20 px-2 py-1 text-left text-xs text-text transition hover:border-accent/50 hover:bg-accent/10 disabled:opacity-50"
+            >
+              {busyValue === candidate ? (
+                <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none text-accent" aria-hidden>
+                  play_circle
+                </span>
+              )}
+              <span className="min-w-0 flex-1 break-all">{candidate}</span>
+            </button>
+          ))}
+          {hiddenCount > 0 && (
+            <div className="px-1 text-[11px] text-text/50">
+              {`${hiddenCount} more file(s) — use Browse… to pick one of them.`}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={browse}
+          disabled={Boolean(busyValue)}
+          className="inline-flex items-center gap-1 bg-secondary px-2 py-0.5 text-xs transition hover:bg-selected disabled:opacity-50"
+        >
+          <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+            folder_open
+          </span>
+          Browse…
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Inline editor for the stored title / creator / engine of a library entry.
+ */
+const DetailsMetadataEditor = ({ game, onSaved, onClose }) => {
+  const [form, setForm] = React.useState({
+    title: game?.title || "",
+    creator: game?.creator || "",
+    engine: game?.engine || "",
+  });
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const updateField = (field) => (event) =>
+    setForm((previous) => ({ ...previous, [field]: event.target.value }));
+
+  const save = async (event) => {
+    event.preventDefault();
+    if (!form.title.trim()) {
+      setError("Enter a title for this game.");
+      return;
+    }
+    setIsSaving(true);
+    setError("");
+    try {
+      const result = await window.electronAPI.updateGame({
+        record_id: game.record_id,
+        title: form.title,
+        creator: form.creator,
+        engine: form.engine,
+      });
+      if (!result?.success) {
+        setError(result?.error || "The changes could not be saved. Try again.");
+        return;
+      }
+      const updatedGame = await window.electronAPI.getGame(game.record_id);
+      detailsToast()?.success("The game details were saved.", { title: "Saved" });
+      onSaved?.(updatedGame || null);
+    } catch (saveError) {
+      console.error("[library.details] Saving details failed:", saveError);
+      setError("The changes could not be saved. Try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const fieldClass =
+    "w-full border border-border bg-black/25 px-2 py-1 text-sm text-text outline-none focus:border-accent/60";
+
+  return (
+    <form
+      onSubmit={save}
+      className="atlas-fade-enter space-y-2 border border-border/70 bg-canvas/40 p-3"
+      aria-label="Edit game details"
+    >
+      {game?.atlas_id && (
+        <div className="text-[11px] text-text/55">
+          While this game is linked to the catalog, the catalog name is shown in
+          the library.
+        </div>
+      )}
+      <label className="block text-[11px] uppercase tracking-[0.14em] text-text/55">
+        Title
+        <input value={form.title} onChange={updateField("title")} className={`mt-1 normal-case tracking-normal ${fieldClass}`} />
+      </label>
+      <label className="block text-[11px] uppercase tracking-[0.14em] text-text/55">
+        Creator
+        <input value={form.creator} onChange={updateField("creator")} className={`mt-1 normal-case tracking-normal ${fieldClass}`} />
+      </label>
+      <label className="block text-[11px] uppercase tracking-[0.14em] text-text/55">
+        Engine
+        <input
+          value={form.engine}
+          onChange={updateField("engine")}
+          list="details-engine-suggestions"
+          className={`mt-1 normal-case tracking-normal ${fieldClass}`}
+        />
+        <datalist id="details-engine-suggestions">
+          {DETAILS_ENGINE_SUGGESTIONS.map((engine) => (
+            <option key={engine} value={engine} />
+          ))}
+        </datalist>
+      </label>
+      {error && (
+        <div className="text-xs text-red-200" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={isSaving}
+          className="bg-secondary px-2 py-0.5 text-xs transition hover:bg-selected disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={isSaving}
+          className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:brightness-110 disabled:opacity-50"
+        >
+          {isSaving && <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />}
+          Save
+        </button>
+      </div>
+    </form>
+  );
+};
+
 const LibraryDetailsPanel = ({
   presenceState = "open",
   game,
@@ -145,6 +491,10 @@ const LibraryDetailsPanel = ({
   onRemoveGame,
   onPreviewSelect,
   onOpenCloudAuth,
+  onLocateVersion,
+  onGameChanged,
+  onLinkCatalog,
+  onImageAction,
 }) => {
   const versionList = useMemo(() => {
     if (!game?.versions?.length) {
@@ -182,7 +532,76 @@ const LibraryDetailsPanel = ({
   );
   const [isResizing, setIsResizing] = useState(false);
   const [launchingVersionKey, setLaunchingVersionKey] = useState("");
+  const [pickerVersionKey, setPickerVersionKey] = useState("");
+  const [removingVersionKey, setRemovingVersionKey] = useState("");
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
   const resizeDragRef = useRef(null);
+  const needsCatalogLink = window.libraryInstallState?.needsCatalogLink
+    ? window.libraryInstallState.needsCatalogLink(game)
+    : Boolean(game && !game.atlas_id && !game.f95_id && !game.siteUrl);
+  const liveCheckedLabel = formatDetailRelativeTime(game?.liveCheckedAt);
+  const isLiveLatest =
+    Boolean(game?.liveVersion) && game?.latestVersion === game?.liveVersion;
+  const siteLatestHint = isLiveLatest
+    ? ` (from the F95 thread${liveCheckedLabel ? `, checked ${liveCheckedLabel}` : ""})`
+    : "";
+
+  useEffect(() => {
+    setPickerVersionKey("");
+    setRemovingVersionKey("");
+    setIsEditingDetails(false);
+  }, [game?.record_id]);
+
+  const handleRemoveVersion = async (version, versionKey) => {
+    if (!game?.record_id || removingVersionKey) {
+      return;
+    }
+    if (versionList.length <= 1) {
+      onRemoveGame?.(game);
+      return;
+    }
+
+    const label = version.version || "this version";
+    const confirmed = await detailsConfirm({
+      title: `Remove version ${label}?`,
+      message:
+        "Only this entry is removed from the library. The game folder on disk is not deleted.",
+      confirmLabel: "Remove version",
+      tone: "danger",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setRemovingVersionKey(versionKey);
+    try {
+      const result = await window.electronAPI.deleteVersion({
+        recordId: game.record_id,
+        version: version.version,
+      });
+      if (!result?.success) {
+        detailsToast()?.error(
+          result?.error || "The version could not be removed. Try again.",
+          { title: "Remove version" },
+        );
+        return;
+      }
+      const updatedGame = await window.electronAPI.getGame(game.record_id);
+      if (updatedGame) {
+        onGameChanged?.(updatedGame);
+      }
+      detailsToast()?.success(`Version ${label} was removed from the library.`, {
+        title: "Version removed",
+      });
+    } catch (error) {
+      console.error("[library.details] Removing a version failed:", error);
+      detailsToast()?.error("The version could not be removed. Try again.", {
+        title: "Remove version",
+      });
+    } finally {
+      setRemovingVersionKey("");
+    }
+  };
   const favoriteIconRef = window.AtlasMotion?.useFlashClass
     ? window.AtlasMotion.useFlashClass(isFavorite, "atlas-pop")
     : null;
@@ -407,7 +826,37 @@ const LibraryDetailsPanel = ({
                 className="atlas-view-enter space-y-5"
               >
                 <section className="overflow-hidden rounded-2xl border border-border bg-secondary/20">
-                  <div className="h-[220px] overflow-hidden bg-secondary/40">
+                  <div className="group/banner relative h-[220px] overflow-hidden bg-secondary/40">
+                    {(game.atlas_id || game.banner_url) && onImageAction && (
+                      <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity duration-300 focus-within:opacity-100 group-hover/banner:opacity-100">
+                        {game.atlas_id && (
+                          <button
+                            type="button"
+                            onClick={() => onImageAction("refreshBanner", game)}
+                            className="inline-flex h-7 w-7 items-center justify-center border border-border bg-black/60 text-text backdrop-blur-sm transition hover:bg-black/80"
+                            aria-label="Download the banner again"
+                            title="Download the banner again"
+                          >
+                            <span className="material-symbols-outlined text-[16px] leading-none" aria-hidden>
+                              refresh
+                            </span>
+                          </button>
+                        )}
+                        {game.banner_url && (
+                          <button
+                            type="button"
+                            onClick={() => onImageAction("removeBanner", game)}
+                            className="inline-flex h-7 w-7 items-center justify-center border border-border bg-black/60 text-text backdrop-blur-sm transition hover:bg-red-900/70"
+                            aria-label="Remove the saved banner"
+                            title="Remove the saved banner"
+                          >
+                            <span className="material-symbols-outlined text-[16px] leading-none" aria-hidden>
+                              hide_image
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                     <DetailsImage
                       src={game.banner_url}
                       alt={displayTitle}
@@ -445,7 +894,56 @@ const LibraryDetailsPanel = ({
                           </span>
                         </span>
                       )}
+                      {needsCatalogLink && (
+                        <span title="This game was added from its folder and isn't linked to the game catalog yet, so it gets no updates or banner.">
+                          <DetailPill>Not matched</DetailPill>
+                        </span>
+                      )}
+                      <div className="ml-auto flex items-center gap-1.5">
+                        {!game.atlas_id && onLinkCatalog && (
+                          <button
+                            type="button"
+                            onClick={() => onLinkCatalog(game)}
+                            className="inline-flex items-center gap-1 border border-accent/50 bg-accent/15 px-2 py-0.5 text-[11px] text-text transition hover:bg-accent/25"
+                            title="Find this game in the catalog to get its banner, name and update checks"
+                          >
+                            <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                              link
+                            </span>
+                            Link to catalog…
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingDetails((previous) => !previous)}
+                          aria-pressed={isEditingDetails}
+                          className={`inline-flex h-6 w-6 items-center justify-center border transition-colors ${
+                            isEditingDetails
+                              ? "border-accent/60 bg-accent/20 text-text"
+                              : "border-border bg-white/5 text-text/80 hover:bg-white/10"
+                          }`}
+                          aria-label="Edit title, creator and engine"
+                          title="Edit title, creator and engine"
+                        >
+                          <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                            edit
+                          </span>
+                        </button>
+                      </div>
                     </div>
+                    {isEditingDetails && (
+                      <DetailsMetadataEditor
+                        key={game.record_id}
+                        game={game}
+                        onSaved={(updatedGame) => {
+                          setIsEditingDetails(false);
+                          if (updatedGame) {
+                            onGameChanged?.(updatedGame);
+                          }
+                        }}
+                        onClose={() => setIsEditingDetails(false)}
+                      />
+                    )}
                   </div>
                 </section>
 
@@ -471,18 +969,30 @@ const LibraryDetailsPanel = ({
                         </div>
                         <div className="text-xs opacity-70">
                           Site latest: {game.latestVersion || "Unknown"}
+                          {game.latestVersion ? siteLatestHint : ""}
                         </div>
+                        {!versionList.some(
+                          (version) => version.isPresent !== false && version.exec_path,
+                        ) && (
+                          <div className="mt-1 text-xs text-amber-200/85">
+                            Choose the file that starts the game with Choose .exe
+                            below to play it.
+                          </div>
+                        )}
                       </>
                     ) : hasMissingFiles ? (
                       <>
                         <div className="mt-1 text-xs opacity-70">
                           Last installed: {game.lastKnownVersion || "Unknown"}
-                          {game.latestVersion ? ` · Site latest: ${game.latestVersion}` : ""}
+                          {game.latestVersion
+                            ? ` · Site latest: ${game.latestVersion}${siteLatestHint}`
+                            : ""}
                         </div>
                         <div className="text-xs opacity-70">
                           The game folder was deleted, moved or is on a
-                          disconnected drive. Install it again to play, or
-                          remove it from the library.
+                          disconnected drive. Use Locate… on the version below
+                          if you moved it, install it again, or remove it from
+                          the library.
                         </div>
                       </>
                     ) : (
@@ -562,32 +1072,54 @@ const LibraryDetailsPanel = ({
                               </div>
                             </div>
                             <div className="flex shrink-0 items-start gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handlePlayVersion(version, versionKey)}
-                                className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-60"
-                                disabled={
-                                  isVersionMissing ||
-                                  !version.exec_path ||
-                                  Boolean(launchingVersionKey)
-                                }
-                                title={
-                                  isVersionMissing
-                                    ? "The install folder no longer exists"
-                                    : version.exec_path
-                                      ? `Play ${version.version || ""}`.trim()
-                                      : "No executable selected for this version"
-                                }
-                              >
-                                {isLaunching ? (
-                                  <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
-                                ) : (
+                              {isVersionMissing ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onLocateVersion?.(version, game)}
+                                  disabled={!onLocateVersion}
+                                  className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-60"
+                                  title="Point this version to the folder where the game is now"
+                                >
                                   <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
-                                    play_arrow
+                                    travel_explore
                                   </span>
-                                )}
-                                {isLaunching ? "Starting" : "Play"}
-                              </button>
+                                  Locate…
+                                </button>
+                              ) : !version.exec_path ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setPickerVersionKey((current) =>
+                                      current === versionKey ? "" : versionKey,
+                                    )
+                                  }
+                                  aria-expanded={pickerVersionKey === versionKey}
+                                  className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
+                                  title="Choose the file that starts this game"
+                                >
+                                  <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                                    settings
+                                  </span>
+                                  Choose .exe
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePlayVersion(version, versionKey)}
+                                  className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:opacity-60"
+                                  disabled={Boolean(launchingVersionKey)}
+                                  title={`Play ${version.version || ""}`.trim()}
+                                >
+                                  {isLaunching ? (
+                                    <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+                                  ) : (
+                                    <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                                      play_arrow
+                                    </span>
+                                  )}
+                                  {isLaunching ? "Starting" : "Play"}
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => onOpenFolder(version.game_path)}
@@ -604,8 +1136,40 @@ const LibraryDetailsPanel = ({
                                 </span>
                                 Open
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveVersion(version, versionKey)}
+                                disabled={Boolean(removingVersionKey)}
+                                className="inline-flex h-[22px] w-[22px] items-center justify-center border border-red-500/35 bg-red-500/10 text-red-100 transition hover:bg-red-500/20 disabled:opacity-50"
+                                aria-label={`Remove version ${version.version || ""} from the library`.replace(/\s+/g, " ")}
+                                title="Remove this version from the library (the folder stays on disk)"
+                              >
+                                {removingVersionKey === versionKey ? (
+                                  <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />
+                                ) : (
+                                  <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                                    delete
+                                  </span>
+                                )}
+                              </button>
                             </div>
                           </div>
+
+                          {pickerVersionKey === versionKey &&
+                            !isVersionMissing &&
+                            !version.exec_path && (
+                              <DetailsExecutablePicker
+                                game={game}
+                                version={version}
+                                onChosen={(updatedGame) => {
+                                  setPickerVersionKey("");
+                                  if (updatedGame) {
+                                    onGameChanged?.(updatedGame);
+                                  }
+                                }}
+                                onClose={() => setPickerVersionKey("")}
+                              />
+                            )}
 
                           <div className="mt-3 grid grid-cols-2 gap-2 text-xs opacity-75">
                             <div>
@@ -737,10 +1301,38 @@ const LibraryDetailsPanel = ({
                     <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
                       Screenshots
                     </div>
-                    <div className="text-xs opacity-60">
-                      {previews.length > 0
-                        ? `${previews.length} cached`
-                        : "No cached shots"}
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs opacity-60">
+                        {previews.length > 0
+                          ? `${previews.length} cached`
+                          : "No cached shots"}
+                      </div>
+                      {onImageAction && game.atlas_id && (
+                        <button
+                          type="button"
+                          onClick={() => onImageAction("refreshScreenshots", game)}
+                          className="inline-flex h-6 w-6 items-center justify-center border border-border bg-white/5 text-text/80 transition hover:bg-white/10"
+                          aria-label="Download screenshots again"
+                          title="Download screenshots again"
+                        >
+                          <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                            refresh
+                          </span>
+                        </button>
+                      )}
+                      {onImageAction && previews.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => onImageAction("removeScreenshots", game)}
+                          className="inline-flex h-6 w-6 items-center justify-center border border-border bg-white/5 text-text/80 transition hover:bg-red-900/60"
+                          aria-label="Remove saved screenshots"
+                          title="Remove saved screenshots"
+                        >
+                          <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                            hide_image
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                   {previews.length === 0 ? (

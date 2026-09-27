@@ -8,7 +8,10 @@ const {
   splitDelimitedText,
   filterSiteCatalogEntries,
 } = require("./shared/siteSearch");
-const { buildVersionUpdateState } = require("./shared/versionUpdate");
+const {
+  buildVersionUpdateState,
+  pickNewerVersion,
+} = require("./shared/versionUpdate");
 
 let db;
 
@@ -51,6 +54,25 @@ const resolveBannerUrl = (appPaths, localBannerPath, remoteBannerUrl) =>
 const buildDisplayText = (localValue, remoteValue) =>
   remoteValue || localValue || "";
 
+/**
+ * Splits the joined version columns of a game row: the catalog version
+ * (`atlasLatestVersion`), the version last read from the live F95 thread
+ * (`liveVersion`, `liveCheckedAt`) and the newer of both as `latestVersion`.
+ */
+const resolveLatestVersionFields = (row) => {
+  const { live_version: liveVersionColumn, live_checked_at: liveCheckedAtColumn, ...rest } =
+    row;
+  const atlasLatestVersion = String(row.latestVersion || "");
+  const liveVersion = String(liveVersionColumn || "");
+  return {
+    rest,
+    atlasLatestVersion,
+    liveVersion,
+    liveCheckedAt: String(liveCheckedAtColumn || ""),
+    latestVersion: pickNewerVersion(atlasLatestVersion, liveVersion),
+  };
+};
+
 const GAME_METADATA_SELECT = `
   games.record_id as record_id,
   atlas_mappings.atlas_id as atlas_id,
@@ -88,6 +110,8 @@ const GAME_METADATA_SELECT = `
   atlas_data.release_date,
   atlas_data.voice,
   atlas_data.short_name,
+  live.version AS live_version,
+  live.checked_at AS live_checked_at,
   GROUP_CONCAT(tags.tag) AS tags
 `;
 
@@ -99,6 +123,7 @@ const GAME_METADATA_JOINS = `
   LEFT JOIN f95_zone_data AS f95_atlas_data ON atlas_mappings.atlas_id = f95_atlas_data.atlas_id
   LEFT JOIN f95_zone_data AS f95_thread_data ON f95_zone_mappings.f95_id = f95_thread_data.f95_id
   LEFT JOIN atlas_data ON atlas_mappings.atlas_id = atlas_data.atlas_id
+  LEFT JOIN library_live_versions AS live ON games.record_id = live.record_id
   LEFT JOIN tag_mappings ON games.record_id = tag_mappings.record_id
   LEFT JOIN tags ON tag_mappings.tag_id = tags.tag_id
 `;
@@ -283,6 +308,46 @@ const updateVersion = (version, record_id) => {
   });
 };
 
+// Moves one version to another folder (Locate). Other columns (play time,
+// size, date added) are kept. Resolves the number of changed rows.
+const updateVersionLocation = (recordId, version, gamePath, execPath) =>
+  new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE versions SET game_path = ?, exec_path = ? WHERE record_id = ? AND version = ?`,
+      [
+        String(gamePath || ""),
+        String(execPath || ""),
+        recordId,
+        String(version ?? ""),
+      ],
+      function onVersionLocationUpdated(err) {
+        if (err) {
+          console.error("Error updating version location:", err);
+          reject(err);
+          return;
+        }
+        resolve(this.changes || 0);
+      },
+    );
+  });
+
+// Stores the launcher chosen for one version. Resolves the changed rows.
+const updateVersionExecutable = (recordId, version, execPath) =>
+  new Promise((resolve, reject) => {
+    db.run(
+      `UPDATE versions SET exec_path = ? WHERE record_id = ? AND version = ?`,
+      [String(execPath || ""), recordId, String(version ?? "")],
+      function onVersionExecutableUpdated(err) {
+        if (err) {
+          console.error("Error updating version executable:", err);
+          reject(err);
+          return;
+        }
+        resolve(this.changes || 0);
+      },
+    );
+  });
+
 const deleteVersionsForRecordPath = (recordId, gamePath) => {
   return new Promise((resolve, reject) => {
     db.run(
@@ -331,8 +396,9 @@ const getGame = (recordId, appPaths) => {
             reject(err);
             return;
           }
+          const versionFields = resolveLatestVersionFields(row);
           const game = {
-            ...row,
+            ...versionFields.rest,
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
             isFavorite: Boolean(row.isFavorite),
             banner_url: resolveBannerUrl(
@@ -342,6 +408,10 @@ const getGame = (recordId, appPaths) => {
             ),
             displayTitle: buildDisplayText(row.title, row.atlas_title),
             displayCreator: buildDisplayText(row.creator, row.atlas_creator),
+            atlasLatestVersion: versionFields.atlasLatestVersion,
+            liveVersion: versionFields.liveVersion,
+            liveCheckedAt: versionFields.liveCheckedAt,
+            latestVersion: versionFields.latestVersion,
             versions: versionRows.map((v) => ({
               version: v.version,
               game_path: v.game_path,
@@ -355,7 +425,7 @@ const getGame = (recordId, appPaths) => {
             versionCount: versionRows.length,
           };
           const versionState = buildVersionUpdateState(
-            row.latestVersion,
+            game.latestVersion,
             game.versions,
           );
           game.isUpdateAvailable = versionState.hasUpdate;
@@ -429,13 +499,18 @@ const getGames = (appPaths, offset = 0, limit = null) => {
         // Map rows to include versions array and isUpdateAvailable
         const games = rows.map((row) => {
           const versions = versionsByRecordId[row.record_id] || [];
+          const versionFields = resolveLatestVersionFields(row);
           const versionState = buildVersionUpdateState(
-            row.latestVersion,
+            versionFields.latestVersion,
             versions,
           );
 
           return {
-            ...row,
+            ...versionFields.rest,
+            atlasLatestVersion: versionFields.atlasLatestVersion,
+            liveVersion: versionFields.liveVersion,
+            liveCheckedAt: versionFields.liveCheckedAt,
+            latestVersion: versionFields.latestVersion,
             // Unescape engine to fix 'Ren''Py' issue
             engine: row.engine ? row.engine.replace(/''/g, "'") : row.engine,
             isFavorite: Boolean(row.isFavorite),
@@ -503,6 +578,8 @@ const deleteGameCompletely = async (recordId, appPaths) => {
       })
       .catch(() => {});
 
+    // Foreign keys are not enforced by node-sqlite3, so dependent rows are
+    // removed explicitly.
     const tables = [
       "atlas_mappings",
       "steam_mappings",
@@ -510,6 +587,7 @@ const deleteGameCompletely = async (recordId, appPaths) => {
       "tag_mappings",
       "save_profiles",
       "save_sync_state",
+      "library_live_versions",
     ];
 
     for (const tbl of tables) {
@@ -899,6 +977,26 @@ const findF95Id = (atlasId) => {
     );
   });
 };
+
+// Thread identity of a catalog entry: { f95_id, site_url } or null.
+const getF95ZoneDataByAtlasId = (atlasId) =>
+  new Promise((resolve, reject) => {
+    db.get(
+      `SELECT f95_id, site_url FROM f95_zone_data WHERE atlas_id = ?`,
+      [atlasId],
+      (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(
+          row
+            ? { f95_id: row.f95_id, site_url: row.site_url || "" }
+            : null,
+        );
+      },
+    );
+  });
 
 const GetAtlasIDbyRecord = (recordId) => {
   return new Promise((resolve, reject) => {
@@ -1651,7 +1749,10 @@ module.exports = {
   updateGame,
   setGameFavorite,
   updateVersion,
+  updateVersionLocation,
+  updateVersionExecutable,
   deleteVersionsForRecordPath,
+  getF95ZoneDataByAtlasId,
   getSteamIDbyRecord,
   addSteamMapping,
   getSteamBannerUrl,

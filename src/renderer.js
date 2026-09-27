@@ -207,28 +207,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("show-context-menu", template),
   onContextMenuCommand: (callback) =>
     ipcRenderer.on("context-menu-command", callback),
-  onGameData: (callback) => {
-    console.log("Registering onGameData listener");
-    ipcRenderer.on("send-game-data", (event, game) => {
-      console.log("Received send-game-data event in renderer:", game);
-      callback(event, game);
-    });
-  },
   openDirectory: (path) => {
     console.log("Invoking openDirectory for path:", path);
     return ipcRenderer.invoke("open-directory", path);
   },
   launchGame: (payload) => ipcRenderer.invoke("launch-game", payload),
-  onGameDetailsImportProgress: (callback) => {
-    console.log("Registering game-details-import-progress listener");
-    ipcRenderer.on("game-details-import-progress", (event, progress) =>
-      callback(progress),
-    );
-  },
-  removeGameDetailsImportProgressListener: (callback) => {
-    console.log("Removing game-details-import-progress listener");
-    ipcRenderer.removeListener("game-details-import-progress", callback);
-  },
+  // Library maintenance: locate a moved folder, choose the launcher, backups,
+  // catalog link and live thread checks (main/libraryMaintenanceIpc.js).
+  relocateGameVersion: (payload) =>
+    ipcRenderer.invoke("relocate-game-version", payload),
+  listGameExecutables: (payload) =>
+    ipcRenderer.invoke("list-game-executables", payload),
+  pickGameExecutable: (payload) =>
+    ipcRenderer.invoke("pick-game-executable", payload),
+  setGameExecutable: (payload) =>
+    ipcRenderer.invoke("set-game-executable", payload),
+  listLibraryBackups: () => ipcRenderer.invoke("list-library-backups"),
+  createLibraryBackup: () => ipcRenderer.invoke("create-library-backup"),
+  restoreLibraryBackup: (payload) =>
+    ipcRenderer.invoke("restore-library-backup", payload),
+  linkGameToCatalog: (payload) =>
+    ipcRenderer.invoke("link-game-to-catalog", payload),
+  checkLiveUpdates: (payload) =>
+    ipcRenderer.invoke("check-live-updates", payload || {}),
+  getLiveUpdateState: () => ipcRenderer.invoke("get-live-update-state"),
   startSteamScan: (params) => ipcRenderer.invoke("start-steam-scan", params),
   selectSteamDirectory: () => {
     console.log("Invoking selectSteamDirectory");

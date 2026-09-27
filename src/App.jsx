@@ -54,6 +54,9 @@ const createDefaultF95UpdateModalState = () => ({
   isOpen: false,
   isLoading: false,
   isInstalling: false,
+  // No F95 session: the dialog shows "Sign in to F95" instead of mirrors and
+  // continues by itself once the session appears.
+  needsLogin: false,
   error: "",
   captchaUrl: "",
   game: null,
@@ -177,6 +180,191 @@ const {
     not_installed: 0,
   }),
 } = window.libraryInstallState || {};
+
+// Bulk actions for games whose files are missing (shared/missingGamesActions).
+const {
+  selectMissingGames = (list) =>
+    (Array.isArray(list) ? list : []).filter(
+      (game) => game?.installState === "missing",
+    ),
+  partitionReinstallableGames = (list) => ({
+    reinstallable: (Array.isArray(list) ? list : []).filter((game) => game?.siteUrl),
+    unlinkable: (Array.isArray(list) ? list : []).filter((game) => !game?.siteUrl),
+  }),
+  createReinstallQueue = null,
+  advanceReinstallQueue = null,
+  markReinstallStepFailed = null,
+  summarizeReinstallQueue = null,
+} = window.missingGamesActions || {};
+
+// Sort order and "Show" filter survive restarts (shared/storedChoice).
+const {
+  readStoredChoice = (_storage, _key, _allowed, fallback) => fallback,
+  writeStoredChoice = () => false,
+} = window.storedChoice || {};
+const LIBRARY_SORT_STORAGE_KEY = "f95launcher.librarySortMode";
+const LIBRARY_FILTER_STORAGE_KEY = "f95launcher.libraryInstallFilter";
+const LIBRARY_SORT_VALUES = LIBRARY_SORT_OPTIONS.map((option) => option.value);
+const LIBRARY_FILTER_VALUES = LIBRARY_INSTALL_FILTER_OPTIONS.map(
+  (option) => option.value,
+);
+const getLibraryPreferenceStorage = () => {
+  try {
+    return window.localStorage || null;
+  } catch {
+    return null;
+  }
+};
+
+// Reload the library (and re-check which folders exist) when the window gets
+// focus again after this long.
+const LIBRARY_PRESENCE_RECHECK_AFTER_MS = 60 * 1000;
+const REINSTALL_TOAST_ID = "library-reinstall-missing";
+
+const LIBRARY_RESCAN_MENU_ITEMS = [
+  {
+    id: "rescanLibrary",
+    label: "Find New Games",
+    description: "Add games from folders the library doesn't know yet.",
+    icon: "travel_explore",
+  },
+  {
+    id: "refreshLibrary",
+    label: "Refresh Installed Games",
+    description: "Check every folder again: versions, launchers, missing files.",
+    icon: "autorenew",
+  },
+  { id: "separator-1", type: "separator" },
+  {
+    id: "refreshLibraryPreviews",
+    label: "Refresh Cached Screenshots",
+    description: "Download screenshots that are missing.",
+    icon: "photo_library",
+  },
+  {
+    id: "resetCacheAndRescanLibrary",
+    label: "Reset Scan Cache & Rescan",
+    description: "Forget earlier scan results, then refresh everything.",
+    icon: "restart_alt",
+  },
+  { id: "separator-2", type: "separator" },
+  {
+    id: "resetLibrary",
+    label: "Rebuild Library From Scratch…",
+    description: "Back up the library, clear it and scan your folders again.",
+    icon: "delete_sweep",
+    tone: "danger",
+  },
+];
+
+// Menu above the "Rescan Library" button. Closes on Escape, outside click
+// and item click; arrow keys move between items.
+const LibraryRescanMenu = ({ isOpen, anchorRef, onSelect, onClose }) => {
+  const menuRef = useRef(null);
+  const presence = appMotion.usePresence(isOpen);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  appMotion.useEscape(isOpen, () => {
+    onCloseRef.current?.();
+    anchorRef?.current?.focus?.();
+  });
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector('[role="menuitem"]')?.focus();
+    });
+    const handlePointerDown = (event) => {
+      if (
+        menuRef.current?.contains(event.target) ||
+        anchorRef?.current?.contains(event.target)
+      ) {
+        return;
+      }
+      onCloseRef.current?.();
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isOpen, anchorRef]);
+
+  if (!presence.isMounted) {
+    return null;
+  }
+
+  const handleKeyDown = (event) => {
+    const items = Array.from(
+      menuRef.current?.querySelectorAll('[role="menuitem"]') || [],
+    );
+    if (items.length === 0) {
+      return;
+    }
+    const index = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      items[(index + 1 + items.length) % items.length].focus();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      items[(index - 1 + items.length) % items.length].focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      items[0].focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      items[items.length - 1].focus();
+    } else if (event.key === "Tab") {
+      onCloseRef.current?.();
+    }
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label="Rescan library"
+      data-state={presence.state}
+      onKeyDown={handleKeyDown}
+      className="atlas-rise absolute bottom-full left-0 z-[70] mb-2 w-[320px] border border-border bg-primary/95 p-1 shadow-glass backdrop-blur-xl"
+    >
+      {LIBRARY_RESCAN_MENU_ITEMS.map((item) =>
+        item.type === "separator" ? (
+          <div key={item.id} role="separator" className="my-1 h-px bg-border/70" />
+        ) : (
+          <button
+            key={item.id}
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            onClick={() => onSelect(item.id)}
+            className={`flex w-full items-start gap-2.5 px-2.5 py-2 text-left outline-none transition-colors hover:bg-white/10 focus-visible:bg-white/10 ${
+              item.tone === "danger" ? "text-red-100" : "text-text"
+            }`}
+          >
+            <span
+              className={`material-symbols-outlined mt-0.5 shrink-0 text-[18px] leading-none ${
+                item.tone === "danger" ? "text-red-300" : "text-accent"
+              }`}
+              aria-hidden
+            >
+              {item.icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold">{item.label}</span>
+              <span className="block text-[11px] leading-snug text-text/55">
+                {item.description}
+              </span>
+            </span>
+          </button>
+        ),
+      )}
+    </div>
+  );
+};
 
 const LIBRARY_SCAN_MODE_START_TEXT = {
   incremental: "Starting library rescan (looking for new games)...",
@@ -451,12 +639,35 @@ const App = () => {
   const [isSelectedGameLoading, setIsSelectedGameLoading] = useState(false);
   const [previewModalIndex, setPreviewModalIndex] = useState(null);
   const [libraryQuery, setLibraryQuery] = useState("");
-  const [librarySortMode, setLibrarySortMode] = useState(
-    LIBRARY_SORT_MODES.INSTALLED_NEWEST || "installedNewest",
+  const [librarySortMode, setLibrarySortMode] = useState(() =>
+    readStoredChoice(
+      getLibraryPreferenceStorage(),
+      LIBRARY_SORT_STORAGE_KEY,
+      LIBRARY_SORT_VALUES,
+      LIBRARY_SORT_MODES.INSTALLED_NEWEST || "installedNewest",
+    ),
   );
-  const [libraryInstallFilter, setLibraryInstallFilter] = useState(
-    LIBRARY_INSTALL_FILTERS.ALL,
+  const [libraryInstallFilter, setLibraryInstallFilter] = useState(() =>
+    readStoredChoice(
+      getLibraryPreferenceStorage(),
+      LIBRARY_FILTER_STORAGE_KEY,
+      LIBRARY_FILTER_VALUES,
+      LIBRARY_INSTALL_FILTERS.ALL,
+    ),
   );
+  const [isRescanMenuOpen, setIsRescanMenuOpen] = useState(false);
+  const [isRecheckingLibrary, setIsRecheckingLibrary] = useState(false);
+  const [catalogLinkModal, setCatalogLinkModal] = useState({
+    isOpen: false,
+    game: null,
+  });
+  const [reinstallRun, setReinstallRun] = useState(null);
+  const [isRemovingMissingGames, setIsRemovingMissingGames] = useState(false);
+  const [liveUpdateState, setLiveUpdateState] = useState({
+    running: false,
+    lastRun: null,
+  });
+  const [isCheckingThreads, setIsCheckingThreads] = useState(false);
   const [libraryResetModal, setLibraryResetModal] = useState({
     isOpen: false,
     isRunning: false,
@@ -510,6 +721,14 @@ const App = () => {
   const isLibraryScanRunningRef = useRef(false);
   const showDiscoveryRef = useRef(false);
   const downloadStatusRef = useRef(null);
+  const lastLibraryLoadAtRef = useRef(0);
+  const pendingGameRefreshIdsRef = useRef(new Set());
+  const gameRefreshTimerRef = useRef(null);
+  const rescanButtonRef = useRef(null);
+  const handleGameUpdateRef = useRef(null);
+  const reinstallRunRef = useRef(null);
+  const reinstallStepBusyRef = useRef(false);
+  const f95DownloadItemsRef = useRef([]);
   const deferredLibraryQuery = useDeferredValue(libraryQuery);
 
   const refreshLibraryGrid = useCallback(() => {
@@ -558,18 +777,37 @@ const App = () => {
     });
   }, [runGridResizeSync]);
 
-  // Debounce function for game refresh
-  const debounce = (func, delay) => {
-    let timeout;
-    return (...args) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func(...args), delay);
-    };
-  };
-
   useEffect(() => {
     selectedGameRef.current = selectedGame;
   }, [selectedGame]);
+
+  useEffect(() => {
+    if (LIBRARY_SORT_VALUES.length > 0) {
+      writeStoredChoice(
+        getLibraryPreferenceStorage(),
+        LIBRARY_SORT_STORAGE_KEY,
+        librarySortMode,
+        LIBRARY_SORT_VALUES,
+      );
+    }
+  }, [librarySortMode]);
+
+  useEffect(() => {
+    if (LIBRARY_FILTER_VALUES.length > 0) {
+      writeStoredChoice(
+        getLibraryPreferenceStorage(),
+        LIBRARY_FILTER_STORAGE_KEY,
+        libraryInstallFilter,
+        LIBRARY_FILTER_VALUES,
+      );
+    }
+  }, [libraryInstallFilter]);
+
+  useEffect(() => {
+    if (isLibraryScanRunning) {
+      setIsRescanMenuOpen(false);
+    }
+  }, [isLibraryScanRunning]);
 
   useEffect(() => {
     f95UpdateModalRef.current = f95UpdateModal;
@@ -581,6 +819,28 @@ const App = () => {
   useEffect(() => {
     deleteGameModalRef.current = deleteGameModal;
   }, [deleteGameModal]);
+
+  // The install dialog waits for an F95 sign-in: continue with the mirrors
+  // as soon as the session appears.
+  useEffect(() => {
+    const handleF95AuthChanged = (state) => {
+      if (!state?.isAuthenticated) {
+        return;
+      }
+      const modalState = f95UpdateModalRef.current;
+      if (modalState?.isOpen && modalState.needsLogin && modalState.game) {
+        void handleGameUpdateRef.current?.(modalState.game);
+      }
+    };
+    if (typeof window.electronAPI?.subscribeF95AuthChanged === "function") {
+      return window.electronAPI.subscribeF95AuthChanged(handleF95AuthChanged);
+    }
+    return subscribeElectronEvent(
+      "onF95AuthChanged",
+      "f95-auth-changed",
+      handleF95AuthChanged,
+    );
+  }, []);
 
   useEffect(() => {
     isLibraryScanRunningRef.current = isLibraryScanRunning;
@@ -887,6 +1147,24 @@ const App = () => {
       selectedLinkUrl: "",
     });
 
+    // The mirrors are only visible with an F95 session: ask the user to sign
+    // in first. The dialog continues by itself on the next auth change.
+    let authState = null;
+    try {
+      authState = await window.electronAPI.getF95AuthStatus();
+    } catch (error) {
+      console.error("Failed to read the F95 session state:", error);
+    }
+    if (!authState?.isAuthenticated) {
+      setF95UpdateModal({
+        ...createDefaultF95UpdateModalState(),
+        isOpen: true,
+        needsLogin: true,
+        game,
+      });
+      return;
+    }
+
     try {
       const payload = await window.electronAPI.inspectF95Thread({
         threadUrl: game.siteUrl,
@@ -932,6 +1210,17 @@ const App = () => {
         selectedLinkUrl: "",
       });
     }
+  };
+
+  handleGameUpdateRef.current = handleGameUpdate;
+
+  const signInToF95 = () => {
+    Promise.resolve(window.electronAPI.openF95Login()).catch((error) => {
+      console.error("Failed to open the F95 sign-in window:", error);
+      appToast.error("The F95 sign-in window could not be opened.", {
+        title: "Sign in to F95",
+      });
+    });
   };
 
   const buildF95UpdateInstallPayload = (modalState, link) => {
@@ -1124,6 +1413,612 @@ const App = () => {
     if (targetUrl) {
       window.electronAPI.openExternalUrl(targetUrl);
     }
+  };
+
+  // ── Library repair: locate a moved folder ──────────────────────────────
+  // A plain function: the context-menu listener registered on mount keeps the
+  // first instance, which only uses stable setters and callbacks.
+  const handleLocateVersion = async (version, game) => {
+    if (!game?.record_id || !version) {
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.relocateGameVersion({
+        recordId: game.record_id,
+        version: String(version.version ?? ""),
+        oldPath: String(version.game_path || ""),
+      });
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.success) {
+        appToast.error(
+          result?.code === "FOLDER_IN_USE"
+            ? "That folder already belongs to another game in your library."
+            : getRendererErrorMessage(
+                result?.error,
+                "That folder could not be used for this game.",
+              ),
+          { title: "Locate folder" },
+        );
+        return;
+      }
+
+      const updatedGame = result.game || game;
+      if (result.game) {
+        applyUpdatedGameToState(result.game);
+      }
+      if (result.execPath) {
+        appToast.success(
+          `${getDisplayTitle(updatedGame)} is ready to play from its new folder.`,
+          { title: "Folder found" },
+        );
+      } else {
+        appToast.warning(
+          "The folder was saved, but no file that starts the game was found in it.",
+          {
+            title: "Choose the game file",
+            actions: [
+              {
+                label: "Choose .exe",
+                onClick: () => {
+                  setActiveSection(SECTION_LIBRARY);
+                  setSelectedGame(updatedGame);
+                },
+              },
+            ],
+          },
+        );
+      }
+    } catch (error) {
+      console.error("[library.repair] Locate failed:", error);
+      appToast.error("That folder could not be used for this game.", {
+        title: "Locate folder",
+      });
+    }
+  };
+
+  // ── Catalog link ────────────────────────────────────────────────────────
+  const openCatalogLinkModal = (game) => {
+    if (game?.record_id) {
+      setCatalogLinkModal({ isOpen: true, game });
+    }
+  };
+
+  const closeCatalogLinkModal = () => {
+    setCatalogLinkModal((previous) => ({ ...previous, isOpen: false }));
+  };
+
+  const handleCatalogLinked = (updatedGame) => {
+    if (updatedGame) {
+      applyUpdatedGameToState(updatedGame);
+    }
+  };
+
+  // ── Cached banner / screenshots of the details panel ───────────────────
+  const handleImageAction = async (action, game) => {
+    const recordId = game?.record_id;
+    if (!recordId) {
+      return;
+    }
+
+    const reloadPreviews = async () => {
+      const previews = await window.electronAPI.getPreviews(recordId);
+      if (selectedGameRef.current?.record_id === recordId) {
+        setSelectedGamePreviews(Array.isArray(previews) ? previews : []);
+      }
+    };
+
+    const actions = {
+      refreshBanner: {
+        pending: "Downloading the banner…",
+        done: "The banner was downloaded again.",
+        failed: "The banner could not be downloaded. Try again later.",
+        run: async () => {
+          await window.electronAPI.updateBanners(recordId);
+        },
+      },
+      removeBanner: {
+        pending: "Removing the saved banner…",
+        done: "The saved banner was removed.",
+        failed: "The banner could not be removed.",
+        run: async () => {
+          const result = await window.electronAPI.deleteBanner(recordId);
+          if (result && result.success === false) {
+            throw new Error("remove failed");
+          }
+        },
+      },
+      refreshScreenshots: {
+        pending: "Downloading screenshots…",
+        done: "Screenshots were downloaded again.",
+        failed: "The screenshots could not be downloaded. Try again later.",
+        run: async () => {
+          await window.electronAPI.updatePreviews(recordId);
+          await reloadPreviews();
+        },
+      },
+      removeScreenshots: {
+        pending: "Removing saved screenshots…",
+        done: "Saved screenshots were removed.",
+        failed: "The screenshots could not be removed.",
+        run: async () => {
+          const result = await window.electronAPI.deletePreviews(recordId);
+          if (result && result.success === false) {
+            throw new Error("remove failed");
+          }
+          await reloadPreviews();
+        },
+      },
+    };
+    const entry = actions[action];
+    if (!entry) {
+      return;
+    }
+
+    const toastId = appToast.loading(entry.pending, { title: getDisplayTitle(game) });
+    try {
+      await entry.run();
+      refreshGame(recordId);
+      appToast.update(toastId, {
+        type: "success",
+        message: entry.done,
+        dismissible: true,
+        duration: 3000,
+      });
+    } catch (error) {
+      console.error(`[library.details] Image action ${action} failed:`, error);
+      appToast.update(toastId, {
+        type: "error",
+        message: entry.failed,
+        dismissible: true,
+      });
+    }
+  };
+
+  // ── Games with missing files: reinstall all / remove all ───────────────
+  const setReinstallRunState = (nextRun) => {
+    reinstallRunRef.current = nextRun;
+    setReinstallRun(nextRun);
+  };
+
+  const describeReinstallProgress = (run) => {
+    if (!run?.queue) {
+      return "";
+    }
+    const position = run.queue.done.length + (run.queue.active ? 1 : 0);
+    const current = run.queue.active ? `: ${getDisplayTitle(run.queue.active)}` : "";
+    return `Reinstalling ${Math.min(Math.max(position, 1), run.total)} of ${run.total}${current}`;
+  };
+
+  const showReinstallProgressToast = (run) => {
+    appToast.show({
+      id: REINSTALL_TOAST_ID,
+      type: "loading",
+      title: "Reinstalling missing games",
+      message: describeReinstallProgress(run),
+      dismissible: false,
+      duration: 0,
+      // dismiss: false keeps the toast so it can show "Reinstall stopped".
+      actions: [
+        { label: "Stop", dismiss: false, onClick: () => stopReinstallRun() },
+      ],
+    });
+  };
+
+  const finishReinstallRun = (run) => {
+    setReinstallRunState(null);
+    const summary = summarizeReinstallQueue
+      ? summarizeReinstallQueue(run.queue)
+      : { completed: [], failed: [], needsAction: [], noMirror: [] };
+    const unlinkable = Array.isArray(run.unlinkable) ? run.unlinkable : [];
+    const parts = [
+      `${summary.completed.length} completed`,
+      `${summary.failed.length} failed`,
+      `${summary.needsAction.length} need your action`,
+      `${summary.noMirror.length} without a mirror`,
+    ];
+    if (unlinkable.length > 0) {
+      parts.push(`${unlinkable.length} cannot be reinstalled automatically`);
+    }
+    const describeGroup = (label, list) =>
+      list.length > 0
+        ? `${label}:\n${list.map((game) => `• ${getDisplayTitle(game)}`).join("\n")}`
+        : "";
+    const details = [
+      describeGroup("Reinstalled", summary.completed),
+      describeGroup("Failed (see Downloads)", summary.failed),
+      describeGroup("Need your action in Downloads", summary.needsAction),
+      describeGroup("No mirror could be picked automatically", summary.noMirror),
+      describeGroup("Cannot be reinstalled automatically (no F95 thread)", unlinkable),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const hasProblems =
+      summary.failed.length +
+        summary.needsAction.length +
+        summary.noMirror.length +
+        unlinkable.length >
+      0;
+
+    appToast.update(REINSTALL_TOAST_ID, {
+      type: hasProblems ? "warning" : "success",
+      title: "Reinstall finished",
+      message: parts.join(" · "),
+      dismissible: true,
+      duration: 12000,
+      actions: [
+        {
+          label: "Details",
+          onClick: () =>
+            window.AtlasUI?.alert?.({ title: "Reinstall summary", message: details }),
+        },
+        ...(summary.failed.length + summary.needsAction.length > 0
+          ? [{ label: "Open downloads", onClick: () => setDownloadsPanelOpen(true) }]
+          : []),
+      ],
+    });
+  };
+
+  const pumpReinstallQueue = () => {
+    const run = reinstallRunRef.current;
+    if (!run || reinstallStepBusyRef.current || !advanceReinstallQueue) {
+      return;
+    }
+
+    const step = advanceReinstallQueue(
+      run.queue,
+      f95DownloadItemsRef.current,
+      Date.now(),
+    );
+    if (!step.finished && !step.next && !step.queue.isFinished) {
+      return;
+    }
+
+    const nextRun = { ...run, queue: step.queue };
+    setReinstallRunState(nextRun);
+    if (step.queue.isFinished) {
+      finishReinstallRun(nextRun);
+      return;
+    }
+    if (step.next) {
+      showReinstallProgressToast(nextRun);
+      void runReinstallStep(step.next);
+    }
+  };
+
+  const runReinstallStep = async (game) => {
+    reinstallStepBusyRef.current = true;
+    let failure = "";
+    try {
+      const payload = await window.electronAPI.inspectF95Thread({
+        threadUrl: game.siteUrl,
+      });
+      const recommendation = payload?.recommendation;
+      if (!payload?.success) {
+        failure = "error";
+      } else if (!recommendation?.linkUrl) {
+        failure = "no_mirror";
+      } else {
+        const link = (Array.isArray(payload.links) ? payload.links : []).find(
+          (entry) => entry.url === recommendation.linkUrl,
+        ) || { url: recommendation.linkUrl, label: "", host: "" };
+        const result = await window.electronAPI.installF95Thread({
+          // The library thread link keeps the download list matched to this
+          // game even when the thread page redirects to a new address.
+          threadUrl: game.siteUrl,
+          title: payload.title || getDisplayTitle(game),
+          creator: payload.creator || getDisplayCreator(game),
+          version: payload.version || game.latestVersion || "",
+          downloadUrl: recommendation.linkUrl,
+          downloadLabel: link.label || "",
+          mirrorHost: link.host || "",
+          variantId: recommendation.variantId || link.variantId || "",
+          fallbackLinks:
+            window.f95MirrorUi?.buildFallbackLinks?.(payload, link) || [],
+        });
+        if (!result?.success && !result?.awaitingAction) {
+          failure = "error";
+        }
+      }
+    } catch (error) {
+      console.error("[library.reinstall] Step failed:", error);
+      failure = "error";
+    } finally {
+      reinstallStepBusyRef.current = false;
+    }
+
+    const run = reinstallRunRef.current;
+    if (!run || run.queue.active !== game) {
+      return;
+    }
+    if (failure && markReinstallStepFailed) {
+      setReinstallRunState({
+        ...run,
+        queue: markReinstallStepFailed(run.queue, failure),
+      });
+    }
+    pumpReinstallQueue();
+  };
+
+  const stopReinstallRun = () => {
+    if (!reinstallRunRef.current) {
+      return;
+    }
+    setReinstallRunState(null);
+    appToast.update(REINSTALL_TOAST_ID, {
+      type: "info",
+      title: "Reinstall stopped",
+      message: "Games that already started keep downloading in Downloads.",
+      dismissible: true,
+      duration: 6000,
+      actions: [],
+    });
+  };
+
+  const startReinstallMissingGames = async () => {
+    if (reinstallRunRef.current || !createReinstallQueue) {
+      return;
+    }
+
+    const { reinstallable, unlinkable } = partitionReinstallableGames(
+      selectMissingGames(games),
+    );
+    if (reinstallable.length === 0) {
+      appToast.warning(
+        "None of these games is linked to an F95 thread, so they can't be reinstalled automatically. Use Locate… or Link to catalog… in the details panel.",
+        { title: "Nothing to reinstall" },
+      );
+      return;
+    }
+
+    let authState = null;
+    try {
+      authState = await window.electronAPI.getF95AuthStatus();
+    } catch (error) {
+      console.error("Failed to read the F95 session state:", error);
+    }
+    if (!authState?.isAuthenticated) {
+      appToast.info("Sign in to F95 so the games can be downloaded again.", {
+        title: "Sign in to F95",
+        actions: [{ label: "Sign in to F95", onClick: signInToF95 }],
+      });
+      return;
+    }
+
+    const confirmed = window.AtlasUI?.confirm
+      ? await window.AtlasUI.confirm({
+          title: `Reinstall ${reinstallable.length} game${reinstallable.length === 1 ? "" : "s"}?`,
+          message:
+            "They are downloaded again one at a time from their F95 threads and installed into your library folder." +
+            (unlinkable.length > 0
+              ? `\n\n${unlinkable.length} game${unlinkable.length === 1 ? " has" : "s have"} no F95 thread and will be skipped.`
+              : ""),
+          confirmLabel: "Reinstall",
+        })
+      : true;
+    if (!confirmed) {
+      return;
+    }
+
+    setReinstallRunState({
+      queue: createReinstallQueue(reinstallable),
+      total: reinstallable.length,
+      unlinkable,
+    });
+    pumpReinstallQueue();
+  };
+
+  useEffect(() => {
+    f95DownloadItemsRef.current = f95Downloads.items;
+    pumpReinstallQueue();
+    // pumpReinstallQueue only reads refs.
+  }, [f95Downloads.items]);
+
+  const removeAllMissingGames = async () => {
+    const missingGames = selectMissingGames(games);
+    if (
+      missingGames.length === 0 ||
+      isRemovingMissingGames ||
+      reinstallRunRef.current
+    ) {
+      return;
+    }
+
+    const count = missingGames.length;
+    const confirmed = window.AtlasUI?.confirm
+      ? await window.AtlasUI.confirm({
+          title: `Remove ${count} game${count === 1 ? "" : "s"} from the library?`,
+          message:
+            "Only the library entries are removed. Nothing on this PC is deleted and saves stay where they are. If you use cloud saves, the games also leave your account library.",
+          confirmLabel: "Remove from library",
+          tone: "danger",
+        })
+      : window.confirm(`Remove ${count} game(s) from the library?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setIsRemovingMissingGames(true);
+    const toastId = appToast.loading(`Removing ${count} game${count === 1 ? "" : "s"}…`, {
+      title: "Remove from library",
+    });
+    let removed = 0;
+    const failedTitles = [];
+    const warnings = new Set();
+    for (const game of missingGames) {
+      try {
+        const result = await window.electronAPI.removeLibraryGame({
+          recordId: game.record_id,
+          mode: DELETE_GAME_MODES.LIBRARY_ONLY,
+        });
+        if (result?.success) {
+          removed += 1;
+          (result.warnings || []).forEach((warning) => warnings.add(warning));
+        } else {
+          failedTitles.push(getDisplayTitle(game));
+        }
+      } catch (error) {
+        console.error("[library.remove] Bulk removal failed for a game:", error);
+        failedTitles.push(getDisplayTitle(game));
+      }
+    }
+    setIsRemovingMissingGames(false);
+
+    const message = [
+      `${removed} removed from your library.`,
+      failedTitles.length > 0
+        ? `Could not remove: ${failedTitles.join(", ")}.`
+        : "",
+      ...warnings,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    appToast.update(toastId, {
+      type: failedTitles.length > 0 || warnings.size > 0 ? "warning" : "success",
+      title: "Remove from library",
+      message,
+      dismissible: true,
+      duration: failedTitles.length > 0 ? 10000 : 5000,
+    });
+  };
+
+  // ── Presence re-check without a scan ────────────────────────────────────
+  const recheckLibrary = async () => {
+    if (isRecheckingLibrary || isLibraryScanRunningRef.current) {
+      return;
+    }
+    setIsRecheckingLibrary(true);
+    const reloaded = await reloadLibraryGames();
+    setIsRecheckingLibrary(false);
+    if (!reloaded) {
+      appToast.error("The library could not be re-checked. Try again.", {
+        title: "Re-check",
+      });
+      return;
+    }
+    const counts = countLibraryInstallStates(reloaded);
+    appToast.info(
+      counts.missing > 0
+        ? `${counts.missing} game${counts.missing === 1 ? " has" : "s have"} missing files.`
+        : "Every installed game was found on this PC.",
+      { title: "Library re-checked", duration: 3500 },
+    );
+  };
+
+  // ── Live thread checks (Updates section) ────────────────────────────────
+  const refreshLiveUpdateState = useCallback(async () => {
+    try {
+      const state = await window.electronAPI.getLiveUpdateState?.();
+      if (state) {
+        setLiveUpdateState(state);
+      }
+    } catch (error) {
+      console.error("Failed to read the thread check state:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === SECTION_UPDATES) {
+      void refreshLiveUpdateState();
+    }
+  }, [activeSection, refreshLiveUpdateState]);
+
+  const checkThreadsNow = async () => {
+    if (isCheckingThreads) {
+      return;
+    }
+    setIsCheckingThreads(true);
+    try {
+      // Manual checks cover every installed game (favorites first); the
+      // automatic check every six hours covers favorites only.
+      const result = await window.electronAPI.checkLiveUpdates({
+        force: true,
+        favoritesOnly: false,
+      });
+      if (result?.skippedReason === "not_authenticated") {
+        appToast.info("Sign in to F95 first.", {
+          title: "Check threads",
+          actions: [{ label: "Sign in to F95", onClick: signInToF95 }],
+        });
+      } else if (!result?.success) {
+        appToast.error(
+          getRendererErrorMessage(result?.error, "The threads could not be checked."),
+          { title: "Check threads" },
+        );
+      } else if (!result.checked) {
+        appToast.info("No installed game with an F95 thread needs a check.", {
+          title: "Check threads",
+        });
+      } else {
+        appToast.success(
+          `${result.checked} checked · ${result.updated} new version${result.updated === 1 ? "" : "s"} · ${result.failed} failed`,
+          { title: "Threads checked" },
+        );
+      }
+    } catch (error) {
+      console.error("Failed to check threads:", error);
+      appToast.error("The threads could not be checked.", { title: "Check threads" });
+    } finally {
+      setIsCheckingThreads(false);
+      void refreshLiveUpdateState();
+    }
+  };
+
+  // ── Screenshot refresh (rescan menu) ────────────────────────────────────
+  const refreshLibraryScreenshots = () => {
+    if (isLibraryScanRunningRef.current) {
+      appToast.info("Wait for the current library task to finish.");
+      return;
+    }
+    isLibraryScanRunningRef.current = true;
+    setIsLibraryScanRunning(true);
+    setImportProgress({
+      text: "Starting screenshot refresh...",
+      progress: 0,
+      total: 1,
+    });
+
+    window.electronAPI
+      .refreshLibraryPreviews()
+      .then((result) => {
+        if ((result?.totalGames || 0) === 0) {
+          setImportProgress({
+            text: "No library games with site screenshots were found.",
+            progress: 0,
+            total: 1,
+          });
+          return;
+        }
+
+        if (!result?.success) {
+          setImportProgress({
+            text: `Screenshot refresh finished: ${result?.refreshed || 0} updated, ${result?.skipped || 0} skipped, ${result?.failed || 0} failed`,
+            progress: result?.processed || 0,
+            total: result?.totalGames || 1,
+          });
+          return;
+        }
+
+        setImportProgress({
+          text: `Screenshot refresh complete: ${result.refreshed} updated, ${result.skipped} already complete`,
+          progress: result.processed || 0,
+          total: result.totalGames || 1,
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to refresh library screenshots:", error);
+        setImportProgress({
+          text: `Screenshot refresh failed: ${error.message}`,
+          progress: 0,
+          total: 1,
+        });
+      })
+      .finally(() => {
+        isLibraryScanRunningRef.current = false;
+        setIsLibraryScanRunning(false);
+      });
   };
 
   const addScanSource = async () => {
@@ -1413,33 +2308,115 @@ const App = () => {
     [refreshLibraryGrid],
   );
 
-  // Debounced refresh for game updates
+  // Refresh for "game-updated" events. Ids that arrive within 100 ms are
+  // collected and each is fetched once (a plain debounce kept only the last
+  // id, so bursts such as a thread check of many games lost updates).
   const refreshGame = useCallback(
-    debounce((recordId) => {
-      console.log(`refreshGame called for recordId: ${recordId}`);
-      window.electronAPI
-        .getGame(recordId)
-        .then((updatedGame) => {
-          if (updatedGame) {
-            console.log(`Updated game data for recordId ${recordId}:`, {
-              record_id: updatedGame.record_id,
-              title: updatedGame.title,
-              banner_url: updatedGame.banner_url,
-            });
-            applyUpdatedGameToState(updatedGame);
-            console.log(`Forcing grid update for recordId: ${recordId}`);
-          } else {
-            console.warn(`No game data returned for recordId: ${recordId}`);
+    (recordId) => {
+      const normalizedId = Number(recordId);
+      if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+        return;
+      }
+      pendingGameRefreshIdsRef.current.add(normalizedId);
+      if (gameRefreshTimerRef.current !== null) {
+        return;
+      }
+
+      gameRefreshTimerRef.current = window.setTimeout(() => {
+        gameRefreshTimerRef.current = null;
+        const recordIds = [...pendingGameRefreshIdsRef.current];
+        pendingGameRefreshIdsRef.current.clear();
+
+        for (const pendingId of recordIds) {
+          window.electronAPI
+            .getGame(pendingId)
+            .then((updatedGame) => {
+              if (updatedGame) {
+                applyUpdatedGameToState(updatedGame);
+              } else {
+                console.warn(`No game data returned for recordId: ${pendingId}`);
+              }
+            })
+            .catch((error) =>
+              console.error(
+                `Failed to update game for recordId ${pendingId}:`,
+                error,
+              ),
+            );
+
+          // Images may have changed (catalog link, banner refresh): keep the
+          // screenshots of the open details panel current.
+          if (selectedGameRef.current?.record_id === pendingId) {
+            window.electronAPI
+              .getPreviews(pendingId)
+              .then((previews) => {
+                if (selectedGameRef.current?.record_id === pendingId) {
+                  setSelectedGamePreviews(Array.isArray(previews) ? previews : []);
+                }
+              })
+              .catch((error) =>
+                console.error("Failed to refresh screenshots:", error),
+              );
           }
-        })
-        .catch((error) =>
-          console.error(
-            `Failed to update game for recordId ${recordId}:`,
-            error,
-          ),
-        );
-    }, 100),
+        }
+      }, 100);
+    },
     [applyUpdatedGameToState],
+  );
+
+  // Full reload of the library list; the main process re-checks which game
+  // folders exist on disk while loading it.
+  const reloadLibraryGames = useCallback(async () => {
+    try {
+      const allGames = await window.electronAPI.getGames();
+      const gamesArray = Array.isArray(allGames) ? allGames : [];
+      lastLibraryLoadAtRef.current = Date.now();
+      setGames(gamesArray);
+      setTotalVersions(
+        gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
+      );
+      const selectedId = selectedGameRef.current?.record_id;
+      if (selectedId) {
+        const refreshedSelection = gamesArray.find(
+          (game) => game.record_id === selectedId,
+        );
+        if (refreshedSelection) {
+          setSelectedGame(refreshedSelection);
+          setSelectedGameDetails(refreshedSelection);
+        }
+      }
+      return gamesArray;
+    } catch (error) {
+      console.error("Failed to reload the library:", error);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      if (isLibraryScanRunningRef.current) {
+        return;
+      }
+      if (
+        Date.now() - lastLibraryLoadAtRef.current <
+        LIBRARY_PRESENCE_RECHECK_AFTER_MS
+      ) {
+        return;
+      }
+      void reloadLibraryGames();
+    };
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [reloadLibraryGames]);
+
+  useEffect(
+    () => () => {
+      if (gameRefreshTimerRef.current !== null) {
+        window.clearTimeout(gameRefreshTimerRef.current);
+        gameRefreshTimerRef.current = null;
+      }
+    },
+    [],
   );
 
   const setGameFavoriteState = useCallback(
@@ -1526,6 +2503,7 @@ const App = () => {
       .then((allGames) => {
         const gamesArray = Array.isArray(allGames) ? allGames : [];
         console.log(`Initial fetch: ${gamesArray.length} games loaded`);
+        lastLibraryLoadAtRef.current = Date.now();
         setGames(gamesArray);
         setTotalVersions(
           gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
@@ -1691,6 +2669,7 @@ const App = () => {
         .then((allGames) => {
           const gamesArray = Array.isArray(allGames) ? allGames : [];
           console.log(`Import complete: ${gamesArray.length} games loaded`);
+          lastLibraryLoadAtRef.current = Date.now();
           setGames(gamesArray);
           setTotalVersions(
             gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
@@ -1807,22 +2786,9 @@ const App = () => {
       ),
       subscribeElectronEvent("onGameImported", "game-imported", handleGameImported),
     ];
+    // Cloud library sync and library restore both ask for a full reload.
     const handleGamesLibrarySynced = () => {
-      window.electronAPI
-        .getGames()
-        .then((allGames) => {
-          const gamesArray = Array.isArray(allGames) ? allGames : [];
-          setGames(gamesArray);
-          setTotalVersions(
-            gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
-          );
-        })
-        .catch((error) => {
-          console.error(
-            "Failed to refresh games after cloud library sync:",
-            error,
-          );
-        });
+      void reloadLibraryGames();
     };
     unsubscribers.push(
       subscribeElectronEvent(
@@ -1892,6 +2858,51 @@ const App = () => {
         return;
       }
 
+      if (data.action === "locateGame") {
+        window.electronAPI
+          .getGame(data.recordId)
+          .then((updatedGame) => {
+            if (!updatedGame) {
+              return;
+            }
+            const missingVersions = (
+              Array.isArray(updatedGame.versions) ? updatedGame.versions : []
+            )
+              .filter((version) => version?.isPresent === false)
+              .sort((left, right) => (right.date_added || 0) - (left.date_added || 0));
+            if (missingVersions.length === 0) {
+              appToast.info("The folder of this game is on this PC.", {
+                title: "Nothing to locate",
+              });
+              return;
+            }
+            void handleLocateVersion(missingVersions[0], updatedGame);
+          })
+          .catch((error) =>
+            console.error("Failed to prepare locating a game:", error),
+          );
+        return;
+      }
+
+      if (data.action === "chooseExecutable") {
+        window.electronAPI
+          .getGame(data.recordId)
+          .then((updatedGame) => {
+            if (updatedGame) {
+              setActiveSection(SECTION_LIBRARY);
+              setSelectedGame(updatedGame);
+              appToast.info(
+                "Use Choose .exe on the version in the details panel to pick the file that starts the game.",
+                { title: "Choose the game file", duration: 6000 },
+              );
+            }
+          })
+          .catch((error) =>
+            console.error("Failed to open the game details:", error),
+          );
+        return;
+      }
+
       if (
         data.action === "addToFavorites" ||
         data.action === "removeFromFavorites"
@@ -1922,57 +2933,7 @@ const App = () => {
       }
 
       if (data.action === "refreshLibraryPreviews") {
-        if (isLibraryScanRunningRef.current) {
-          appToast.info("Wait for the current library task to finish.");
-          return;
-        }
-        isLibraryScanRunningRef.current = true;
-        setIsLibraryScanRunning(true);
-        setImportProgress({
-          text: "Starting screenshot refresh...",
-          progress: 0,
-          total: 1,
-        });
-
-        window.electronAPI
-          .refreshLibraryPreviews()
-          .then((result) => {
-            if ((result?.totalGames || 0) === 0) {
-              setImportProgress({
-                text: "No library games with site screenshots were found.",
-                progress: 0,
-                total: 1,
-              });
-              return;
-            }
-
-            if (!result?.success) {
-              setImportProgress({
-                text: `Screenshot refresh finished: ${result?.refreshed || 0} updated, ${result?.skipped || 0} skipped, ${result?.failed || 0} failed`,
-                progress: result?.processed || 0,
-                total: result?.totalGames || 1,
-              });
-              return;
-            }
-
-            setImportProgress({
-              text: `Screenshot refresh complete: ${result.refreshed} updated, ${result.skipped} already complete`,
-              progress: result.processed || 0,
-              total: result.totalGames || 1,
-            });
-          })
-          .catch((error) => {
-            console.error("Failed to refresh library screenshots:", error);
-            setImportProgress({
-              text: `Screenshot refresh failed: ${error.message}`,
-              progress: 0,
-              total: 1,
-            });
-          })
-          .finally(() => {
-            isLibraryScanRunningRef.current = false;
-            setIsLibraryScanRunning(false);
-          });
+        refreshLibraryScreenshots();
       }
     };
     unsubscribers.push(
@@ -2127,6 +3088,9 @@ const App = () => {
       }
 
       const summaryParts = [`${result.imported || 0} added`];
+      if (result.importedUnmatched > 0) {
+        summaryParts.push(`${result.importedUnmatched} of them without a catalog match`);
+      }
       if (result.refreshed > 0) {
         summaryParts.push(`${result.refreshed} refreshed`);
       }
@@ -2147,8 +3111,83 @@ const App = () => {
 
       if (result.missingCount > 0) {
         appToast.warning(
-          `${result.missingCount} game${result.missingCount === 1 ? "" : "s"} in your library point to folders that no longer exist. Use the "Files missing" filter to reinstall or remove them.`,
-          { title: "Missing game files", duration: 8000 },
+          `${result.missingCount} game${result.missingCount === 1 ? "" : "s"} in your library point to folders that no longer exist. Use the "Files missing" filter to locate, reinstall or remove them.`,
+          {
+            title: "Missing game files",
+            duration: 8000,
+            actions: [
+              {
+                label: "Show them",
+                onClick: () => {
+                  setActiveSection(SECTION_LIBRARY);
+                  setLibraryInstallFilter(LIBRARY_INSTALL_FILTERS.MISSING);
+                },
+              },
+            ],
+          },
+        );
+      }
+
+      if (result.reviewQueued > 0 || result.importedUnmatched > 0) {
+        const reviewText =
+          result.reviewQueued > 0
+            ? `${result.reviewQueued} folder${result.reviewQueued === 1 ? "" : "s"} need${result.reviewQueued === 1 ? "s" : ""} your review before ${result.reviewQueued === 1 ? "it is" : "they are"} added.`
+            : "";
+        const unmatchedText =
+          result.importedUnmatched > 0
+            ? `${result.importedUnmatched} game${result.importedUnmatched === 1 ? " was" : "s were"} added without a catalog match — open the game and use Link to catalog… to get its banner and updates.`
+            : "";
+        appToast.info([reviewText, unmatchedText].filter(Boolean).join("\n"), {
+          title: "Scan complete",
+          duration: 9000,
+          actions:
+            result.reviewQueued > 0
+              ? [{ label: "Open Scan Hub", onClick: () => setShowDiscovery(true) }]
+              : [],
+        });
+      }
+
+      const duplicateMerges = Array.isArray(result.duplicateMerges)
+        ? result.duplicateMerges
+        : [];
+      const mergedCount = duplicateMerges.reduce(
+        (sum, merge) =>
+          sum + (Array.isArray(merge?.mergedTitles) ? merge.mergedTitles.length : 0),
+        0,
+      );
+      if (mergedCount > 0) {
+        const mergeDetails = duplicateMerges
+          .map((merge) => {
+            const merged = Array.isArray(merge?.mergedTitles) ? merge.mergedTitles : [];
+            const failed = Array.isArray(merge?.failedTitles) ? merge.failedTitles : [];
+            const lines = [];
+            if (merged.length > 0) {
+              lines.push(`${merge.keptTitle || "Game"} ← ${merged.join(", ")}`);
+            }
+            if (failed.length > 0) {
+              lines.push(
+                `${merge.keptTitle || "Game"}: could not merge ${failed.join(", ")}`,
+              );
+            }
+            return lines.join("\n");
+          })
+          .filter(Boolean)
+          .join("\n");
+        appToast.info(
+          `Merged ${mergedCount} duplicate ${mergedCount === 1 ? "entry" : "entries"}.`,
+          {
+            title: "Duplicates merged",
+            actions: [
+              {
+                label: "Details",
+                onClick: () =>
+                  window.AtlasUI?.alert?.({
+                    title: "Duplicates merged",
+                    message: mergeDetails,
+                  }),
+              },
+            ],
+          },
         );
       }
       return result;
@@ -2175,30 +3214,34 @@ const App = () => {
       return;
     }
 
-    window.electronAPI.showContextMenu([
-      {
-        label: "Find New Games",
-        data: { action: "rescanLibrary" },
-      },
-      {
-        label: "Refresh Installed Games",
-        data: { action: "refreshLibrary" },
-      },
-      { type: "separator" },
-      {
-        label: "Refresh Cached Screenshots",
-        data: { action: "refreshLibraryPreviews" },
-      },
-      {
-        label: "Reset Scan Cache & Rescan",
-        data: { action: "resetCacheAndRescanLibrary" },
-      },
-      { type: "separator" },
-      {
-        label: "Rebuild Library From Scratch…",
-        data: { action: "resetLibrary" },
-      },
-    ]);
+    setIsRescanMenuOpen((previous) => !previous);
+  };
+
+  const closeRescanLibraryMenu = useCallback(() => {
+    setIsRescanMenuOpen(false);
+  }, []);
+
+  const runRescanMenuAction = (actionId) => {
+    setIsRescanMenuOpen(false);
+    switch (actionId) {
+      case "rescanLibrary":
+        void rescanLibrary();
+        break;
+      case "refreshLibrary":
+        void rescanLibrary({ mode: "refresh" });
+        break;
+      case "refreshLibraryPreviews":
+        refreshLibraryScreenshots();
+        break;
+      case "resetCacheAndRescanLibrary":
+        void rescanLibrary({ mode: "reset_cache" });
+        break;
+      case "resetLibrary":
+        openLibraryResetModal();
+        break;
+      default:
+        break;
+    }
   };
 
   const closeLibraryResetModal = () => {
@@ -2343,6 +3386,11 @@ const App = () => {
     ],
   );
   const librarySortDescription = getLibrarySortDescription(librarySortMode);
+  const liveThreadsCheckedLabel =
+    liveUpdateState?.lastRun?.finishedAt &&
+    !liveUpdateState.lastRun.skippedReason
+      ? window.formatDetailRelativeTime?.(liveUpdateState.lastRun.finishedAt) || ""
+      : "";
 
   useEffect(() => {
     const frameId = window.requestAnimationFrame(() => {
@@ -2779,6 +3827,51 @@ const App = () => {
           </select>
         </label>
       )}
+      {activeSection === SECTION_UPDATES && (
+        <>
+          {liveThreadsCheckedLabel && (
+            <span
+              className="text-[11px] text-text/55"
+              title="Installed favorites are checked on their F95 threads every six hours while you're signed in to F95."
+            >
+              {`Threads checked ${liveThreadsCheckedLabel}`}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={checkThreadsNow}
+            disabled={isCheckingThreads}
+            className="flex items-center gap-1.5 border border-accent/50 bg-accent/15 px-2 py-1 text-xs text-text shadow-glass-sm backdrop-blur-md transition hover:bg-accent/25 disabled:cursor-wait disabled:opacity-70"
+            title="Read the latest versions straight from the F95 threads of your installed games"
+          >
+            {isCheckingThreads ? (
+              <span className="atlas-spinner atlas-keep-motion text-[12px]" aria-hidden />
+            ) : (
+              <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                manage_search
+              </span>
+            )}
+            {isCheckingThreads ? "Checking threads…" : "Check threads now"}
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        onClick={recheckLibrary}
+        disabled={isLibraryScanRunning || isRecheckingLibrary}
+        aria-label="Re-check which games are on this PC"
+        title="Re-check which games are on this PC (no scan)"
+        className="flex h-[26px] w-[26px] items-center justify-center border border-border bg-white/5 text-text shadow-glass-sm backdrop-blur-md transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <span
+          className={`material-symbols-outlined text-[16px] leading-none ${
+            isRecheckingLibrary ? "animate-spin atlas-keep-motion" : ""
+          }`}
+          aria-hidden
+        >
+          refresh
+        </span>
+      </button>
       <button
         type="button"
         onClick={toggleGameList}
@@ -2798,7 +3891,78 @@ const App = () => {
     </div>
   );
 
+  const renderMissingGamesBar = () => {
+    const isBusy = Boolean(reinstallRun) || isRemovingMissingGames;
+    return (
+      <div
+        className="atlas-rise-enter mx-2 flex flex-wrap items-center gap-3 border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-50 shadow-glass-sm"
+        role="region"
+        aria-label="Games with missing files"
+      >
+        <span className="material-symbols-outlined text-[20px] leading-none text-amber-300" aria-hidden>
+          folder_off
+        </span>
+        <div className="min-w-[220px] flex-1">
+          <div className="font-medium">
+            {`${missingGameCount} ${missingGameCount === 1 ? "game has" : "games have"} missing files`}
+          </div>
+          <div className="text-xs text-amber-100/75">
+            {reinstallRun
+              ? describeReinstallProgress(reinstallRun)
+              : "Reinstall them from their F95 threads or remove them from the library. Moved a folder? Use Locate… in the game's details."}
+          </div>
+        </div>
+        {reinstallRun ? (
+          <button
+            type="button"
+            onClick={stopReinstallRun}
+            className="flex items-center gap-1.5 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10"
+          >
+            <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+              stop_circle
+            </span>
+            Stop
+          </button>
+        ) : (
+          <>
+            {createReinstallQueue && (
+              <button
+                type="button"
+                onClick={startReinstallMissingGames}
+                disabled={isBusy}
+                className="flex items-center gap-1.5 border border-accent/60 bg-accent px-2.5 py-1 text-xs font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                  download
+                </span>
+                Reinstall all
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={removeAllMissingGames}
+              disabled={isBusy}
+              className="flex items-center gap-1.5 border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRemovingMissingGames ? (
+                <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
+                  playlist_remove
+                </span>
+              )}
+              Remove all from library
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const hasLibraryQuery = Boolean(libraryQuery.trim());
+  const isLibraryFilterActive =
+    activeSection === SECTION_LIBRARY &&
+    libraryInstallFilter !== LIBRARY_INSTALL_FILTERS.ALL;
   const sectionMeta =
     activeSection === SECTION_UPDATES
       ? {
@@ -2817,14 +3981,25 @@ const App = () => {
             emptyDescription:
               "Log in to F95 to unlock the live search workspace, direct downloads and install-to-library flow.",
           }
-        : {
-            icon: hasLibraryQuery ? "search_off" : "library_add",
-            eyebrow: "User Library",
-            emptyTitle: hasLibraryQuery ? "No games match your search" : "Library is empty",
-            emptyDescription: hasLibraryQuery
-              ? `Nothing in your library matches “${libraryQuery.trim()}”.`
-              : "Scan your configured sources to populate the library and discovery queue.",
-          };
+        : isLibraryFilterActive && !hasLibraryQuery
+          ? {
+              icon: "filter_alt_off",
+              eyebrow: "User Library",
+              emptyTitle: "No games match this filter",
+              emptyDescription: `Nothing in your library is in “${
+                LIBRARY_INSTALL_FILTER_OPTIONS.find(
+                  (option) => option.value === libraryInstallFilter,
+                )?.label || "this view"
+              }”.`,
+            }
+          : {
+              icon: hasLibraryQuery ? "search_off" : "library_add",
+              eyebrow: "User Library",
+              emptyTitle: hasLibraryQuery ? "No games match your search" : "Library is empty",
+              emptyDescription: hasLibraryQuery
+                ? `Nothing in your library matches “${libraryQuery.trim()}”.`
+                : "Scan your configured sources to populate the library and discovery queue.",
+            };
 
   const renderEmptyState = () => (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text">
@@ -2849,6 +4024,14 @@ const App = () => {
               className="border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-accent/25"
             >
               Clear search
+            </button>
+          ) : isLibraryFilterActive ? (
+            <button
+              type="button"
+              onClick={() => setLibraryInstallFilter(LIBRARY_INSTALL_FILTERS.ALL)}
+              className="border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-accent/25"
+            >
+              Show all games
             </button>
           ) : activeSection === SECTION_LIBRARY ? (
             <>
@@ -2948,6 +4131,9 @@ const App = () => {
     if (activeSection === SECTION_LIBRARY) {
       return (
         <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-1 pb-3">
+          {libraryInstallFilter === LIBRARY_INSTALL_FILTERS.MISSING &&
+            missingGameCount > 0 &&
+            renderMissingGamesBar()}
           {favoriteLibraryGames.length > 0 && (
             <section className="atlas-rise-enter space-y-3 px-2">
               <div className="flex items-center gap-3 px-1">
@@ -3271,6 +4457,10 @@ const App = () => {
                   onRemoveGame={openDeleteGameModal}
                   onPreviewSelect={setPreviewModalIndex}
                   onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
+                  onLocateVersion={handleLocateVersion}
+                  onGameChanged={applyUpdatedGameToState}
+                  onLinkCatalog={openCatalogLinkModal}
+                  onImageAction={handleImageAction}
                 />
               </AppSafe>
             )}
@@ -3448,6 +4638,8 @@ const App = () => {
           captchaUrl={f95UpdateModal.captchaUrl}
           attemptEvents={f95UpdateAttemptEvents}
           selectedLinkUrl={f95UpdateModal.selectedLinkUrl}
+          needsLogin={f95UpdateModal.needsLogin}
+          onSignIn={signInToF95}
           onSelectLink={(selectedLinkUrl) =>
             setF95UpdateModal((previous) => ({
               ...previous,
@@ -3458,6 +4650,17 @@ const App = () => {
           onConfirm={confirmF95Update}
           onClose={closeF95UpdateModal}
         />
+      </AppSafe>
+
+      <AppSafe name="catalog-link" variant="silent">
+        {window.CatalogLinkModal && (
+          <window.CatalogLinkModal
+            isOpen={catalogLinkModal.isOpen}
+            game={catalogLinkModal.game}
+            onClose={closeCatalogLinkModal}
+            onLinked={handleCatalogLinked}
+          />
+        )}
       </AppSafe>
 
       <AppSafe name="delete-modal" variant="silent">
@@ -3511,21 +4714,37 @@ const App = () => {
             <i className="fas fa-binoculars mr-2 text-accent transition-transform duration-500 group-hover:-translate-y-0.5"></i>
             Scan Hub
           </button>
-          <button
-            type="button"
-            onClick={openRescanLibraryMenu}
-            disabled={isLibraryScanRunning}
-            className="group flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent disabled:cursor-wait disabled:opacity-70"
-          >
-            <i
-              className={`fas fa-sync-alt mr-2 text-accent ${
-                isLibraryScanRunning
-                  ? "animate-spin atlas-keep-motion"
-                  : "transition-transform duration-700 group-hover:rotate-180"
+          <div className="relative">
+            <button
+              ref={rescanButtonRef}
+              type="button"
+              onClick={openRescanLibraryMenu}
+              disabled={isLibraryScanRunning}
+              aria-haspopup="menu"
+              aria-expanded={isRescanMenuOpen}
+              className={`group flex h-8 items-center px-2 text-xs text-text transition hover:bg-white/10 hover:text-accent disabled:cursor-wait disabled:opacity-70 ${
+                isRescanMenuOpen ? "bg-white/10 text-accent" : ""
               }`}
-            ></i>
-            {isLibraryScanRunning ? "Scanning…" : "Rescan Library"}
-          </button>
+            >
+              <i
+                className={`fas fa-sync-alt mr-2 text-accent ${
+                  isLibraryScanRunning
+                    ? "animate-spin atlas-keep-motion"
+                    : "transition-transform duration-700 group-hover:rotate-180"
+                }`}
+              ></i>
+              {isLibraryScanRunning ? "Scanning…" : "Rescan Library"}
+              <span className="material-symbols-outlined ml-1 text-[14px] leading-none" aria-hidden>
+                {isRescanMenuOpen ? "expand_more" : "expand_less"}
+              </span>
+            </button>
+            <LibraryRescanMenu
+              isOpen={isRescanMenuOpen}
+              anchorRef={rescanButtonRef}
+              onSelect={runRescanMenuAction}
+              onClose={closeRescanLibraryMenu}
+            />
+          </div>
           {cancelScanPresence.isMounted && (
             <button
               type="button"

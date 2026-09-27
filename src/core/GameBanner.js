@@ -172,6 +172,14 @@ const getCardInstallState = (game) => {
     : "missing";
 };
 
+// No catalog entry, thread id or thread link (see shared/libraryInstallState).
+const needsCardCatalogLink = (game) => {
+  if (window.libraryInstallState?.needsCatalogLink) {
+    return window.libraryInstallState.needsCatalogLink(game);
+  }
+  return Boolean(game && !game.atlas_id && !game.f95_id && !game.siteUrl);
+};
+
 const getNewestVersion = (versions) => {
   if (!versions || versions.length === 0) return "";
   let maxVersion = versions[0].version;
@@ -229,14 +237,23 @@ function AtlasF95BannerCard({
     : isMissing
       ? "Files missing"
       : "Not installed";
-  const launchable = isInstalled ? pickVersionForLaunch(presentVersions) : null;
+  const playableVersions = presentVersions.filter((version) =>
+    Boolean(version?.exec_path),
+  );
+  const launchable = isInstalled ? pickVersionForLaunch(playableVersions) : null;
   const canPlay = Boolean(launchable?.exec_path);
-  const canInstall = !canPlay && Boolean(game.siteUrl);
+  // Installed, but no version knows which file starts the game: the card
+  // opens the details panel where the launcher can be chosen.
+  const needsExecutable = isInstalled && !canPlay && presentVersions.length > 0;
+  const canInstall = !canPlay && !needsExecutable && Boolean(game.siteUrl);
   const primaryActionLabel = canPlay
     ? "Play"
-    : canInstall
-      ? "Install"
-      : "Play";
+    : needsExecutable
+      ? "Choose .exe"
+      : canInstall
+        ? "Install"
+        : "Play";
+  const isNotMatched = needsCardCatalogLink(game);
   const stateBadge = isMissing
     ? {
         text: "Files missing",
@@ -266,6 +283,11 @@ function AtlasF95BannerCard({
         recordId: game.record_id,
         title: displayTitle,
       });
+      return;
+    }
+
+    if (needsExecutable) {
+      onSelect?.();
       return;
     }
 
@@ -328,16 +350,39 @@ function AtlasF95BannerCard({
   } else {
     thumbChildren.push(bannerPlaceholder);
   }
-  if (stateBadge) {
+  if (stateBadge || isNotMatched) {
     thumbChildren.push(
       React.createElement(
         "div",
         {
-          key: "state",
-          className: `atlas-badge-enter absolute top-2 left-2 z-30 px-2 py-0.5 border text-[10px] backdrop-blur-sm ${stateBadge.className}`,
-          title: stateBadge.title,
+          key: "badges",
+          className:
+            "pointer-events-none absolute top-2 left-2 z-30 flex flex-col items-start gap-1",
         },
-        stateBadge.text,
+        [
+          stateBadge &&
+            React.createElement(
+              "div",
+              {
+                key: "state",
+                className: `atlas-badge-enter pointer-events-auto px-2 py-0.5 border text-[10px] backdrop-blur-sm ${stateBadge.className}`,
+                title: stateBadge.title,
+              },
+              stateBadge.text,
+            ),
+          isNotMatched &&
+            React.createElement(
+              "div",
+              {
+                key: "unmatched",
+                className:
+                  "atlas-badge-enter pointer-events-auto px-2 py-0.5 border border-white/35 bg-black/45 text-[10px] text-white/80 backdrop-blur-sm",
+                title:
+                  "Added from its folder and not linked to the game catalog yet. Open the details to link it.",
+              },
+              "Not matched",
+            ),
+        ].filter(Boolean),
       ),
     );
   }
@@ -366,14 +411,16 @@ function AtlasF95BannerCard({
       key: "play",
       type: "button",
       className: `inline-flex shrink-0 items-center justify-center gap-1 border px-1.5 py-0.5 text-[10px] font-semibold pointer-events-auto transition-[background-color,box-shadow,color] ${
-        canPlay || canInstall
+        canPlay || canInstall || needsExecutable
           ? "border-accent/70 bg-accent/85 text-onAccent hover:bg-accent hover:shadow-glow-accent"
           : "cursor-not-allowed border-border/60 bg-surfaceMuted text-white/55"
       }`,
-      disabled: !canPlay && !canInstall,
+      disabled: !canPlay && !canInstall && !needsExecutable,
       onClick: handlePrimaryAction,
       "aria-label": primaryActionLabel,
-      title: primaryActionLabel,
+      title: needsExecutable
+        ? "Choose the file that starts this game"
+        : primaryActionLabel,
     },
     React.createElement(
       "span",
@@ -381,7 +428,13 @@ function AtlasF95BannerCard({
         className: "material-symbols-outlined text-[13px] leading-none",
         "aria-hidden": true,
       },
-      canPlay ? "play_arrow" : canInstall ? "download" : "block",
+      canPlay
+        ? "play_arrow"
+        : needsExecutable
+          ? "settings"
+          : canInstall
+            ? "download"
+            : "block",
     ),
     primaryActionLabel,
   );
@@ -597,6 +650,27 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
           enabled: Boolean(v.game_path),
           data: { action: "openFolder", gamePath: v.game_path },
         })),
+      });
+    }
+
+    const installState = getCardInstallState(game);
+    // The folder was moved or renamed: point the library at its new place.
+    if (installState === "missing") {
+      menuTemplate.push({
+        label: "Locate Folder…",
+        data: { action: "locateGame", recordId: game.record_id },
+      });
+    }
+
+    // Files are here, but no version knows which file starts the game.
+    if (
+      installState === "installed" &&
+      playableVersions.length === 0 &&
+      presentVersions.length > 0
+    ) {
+      menuTemplate.push({
+        label: "Choose Executable…",
+        data: { action: "chooseExecutable", recordId: game.record_id },
       });
     }
 

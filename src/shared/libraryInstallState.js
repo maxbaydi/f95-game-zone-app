@@ -128,6 +128,59 @@
     return counts;
   }
 
+  /**
+   * @param {unknown} value
+   * @returns {string}
+   */
+  function normalizeIdentityValue(value) {
+    return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  /**
+   * True when a record has no catalog entry, no thread id and no thread link
+   * (typically a folder added by a scan without a confident catalog match).
+   * Such games get no updates or banners until they are linked to the catalog.
+   * main/catalogLink.js re-exports this function.
+   *
+   * @param {any} game
+   * @returns {boolean}
+   */
+  function needsCatalogLink(game) {
+    if (!game || typeof game !== "object") {
+      return false;
+    }
+
+    return (
+      !normalizeIdentityValue(game.atlas_id) &&
+      !normalizeIdentityValue(game.f95_id) &&
+      !normalizeIdentityValue(game.siteUrl)
+    );
+  }
+
+  /**
+   * Search text for the catalog built from a stored title: bracketed tags and
+   * a trailing version (`-0.5`, ` v1.2.3 Beta`) are dropped and separators
+   * become spaces, so `my-game-0.5 [PC]` searches for `my game`.
+   *
+   * @param {unknown} title
+   * @returns {string}
+   */
+  function buildCatalogSearchTitle(title) {
+    const original = normalizeIdentityValue(title);
+    const withoutTags = original.replace(/\[[^\]]*\]|\([^)]*\)|\{[^}]*\}/g, " ");
+    const withoutVersion = withoutTags.replace(
+      /[\s._-]+(?:v|ver\.?|version)?\s*\d+(?:[._]\d+)*[a-z]?(?:[\s._-].*)?$/i,
+      "",
+    );
+    const cleaned = withoutVersion
+      .replace(/[_]+/g, " ")
+      .replace(/(\w)[-.](?=\w)/g, "$1 ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return cleaned || withoutTags.replace(/\s+/g, " ").trim() || original;
+  }
+
   const api = {
     LIBRARY_INSTALL_STATES,
     LIBRARY_INSTALL_FILTERS,
@@ -136,6 +189,8 @@
     matchesLibraryInstallFilter,
     describeLibraryInstallState,
     countLibraryInstallStates,
+    needsCatalogLink,
+    buildCatalogSearchTitle,
   };
 
   if (typeof module !== "undefined" && module.exports) {

@@ -4757,3 +4757,56 @@ What was done:
 Release path:
 
 - pushing to `main` triggers `.github/workflows/main.yml`, which builds Windows (NSIS) and Linux (deb, AppImage) packages and publishes the GitHub release `v1.4.0`; installed 1.3.x apps pick it up through electron-updater
+
+
+## 2026-09-27 — Library UX batch: Locate / Choose .exe, bulk actions for missing games, backups, catalog link, live thread checks, details panel merge
+
+What was done:
+
+- **Locate / Choose .exe / remove version**: a version whose folder moved is pointed at its new folder (`relocate-game-version`, folder dialog, launcher picked automatically, folders of other records refused); installed games without a launcher get **Choose .exe** on the card and an inline picker in the details panel (`list-game-executables`, `pick-game-executable`, `set-game-executable`); versions can be removed from the panel (folder stays on disk)
+- **Missing games bulk actions** (filter "Files missing"): Reinstall all — one game at a time from its F95 thread via a pure queue (`shared/missingGamesActions.js`) advanced by the downloads list; Remove all from library (library-only removal); F95 sign-in prompt, progress, Stop, summary with Details
+- **Library backups** in Settings → Library & folders: list (date, games, size), Back up now, Restore… (safety backup first, ATTACH + one transaction with shared columns, rollback on any error, cached images of replaced records reconciled, banners re-downloaded in the background)
+- **Unmatched imports + catalog link**: scan imports non-archive folders with `detectionScore >= 40` without a confident match (`importUnmatched`, counted as `importedUnmatched`), card badge "Not matched", **Link to catalog…** modal (`link-game-to-catalog`: Atlas mapping, F95 thread, catalog metadata, images), inline Edit of title/creator/engine (`update-game` now validates and returns `{ success, error }`)
+- **Live thread checks**: migration 011 `library_live_versions`, `liveVersionsStore`, `pickNewerVersion`, `latestVersion` = newer of catalog and thread; checker runs 90 s after start, after an F95 sign-in and every 6 h (favorites, one thread at a time); Updates section has **Check threads now** and "Threads checked …"; details show "(from the F95 thread, checked 2 h ago)"
+- **Details panel merge**: the old "Edit Game Details" window (`gamedetails.html`, `GameDetailsWindow.jsx`, `send-game-data`, `game-details-import-progress`, `createGameDetailsWindow`) is removed; "View Details" opens the side panel; banner/screenshot refresh and removal moved into the panel
+- **Toolbar**: in-app Rescan Library menu (keyboard accessible), persisted sort and "Show" filter (`shared/storedChoice.js`), Re-check button and re-check on window focus after 60 s, scan summary toasts (Open Scan Hub, Show them, "Merged N duplicate entries" + Details from `duplicateMerges`), F95 sign-in CTA in the install dialog with automatic continuation
+- fixes found on the way: `game-updated` bursts were debounced to the last id only (now batched per id); native rescan menu actions `refreshLibrary`, `refreshLibraryPreviews`, `resetLibrary` were not forwarded by `handleContextAction`; empty state for an active filter ("No games match this filter")
+
+How it was implemented:
+
+- new main modules: `src/main/libraryVersionRepair.js`, `src/main/install/findExecutables.js` (moved out of `main.js`), `src/main/libraryBackups.js`, `src/main/catalogLink.js`, `src/main/liveUpdateCheck.js`, `src/main/db/liveVersionsStore.js`, `src/main/db/migrations/011_library_live_versions.js`, `src/main/libraryMaintenanceIpc.js` (all new IPC with validation, scoped logs, user-facing errors)
+- new shared modules: `src/shared/missingGamesActions.js`, `src/shared/storedChoice.js`; `libraryInstallState.needsCatalogLink/buildCatalogSearchTitle`; `versionUpdate.pickNewerVersion`
+- changed: `database.js` (live join, `updateVersionLocation`, `updateVersionExecutable`, `getF95ZoneDataByAtlasId`, `deleteGameCompletely` covers live versions), `libraryReset.js` (live table, exported backup folder name), `libraryDuplicates.summarizeDuplicateCleanup`, `scanCandidateImportPolicy.js`, `main.js` (wiring, checker lifecycle, auth transition, scan summary, context actions, delete-version/update-game hardening)
+- renderer: `App.jsx`, `GameBanner.js`, `LibraryDetailsPanel.jsx`, new `CatalogLinkModal.jsx`, `F95UpdateModal.jsx`, `LibrarySettings.jsx`, `LibraryResetModal.jsx`, `index.html`, `renderer.js`, `web-preview-api.js`, `package.json` build files
+- docs: `library-version-repair.md`, `library-missing-bulk-actions.md`, `library-backups.md`, `library-catalog-link.md`, `library-live-update-check.md`, `library-details-panel.md`, `library-toolbar-and-menus.md`, updated `library-rescan-modes.md`, `library-install-presence.md`, ADR 0009, docs index
+
+Checks (real output):
+
+- `npm run lint`: `✖ 10 problems (10 errors, 0 warnings)` — all in test files written for this batch (`no-useless-escape` for `"c:\games\alpha"` in `test/libraryDuplicates.test.js` lines 150/159/162/168 and `"C:\a"`, `"C:\c"` in `test/scanCandidateImportPolicy.test.js` lines 29/31); `eslint` over the source files alone exits 0
+- `npm run typecheck`: `test/liveUpdateCheck.test.js(151,3): error TS2722: Cannot invoke an object which is possibly 'undefined'.` — the only error
+- `npm test`: `ℹ tests 498`, `ℹ pass 497`, `ℹ fail 1` — `concurrent runNow calls share one run…` fails with `TypeError: resolveInspect is not a function`: the test resolves the inspection synchronously, before the checker could have opened a thread (it first awaits `isAuthenticated()` and `listGames()`); the same scenario with one `setImmediate` before `resolveInspect` passes (shared promise, one inspection)
+- `npm run build:css`: done, new classes present in `tailwind.output.css`
+- extra scripts (scratchpad): failed checks keep the last good live version of the same thread; restore keeps images of unchanged records and drops image rows of replaced ones; all `index.html`/`settings.html` scripts compile with the bundled Babel and declare no duplicate top-level names
+- browser smoke (web preview with mocked IPC and six sample games): badges, Choose .exe picker, Locate (in-use error and success), missing-games bar (sign-in prompt, confirm, install payload, progress, Stop, no-mirror summary, bulk removal), Link to catalog, Edit, version removal, live-thread hint, Check threads now, backups card (list, restore, back up now) in the app and in `settings.html`, rescan menu keyboard/Escape/outside click, persisted sort after reload; no console errors
+
+What remains / manual verification steps:
+
+- lead: fix the three test files above (escapes and the synchronous `resolveInspect`), then lint/typecheck/test are expected to be clean
+- in Electron: Locate a renamed folder; Choose .exe with Browse…; Reinstall all with real mirrors (queue advances on download statuses — covered by unit tests only, the web preview has no download events); Restore a backup after "Rebuild Library From Scratch"; sign in to F95 and confirm the live check runs ~10 s later and the install dialog continues by itself
+- not committed: changes are in the working tree on `main`
+
+Current stage progress: this slice ~95% (open: the test-file fixes above and the Electron manual pass); overall roadmap estimate 98% → 98.5%.
+
+## 2026-09-28 — Lead verification of the UX batch and release 1.5.0
+
+What was done:
+
+- the three test-file issues reported by the implementing agent were fixed (escaped backslashes in `test/libraryDuplicates.test.js` and `test/scanCandidateImportPolicy.test.js`; the concurrent `runNow` test now waits until the inspection is pending)
+- code review of the new main modules (`libraryMaintenanceIpc`, `libraryBackups`, `libraryVersionRepair`, `liveUpdateCheck`, `catalogLink`, `liveVersionsStore`), `database.js`, `main.js` and the renderer diffs: IPC input validation, paths taken from the database instead of the renderer, transaction/rollback in restore, no technical wording in UI text
+- browser smoke in the web preview with seven sample games: card states (Choose .exe, Not matched, Files missing), missing-games bar with Reinstall all (confirm → inspect → install → progress → Stop) and Remove all, Locate… (toast, game leaves the filter), Choose .exe picker (list → set), Link to catalog… (search prefilled without the version tail → Link → renamed card), in-app rescan menu, Updates section with "Threads checked" and the check button; no console errors except the preview's own logo path
+- not re-run by the lead (covered by the agent's browser run only): backups card in Settings, "Check threads now" click, F95 sign-in prompt in the install dialog
+- bumped the app to 1.5.0
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm test` 498 pass / 0 fail.
+
+Release path: pushing to `main` triggers `.github/workflows/main.yml`, which builds the packages and publishes `v1.5.0`.

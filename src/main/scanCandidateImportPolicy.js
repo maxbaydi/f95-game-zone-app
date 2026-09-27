@@ -1,11 +1,46 @@
 // @ts-check
 
 /**
+ * Minimum detection score (0-100, see f95scanner detection reasons) for a
+ * folder without a confident catalog match to be added automatically. Folders
+ * with launchers of a known engine or a single launcher reach it; loose
+ * archives and folders with nothing but a name do not.
+ */
+const MIN_UNMATCHED_DETECTION_SCORE = 40;
+
+/**
  * @param {any} game
  * @returns {boolean}
  */
-function shouldAutoImportScanGame(game) {
+function isCatalogMatched(game) {
   return String(game?.matchStatus || "").toLowerCase() === "matched";
+}
+
+/**
+ * A scan result is imported without review when the catalog match is
+ * confident, or when the folder clearly is a game (high detection score) even
+ * though the catalog has no confident match. Archives are never imported
+ * without a match: their content cannot be checked before extraction.
+ *
+ * @param {any} game
+ * @param {{ minUnmatchedDetectionScore?: number }=} options
+ * @returns {boolean}
+ */
+function shouldAutoImportScanGame(game, options = {}) {
+  if (isCatalogMatched(game)) {
+    return true;
+  }
+
+  const threshold = Number.isFinite(options.minUnmatchedDetectionScore)
+    ? Number(options.minUnmatchedDetectionScore)
+    : MIN_UNMATCHED_DETECTION_SCORE;
+  const detectionScore = Number(game?.detectionScore);
+
+  return (
+    !game?.isArchive &&
+    Number.isFinite(detectionScore) &&
+    detectionScore >= threshold
+  );
 }
 
 /**
@@ -15,15 +50,23 @@ function shouldAutoImportScanGame(game) {
  * A folder the library already knows is always refreshed (marked with
  * `refreshExisting`), even when the Atlas match is not confident: the record
  * exists, so a rescan must update its files and version instead of parking it
- * in the review queue.
+ * in the review queue. New folders without a confident match that are clearly
+ * games are imported with `importUnmatched` so the summary can count them and
+ * the user can link them to the catalog later.
  *
  * @param {any[]} games
- * @param {{ isKnownPath?: (folder: string) => boolean }=} options
+ * @param {{
+ *   isKnownPath?: (folder: string) => boolean,
+ *   minUnmatchedDetectionScore?: number
+ * }=} options
  * @returns {{ importableGames: any[], reviewGames: any[] }}
  */
 function splitAutoImportableScanGames(games, options = {}) {
   const isKnownPath =
     typeof options.isKnownPath === "function" ? options.isKnownPath : null;
+  const policyOptions = {
+    minUnmatchedDetectionScore: options.minUnmatchedDetectionScore,
+  };
   const importableGames = [];
   const reviewGames = [];
 
@@ -42,8 +85,13 @@ function splitAutoImportableScanGames(games, options = {}) {
       continue;
     }
 
-    if (shouldAutoImportScanGame(game)) {
+    if (isCatalogMatched(game)) {
       importableGames.push(game);
+      continue;
+    }
+
+    if (shouldAutoImportScanGame(game, policyOptions)) {
+      importableGames.push({ ...game, importUnmatched: true });
       continue;
     }
 
@@ -57,6 +105,7 @@ function splitAutoImportableScanGames(games, options = {}) {
 }
 
 module.exports = {
+  MIN_UNMATCHED_DETECTION_SCORE,
   shouldAutoImportScanGame,
   splitAutoImportableScanGames,
 };

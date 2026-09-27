@@ -75,6 +75,22 @@ function compareVersionTokens(left, right) {
 }
 
 /**
+ * The newer of two version labels (e.g. the catalog version and the version
+ * read from the live thread). Empty values lose; equal versions keep `left`.
+ *
+ * @param {string | null | undefined} left
+ * @param {string | null | undefined} right
+ * @returns {string}
+ */
+function pickNewerVersion(left, right) {
+  const leftToken = tokenizeVersion(left);
+  const rightToken = tokenizeVersion(right);
+  return compareVersionTokens(leftToken, rightToken) >= 0
+    ? leftToken.raw
+    : rightToken.raw;
+}
+
+/**
  * @param {Array<{ version?: string | null }>} versions
  * @returns {string}
  */
@@ -172,5 +188,6 @@ module.exports = {
   compareVersionTokens,
   getNewestInstalledVersion,
   normalizeVersionLabel,
+  pickNewerVersion,
   tokenizeVersion,
 };

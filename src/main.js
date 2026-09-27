@@ -38,6 +38,12 @@ const {
 const { annotateLibraryPresence } = require("./main/libraryPresence");
 const { normalizeLibraryScanRequest } = require("./main/libraryScanRequest");
 const { resetLibraryIndex } = require("./main/libraryReset");
+const {
+  registerLibraryMaintenanceIpc,
+} = require("./main/libraryMaintenanceIpc");
+const { createLiveUpdateChecker } = require("./main/liveUpdateCheck");
+const { upsertLiveVersion } = require("./main/db/liveVersionsStore");
+const { findExecutables } = require("./main/install/findExecutables");
 const { getFolderSizeAsync } = require("./main/folderSize");
 const {
   LIBRARY_INSTALL_STATES,
@@ -148,6 +154,7 @@ const {
   findPreferredGameByPath,
   normalizePathKey,
   reconcileLibraryDuplicateGamePaths,
+  summarizeDuplicateCleanup,
 } = require("./main/libraryDuplicates");
 const {
   DEFAULT_PREVIEW_LIMIT,
@@ -170,7 +177,10 @@ const {
   setGameFavorite,
   addVersion,
   updateVersion,
+  updateVersionLocation,
+  updateVersionExecutable,
   addAtlasMapping,
+  getF95ZoneDataByAtlasId,
   getGame,
   getGames,
   checkDbUpdates,
@@ -220,6 +230,16 @@ let databaseConnection = null;
 let cloudSaveService = null;
 let cloudSaveQueue = Promise.resolve();
 let libraryUpdateRefreshPromise = null;
+// Background check of live F95 threads (see main/liveUpdateCheck.js).
+let libraryLiveUpdateChecker = null;
+let f95LoginLiveCheckTimer = null;
+// null until the first F95 auth state is known; a later false → true
+// transition (the user signed in) triggers one live thread check.
+let lastKnownF95Authenticated = null;
+let libraryScanInProgress = false;
+
+const LIVE_CHECK_STARTUP_DELAY_MS = 90 * 1000;
+const LIVE_CHECK_AFTER_LOGIN_DELAY_MS = 10 * 1000;
 
 app.commandLine.appendSwitch("force-color-profile", "srgb");
 
@@ -470,58 +490,6 @@ function createImporterWindow() {
 
   importerWindow.on("closed", () => {
     console.log("Importer window closed");
-  });
-}
-
-function createGameDetailsWindow(recordId) {
-  const gameDetailsWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1400,
-    minHeight: 900,
-    icon: APP_WINDOW_ICON_PATH,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    center: true,
-    webPreferences: {
-      preload: path.join(__dirname, "renderer.js"),
-      contextIsolation: true,
-      enableRemoteModule: false,
-      nodeIntegration: false,
-    },
-  });
-
-  attachWindowResilience(gameDetailsWindow, { name: "game-details", dialog });
-  gameDetailsWindow.loadFile(path.join(__dirname, "gamedetails.html"));
-
-  gameDetailsWindow.webContents.on("did-finish-load", () => {
-    console.log("Fetching game data for recordId:", recordId);
-    getGame(recordId, appPaths)
-      .then((game) => {
-        setTimeout(() => {
-          gameDetailsWindow.webContents.send("send-game-data", game);
-        }, 400);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch game data:", err);
-        gameDetailsWindow.webContents.send("send-game-data", null);
-      });
-  });
-
-  if (process.defaultApp || appConfig?.Interface?.showDebugConsole) {
-    gameDetailsWindow.webContents.openDevTools();
-  }
-
-  gameDetailsWindow.on("maximize", () => {
-    gameDetailsWindow.webContents.send("window-state-changed", "maximized");
-  });
-  gameDetailsWindow.on("unmaximize", () => {
-    gameDetailsWindow.webContents.send("window-state-changed", "restored");
-  });
-
-  gameDetailsWindow.on("closed", () => {
-    //gameDetailsWindow = null;
   });
 }
 
@@ -1684,8 +1652,84 @@ async function moveFileIntoDirectory(
   }
 }
 
+/**
+ * Runs one live thread check shortly after the user signs in to F95 (false →
+ * true). Cookie changes arrive in bursts during a login, so the run is
+ * debounced; the startup state never triggers it (the startup run does).
+ */
+function noteF95AuthStateForLiveChecks(authState) {
+  const isAuthenticated = Boolean(authState?.isAuthenticated);
+  const wasAuthenticated = lastKnownF95Authenticated;
+  lastKnownF95Authenticated = isAuthenticated;
+
+  if (!isAuthenticated) {
+    if (f95LoginLiveCheckTimer) {
+      clearTimeout(f95LoginLiveCheckTimer);
+      f95LoginLiveCheckTimer = null;
+    }
+    return;
+  }
+
+  if (wasAuthenticated !== false || !libraryLiveUpdateChecker) {
+    return;
+  }
+
+  if (f95LoginLiveCheckTimer) {
+    clearTimeout(f95LoginLiveCheckTimer);
+  }
+  f95LoginLiveCheckTimer = setTimeout(() => {
+    f95LoginLiveCheckTimer = null;
+    libraryLiveUpdateChecker?.runNow({ reason: "login" }).catch((error) => {
+      console.error("[library.live] Check after sign-in failed:", error);
+    });
+  }, LIVE_CHECK_AFTER_LOGIN_DELAY_MS);
+}
+
+async function handleLiveUpdateRunFinished(summary) {
+  if (!summary || summary.checked <= 0) {
+    return;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    for (const recordId of summary.checkedRecordIds || []) {
+      mainWindow.webContents.send("game-updated", recordId);
+    }
+  }
+
+  try {
+    const config = appConfig || defaultConfig;
+    await libraryUpdateNotificationController.syncFromAllGames({
+      getGames: () => loadLibraryGames(),
+      allowNotify: config?.Notifications?.libraryUpdates !== false,
+      reason: `live-${summary.reason}`,
+    });
+  } catch (error) {
+    console.error(
+      "[library.live] Failed to refresh update notifications after a thread check:",
+      error,
+    );
+  }
+}
+
+function createLibraryLiveUpdateChecker() {
+  return createLiveUpdateChecker({
+    listGames: () => loadLibraryGames(),
+    inspectThread: (threadUrl) => inspectF95Thread({ BrowserWindow, threadUrl }),
+    saveResult: (result) => {
+      if (!databaseConnection) {
+        throw new Error("The library database is not ready.");
+      }
+      return upsertLiveVersion(databaseConnection, result);
+    },
+    isAuthenticated: async () =>
+      (await getF95AuthState(getReadyF95Session())).isAuthenticated,
+    onRunFinished: (summary) => handleLiveUpdateRunFinished(summary),
+  });
+}
+
 async function broadcastF95AuthState() {
   const authState = await getF95AuthState(getReadyF95Session());
+  noteF95AuthStateForLiveChecks(authState);
   const loginWindow = BrowserWindow.getAllWindows().find(
     (windowInstance) => windowInstance.__atlasF95LoginWindow === true,
   );
@@ -3507,15 +3551,42 @@ ipcMain.handle("count-versions", async (_, recordId) => {
   return await countVersions(recordId);
 });
 
-ipcMain.handle("delete-version", async (_, { recordId, version }) => {
-  const countBefore = await countVersions(recordId);
-  const result = await deleteVersion(recordId, version);
-  const countAfter = countBefore - (result.changes > 0 ? 1 : 0);
+// Removes one version row from the library (the folder on disk is kept).
+ipcMain.handle("delete-version", async (_, payload) => {
+  const recordId = Number(payload?.recordId);
+  const version = typeof payload?.version === "string" ? payload.version : null;
+  if (!Number.isInteger(recordId) || recordId <= 0 || version === null) {
+    return {
+      success: false,
+      wasLastVersion: false,
+      error: "This version is no longer in your library.",
+    };
+  }
 
-  return {
-    success: result.changes > 0,
-    wasLastVersion: countAfter === 0,
-  };
+  try {
+    const countBefore = await countVersions(recordId);
+    const result = await deleteVersion(recordId, version);
+    const countAfter = countBefore - (result.changes > 0 ? 1 : 0);
+
+    if (result.changes > 0) {
+      mainWindow?.webContents.send("game-updated", recordId);
+    }
+
+    return {
+      success: result.changes > 0,
+      wasLastVersion: countAfter === 0,
+      ...(result.changes > 0
+        ? {}
+        : { error: "This version is no longer in your library." }),
+    };
+  } catch (error) {
+    console.error("[library.repair] Failed to remove a version:", error);
+    return {
+      success: false,
+      wasLastVersion: false,
+      error: "The version could not be removed. Try again.",
+    };
+  }
 });
 
 ipcMain.handle("delete-game-completely", async (_, recordId) => {
@@ -5039,32 +5110,10 @@ ipcMain.handle("update-banners", async (event, recordId) => {
   console.log("Handling update-banners for recordId:", recordId);
   try {
     const atlas_id = await GetAtlasIDbyRecord(recordId);
-    let progress = 0;
-    let imageTotal = 1;
-    await downloadImages(
-      recordId,
-      atlas_id,
-      () => {
-        event.sender.send("game-details-import-progress", {
-          text: `Downloading images ${progress + 1}/${imageTotal}`,
-          progress,
-          total: imageTotal,
-        });
-      },
-      true,
-      false,
-      1,
-      false,
-    );
+    await downloadImages(recordId, atlas_id, () => {}, true, false, 1, false);
 
     const bannerPath = await getBanner(recordId, appPaths, "large");
     event.sender.send("game-updated", recordId);
-    progress++;
-    event.sender.send("game-details-import-progress", {
-      text: `Completed image download for ${progress}/${imageTotal}`,
-      progress,
-      total: imageTotal,
-    });
     return bannerPath;
   } catch (err) {
     console.error("Error downloading banner:", err);
@@ -5076,18 +5125,10 @@ ipcMain.handle("update-previews", async (event, recordId) => {
   console.log("Handling update-previews for recordId:", recordId);
   try {
     const atlasId = await GetAtlasIDbyRecord(recordId);
-    let progress = 0;
-    let imageTotal = 1;
     await downloadImages(
       recordId,
       atlasId,
-      (current, totalImages) => {
-        event.sender.send("game-details-import-progress", {
-          text: `Downloading previews  ${current}/${totalImages}`,
-          current,
-          total: totalImages,
-        });
-      },
+      () => {},
       false,
       true,
       DEFAULT_PREVIEW_LIMIT,
@@ -5096,12 +5137,6 @@ ipcMain.handle("update-previews", async (event, recordId) => {
 
     const previewUrls = await getPreviews(recordId, appPaths);
     event.sender.send("game-updated", recordId);
-    progress++;
-    event.sender.send("game-details-import-progress", {
-      text: `Completed previews download`,
-      progress,
-      total: imageTotal,
-    });
     return Array.isArray(previewUrls) ? previewUrls : [];
   } catch (err) {
     console.error("Error downloading previews:", err);
@@ -5148,14 +5183,38 @@ ipcMain.handle(
   },
 );
 
+// Edits the stored title / creator / engine of a library record (details
+// panel "Edit"). Returns { success, error? } instead of throwing.
 ipcMain.handle("update-game", async (event, game) => {
-  console.log("Handling update-game:", game);
+  const recordId = Number(game?.record_id);
+  const title = typeof game?.title === "string" ? game.title.trim() : "";
+  const creator = typeof game?.creator === "string" ? game.creator.trim() : "";
+  const engine = typeof game?.engine === "string" ? game.engine.trim() : "";
+  if (!Number.isInteger(recordId) || recordId <= 0 || !title) {
+    return { success: false, error: "Enter a title for this game." };
+  }
+  if (title.length > 300 || creator.length > 300 || engine.length > 100) {
+    return { success: false, error: "One of the values is too long." };
+  }
+
   try {
-    await updateGame(game);
-    console.log("Game updated in database");
+    await updateGame({
+      record_id: recordId,
+      title,
+      creator: creator || "Unknown",
+      engine: engine || "Unknown",
+    });
+    mainWindow?.webContents.send("game-updated", recordId);
+    return { success: true };
   } catch (err) {
-    console.error("Error updating game:", err);
-    throw err;
+    console.error("[library.details] Error updating game:", err);
+    const isDuplicate = /UNIQUE constraint failed/i.test(String(err?.message || ""));
+    return {
+      success: false,
+      error: isDuplicate
+        ? "Another game in your library already has this title, creator and engine."
+        : "The changes could not be saved. Try again.",
+    };
   }
 });
 
@@ -5962,6 +6021,11 @@ function buildLibraryScanSummaryText(input) {
   if (input.imported > 0) {
     parts.push(`${input.imported} new game(s) added`);
   }
+  if (input.importedUnmatched > 0) {
+    parts.push(
+      `${input.importedUnmatched} of them added without a catalog match`,
+    );
+  }
   if (input.refreshed > 0) {
     parts.push(`${input.refreshed} installed game(s) refreshed`);
   }
@@ -6010,6 +6074,7 @@ ipcMain.handle("scan-library", async (event, request) => {
     return sessionResult;
   }
 
+  libraryScanInProgress = true;
   const scanRelay = {
     webContents: {
       send(channel, payload) {
@@ -6163,6 +6228,7 @@ ipcMain.handle("scan-library", async (event, request) => {
     const presenceCounts = countLibraryInstallStates(await loadLibraryGames());
 
     let imported = 0;
+    let importedUnmatched = 0;
     let refreshed = 0;
     importResults.forEach((result, index) => {
       if (!result?.success) {
@@ -6172,8 +6238,12 @@ ipcMain.handle("scan-library", async (event, request) => {
         refreshed += 1;
       } else {
         imported += 1;
+        if (importableGames[index]?.importUnmatched) {
+          importedUnmatched += 1;
+        }
       }
     });
+    const duplicateMerges = summarizeDuplicateCleanup(duplicateCleanup);
 
     const summary = {
       success: scanResult.success,
@@ -6181,10 +6251,12 @@ ipcMain.handle("scan-library", async (event, request) => {
       warningsCount: scanResult.warningsCount || 0,
       scanned: scannedGames.length,
       imported,
+      importedUnmatched,
       refreshed,
       reviewQueued: reviewGames.length,
       errorsCount: scanResult.errorsCount || 0,
       duplicateRecordsRemoved: duplicateCleanup.removed.length,
+      duplicateMerges,
       installedCount: presenceCounts.installed,
       missingCount: presenceCounts.missing,
       notInstalledCount: presenceCounts.not_installed,
@@ -6205,8 +6277,49 @@ ipcMain.handle("scan-library", async (event, request) => {
 
     return summary;
   } finally {
+    libraryScanInProgress = false;
     endScanSession(event.sender);
   }
+});
+
+function getLibraryGameExtensions() {
+  return parseConfiguredExtensions(
+    appConfig?.Library?.gameExtensions,
+    DEFAULT_GAME_EXTENSIONS,
+  );
+}
+
+// Locate folder, choose launcher, library backups, catalog link and live
+// thread checks (see main/libraryMaintenanceIpc.js for the contracts).
+registerLibraryMaintenanceIpc({
+  ipcMain,
+  dialog,
+  getParentWindow: (event) =>
+    BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined,
+  getMainWindow: () => mainWindow,
+  appPaths,
+  getDatabaseConnection: () => databaseConnection,
+  getGames,
+  getGame,
+  loadLibraryGame,
+  getConfiguredLibraryFolder,
+  getGameExtensions: getLibraryGameExtensions,
+  isLibraryScanRunning: () => libraryScanInProgress,
+  updateVersionLocation,
+  updateVersionExecutable,
+  catalogDeps: {
+    addAtlasMapping,
+    getAtlasData,
+    getF95ZoneDataByAtlasId,
+    upsertF95ZoneMapping,
+    updateGame,
+  },
+  downloadImages,
+  previewLimit: DEFAULT_PREVIEW_LIMIT,
+  refreshSaveProfiles: (recordId) =>
+    refreshSaveProfiles(appPaths, databaseConnection, recordId),
+  broadcastGamesLibrarySynced,
+  getLiveUpdateChecker: () => libraryLiveUpdateChecker,
 });
 
 // ────────────────────────────────────────────────
@@ -6465,27 +6578,6 @@ async function backfillMissingVersionFolderSizes(limit = 200) {
   };
 }
 
-function findExecutables(dir, extensions) {
-  const execs = [];
-  const stack = [dir];
-  while (stack.length) {
-    const current = stack.pop();
-    const items = fs.readdirSync(current, { withFileTypes: true });
-    for (const item of items) {
-      const full = path.join(current, item.name);
-      if (item.isDirectory()) {
-        stack.push(full);
-      } else {
-        const ext = path.extname(item.name).toLowerCase().slice(1);
-        if (extensions.includes(ext)) {
-          execs.push(full.replace(dir + path.sep, ""));
-        }
-      }
-    }
-  }
-  return execs;
-}
-
 async function downloadImages(
   recordId,
   atlasId,
@@ -6584,15 +6676,7 @@ async function downloadImages(
 
       console.log("Banner images updated");
       if (downloaded) {
-        require("electron")
-          .webContents.getAllWebContents()
-          .forEach((wc) => {
-            wc.send("game-details-import-progress", {
-              text: `Completed banner download ${imageProgress}/${totalImages}`,
-              progress: imageProgress,
-              total: totalImages,
-            });
-          });
+        // Pause between downloads so image hosts are not hammered.
         await delay(500);
       }
     } catch (err) {
@@ -6648,15 +6732,6 @@ async function downloadImages(
 
       console.log(`Screen ${i + 1} updated`);
       if (downloaded) {
-        require("electron")
-          .webContents.getAllWebContents()
-          .forEach((wc) => {
-            wc.send("game-details-import-progress", {
-              text: `Completed preview download ${imageProgress}/${totalImages}`,
-              progress: imageProgress,
-              total: totalImages,
-            });
-          });
         await delay(500);
       }
     } catch (err) {
@@ -6859,16 +6934,19 @@ async function handleContextAction(targetWebContents, data) {
     case "openUrl":
       await shell.openExternal(data.url);
       break;
+    // "View Details" opens the details panel of the main window.
     case "properties":
-      console.log("Creating GameDetailsWindow for recordId:", data.recordId);
-      createGameDetailsWindow(data.recordId);
-      break;
     case "removeGame":
     case "updateGame":
+    case "locateGame":
+    case "chooseExecutable":
     case "addToFavorites":
     case "removeFromFavorites":
     case "rescanLibrary":
+    case "refreshLibrary":
+    case "refreshLibraryPreviews":
     case "resetCacheAndRescanLibrary":
+    case "resetLibrary":
       forwardContextMenuCommand(targetWebContents, data);
       break;
     default:
@@ -7087,6 +7165,13 @@ app.whenReady().then(async () => {
     });
   });
   createWindow();
+  libraryLiveUpdateChecker = createLibraryLiveUpdateChecker();
+  libraryLiveUpdateChecker.start();
+  setTimeout(() => {
+    libraryLiveUpdateChecker?.runNow({ reason: "startup" }).catch((error) => {
+      console.error("[library.live] Startup thread check failed:", error);
+    });
+  }, LIVE_CHECK_STARTUP_DELAY_MS);
   setTimeout(() => {
     backfillMissingVersionFolderSizes()
       .then((result) => {
@@ -7123,6 +7208,11 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
+  libraryLiveUpdateChecker?.stop();
+  if (f95LoginLiveCheckTimer) {
+    clearTimeout(f95LoginLiveCheckTimer);
+    f95LoginLiveCheckTimer = null;
+  }
   trayController.destroy();
 });
 

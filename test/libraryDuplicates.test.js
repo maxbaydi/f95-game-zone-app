@@ -7,6 +7,7 @@ const {
   findDuplicateGamePathGroups,
   findPreferredGameByPath,
   reconcileLibraryDuplicateGamePaths,
+  summarizeDuplicateCleanup,
 } = require("../src/main/libraryDuplicates");
 
 test("choosePreferredDuplicateRecord prefers mapped canonical game metadata", () => {
@@ -140,4 +141,36 @@ test("reconcileLibraryDuplicateGamePaths dry-run reports cleanup without deletin
     [69],
   );
   assert.deepEqual(deleted, []);
+});
+
+test("summarizeDuplicateCleanup lists what was merged into which record", () => {
+  const summary = summarizeDuplicateCleanup({
+    groups: [
+      {
+        gamePath: "c:\\games\\alpha",
+        winner: { recordId: 5, title: "Alpha", creator: "Dev" },
+        losers: [
+          { recordId: 9, title: "alpha-0.2-pc", creator: "Unknown" },
+          { recordId: 11, title: "Alpha (1)", creator: "Unknown" },
+        ],
+      },
+    ],
+    removed: [
+      { gamePath: "c:\\games\\alpha", winnerRecordId: 5, loserRecordId: 9 },
+    ],
+    failed: [
+      { gamePath: "c:\\games\\alpha", winnerRecordId: 5, loserRecordId: 11, error: "locked" },
+    ],
+  });
+
+  assert.deepEqual(summary, [
+    {
+      gamePath: "c:\\games\\alpha",
+      keptRecordId: 5,
+      keptTitle: "Alpha",
+      mergedTitles: ["alpha-0.2-pc"],
+      failedTitles: ["Alpha (1)"],
+    },
+  ]);
+  assert.deepEqual(summarizeDuplicateCleanup(null), []);
 });

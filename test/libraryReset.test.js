@@ -68,6 +68,7 @@ async function seedLibrary(db, appPaths) {
   await runAsync(db, `INSERT INTO scan_jobs (mode, status, started_at, source_count, games_found, errors_count) VALUES ('scan_sources', 'success', ?, 1, 1, 0)`, [now]);
   await runAsync(db, `INSERT INTO scan_candidates (folder_path, title, creator, first_seen_at, last_seen_at) VALUES ('C:\\Games\\Atlas', 'Atlas Game', 'Atlas Dev', ?, ?)`, [now, now]);
   await runAsync(db, `INSERT INTO cloud_library_delete_queue (request_key, cloud_project_key, preferred_identity_key, requested_at) VALUES ('req-1', 'proj', 'f95:1', ?)`, [now]);
+  await runAsync(db, `INSERT INTO library_live_versions (record_id, thread_url, version, title, checked_at) VALUES (?, 'https://f95zone.to/threads/atlas-game.555/', '1.1', 'Atlas Game', ?)`, [recordId, now]);
 
   const imageDir = path.join(appPaths.images, String(recordId));
   fs.mkdirSync(imageDir, { recursive: true });
@@ -96,6 +97,7 @@ test("resetLibraryIndex clears library tables, keeps catalog data and backs the 
   assert.equal(result.cleared.versions, 1);
   assert.equal(result.cleared.scan_candidates, 1);
   assert.equal(result.cleared.scan_jobs, 1);
+  assert.equal(result.cleared.library_live_versions, 1);
 
   for (const table of LIBRARY_RESET_PRESERVED_TABLES) {
     assert.ok((await countRows(db, table)) >= 1, `${table} is preserved`);

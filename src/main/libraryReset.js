@@ -19,6 +19,7 @@ const LIBRARY_RESET_TABLES = Object.freeze([
   "scan_candidates",
   "scan_jobs",
   "versions",
+  "library_live_versions",
   "games",
 ]);
 
@@ -36,7 +37,8 @@ const LIBRARY_RESET_PRESERVED_TABLES = Object.freeze([
   "cloud_library_delete_queue",
 ]);
 
-const BACKUP_DIRECTORY_NAME = "library_index";
+/** Sub-folder of `appPaths.backups` that holds library database snapshots. */
+const LIBRARY_BACKUP_DIRECTORY_NAME = "library_index";
 
 /**
  * @param {{ run: Function }} db
@@ -115,7 +117,10 @@ function ensureUnusedFilePath(basePath) {
  */
 async function backupDatabaseFile(input) {
   const now = typeof input.now === "function" ? input.now() : new Date();
-  const backupDirectory = path.join(input.appPaths.backups, BACKUP_DIRECTORY_NAME);
+  const backupDirectory = path.join(
+    input.appPaths.backups,
+    LIBRARY_BACKUP_DIRECTORY_NAME,
+  );
   await fs.promises.mkdir(backupDirectory, { recursive: true });
   const targetPath = ensureUnusedFilePath(
     path.join(backupDirectory, `library-${formatBackupStamp(now)}.db`),
@@ -254,6 +259,7 @@ async function resetLibraryIndex(input) {
 }
 
 module.exports = {
+  LIBRARY_BACKUP_DIRECTORY_NAME,
   LIBRARY_RESET_PRESERVED_TABLES,
   LIBRARY_RESET_TABLES,
   backupDatabaseFile,
