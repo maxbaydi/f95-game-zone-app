@@ -4747,3 +4747,13 @@ What remains / manual verification steps:
 - not committed: changes are in the working tree on `main`
 
 Current stage progress: this slice 100%; overall roadmap estimate 97% → 98% (library integrity and rescan flows closed).
+
+## 2026-09-27 — Release 1.4.0
+
+What was done:
+
+- bumped the app to 1.4.0: install presence (installed / files missing / not installed), Install instead of Update for games whose folder is gone, four rescan modes including Rebuild Library From Scratch with a database backup, the apostrophe-escaping repair (migration 010), asynchronous folder sizes and the complete `remove-game` removal
+
+Release path:
+
+- pushing to `main` triggers `.github/workflows/main.yml`, which builds Windows (NSIS) and Linux (deb, AppImage) packages and publishes the GitHub release `v1.4.0`; installed 1.3.x apps pick it up through electron-updater
