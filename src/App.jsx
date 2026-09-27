@@ -162,6 +162,30 @@ const getF95CaptchaContinuationUrl =
     return normalizedCurrentUrl;
   });
 
+const {
+  LIBRARY_INSTALL_FILTERS = {
+    ALL: "all",
+    INSTALLED: "installed",
+    MISSING: "missing",
+    NOT_INSTALLED: "not_installed",
+  },
+  LIBRARY_INSTALL_FILTER_OPTIONS = [],
+  matchesLibraryInstallFilter = () => true,
+  countLibraryInstallStates = () => ({
+    installed: 0,
+    missing: 0,
+    not_installed: 0,
+  }),
+} = window.libraryInstallState || {};
+
+const LIBRARY_SCAN_MODE_START_TEXT = {
+  incremental: "Starting library rescan (looking for new games)...",
+  refresh: "Starting library rescan (refreshing installed games)...",
+  reset_cache: "Starting reset-cache library rescan...",
+  reset_library:
+    "Starting library rebuild (backing up and clearing the index)...",
+};
+
 const IMPORT_PROGRESS_TERMINAL_TOAST_MS = 2000;
 const GRID_SCROLLBAR_GUTTER_PX = 8;
 
@@ -210,12 +234,23 @@ const getGameInstallPaths = (game) => {
   return installPaths;
 };
 
-const filterLocalGames = (games, query, updatesOnly = false) => {
+const filterLocalGames = (
+  games,
+  query,
+  updatesOnly = false,
+  installFilter = LIBRARY_INSTALL_FILTERS.ALL,
+) => {
   const normalizedQuery = (query || "").trim().toLowerCase();
   let result = [...games];
 
   if (updatesOnly) {
     result = result.filter((game) => game.isUpdateAvailable === true);
+  }
+
+  if (installFilter && installFilter !== LIBRARY_INSTALL_FILTERS.ALL) {
+    result = result.filter((game) =>
+      matchesLibraryInstallFilter(game, installFilter),
+    );
   }
 
   if (normalizedQuery) {
@@ -419,6 +454,14 @@ const App = () => {
   const [librarySortMode, setLibrarySortMode] = useState(
     LIBRARY_SORT_MODES.INSTALLED_NEWEST || "installedNewest",
   );
+  const [libraryInstallFilter, setLibraryInstallFilter] = useState(
+    LIBRARY_INSTALL_FILTERS.ALL,
+  );
+  const [libraryResetModal, setLibraryResetModal] = useState({
+    isOpen: false,
+    isRunning: false,
+    error: "",
+  });
   const [siteSearchFilters, setSiteSearchFilters] = useState(
     createDefaultSiteSearchFilters,
   );
@@ -1038,6 +1081,14 @@ const App = () => {
   };
 
   const launchInstalledVersion = async (version, game) => {
+    if (version?.isPresent === false) {
+      appToast.error(
+        "The folder of this game no longer exists on this PC. Install it again to play.",
+        { title: "Game files missing" },
+      );
+      return { success: false };
+    }
+
     if (typeof window.launchAtlasGame === "function") {
       return window.launchAtlasGame({
         execPath: version?.exec_path || "",
@@ -1727,8 +1778,18 @@ const App = () => {
       refreshLibraryGrid();
     };
 
+    const handleLibraryReset = (payload) => {
+      console.log("Library reset event received:", payload);
+      setGames([]);
+      setTotalVersions(0);
+      setSelectedGame(null);
+      setSelectedGameDetails(null);
+      setSelectedGamePreviews([]);
+    };
+
     const unsubscribers = [
       subscribeElectronEvent("onGameDeleted", "game-deleted", handleGameDeleted),
+      subscribeElectronEvent("onLibraryReset", "library-reset", handleLibraryReset),
       subscribeElectronEvent(
         "onWindowStateChanged",
         "window-state-changed",
@@ -1845,8 +1906,18 @@ const App = () => {
         return;
       }
 
+      if (data.action === "refreshLibrary") {
+        rescanLibrary({ mode: "refresh" });
+        return;
+      }
+
       if (data.action === "resetCacheAndRescanLibrary") {
-        rescanLibrary({ resetCache: true });
+        rescanLibrary({ mode: "reset_cache" });
+        return;
+      }
+
+      if (data.action === "resetLibrary") {
+        openLibraryResetModal();
         return;
       }
 
@@ -2016,20 +2087,29 @@ const App = () => {
       return;
     }
 
-    const isResetRescan = Boolean(options?.resetCache);
+    const mode =
+      options?.mode ||
+      (options?.resetCache
+        ? "reset_cache"
+        : options?.forceRescan
+          ? "refresh"
+          : "incremental");
 
     isLibraryScanRunningRef.current = true;
     setIsLibraryScanRunning(true);
     setImportProgress({
-      text: isResetRescan
-        ? "Starting reset-cache library rescan..."
-        : "Starting library rescan...",
+      text:
+        LIBRARY_SCAN_MODE_START_TEXT[mode] ||
+        LIBRARY_SCAN_MODE_START_TEXT.incremental,
       progress: 0,
       total: 1,
     });
 
     try {
-      const result = await window.electronAPI.scanLibrary(options);
+      const result = await window.electronAPI.scanLibrary({
+        ...options,
+        mode,
+      });
 
       if (!result.success) {
         setImportProgress({
@@ -2043,17 +2123,35 @@ const App = () => {
           progress: result.imported || 0,
           total: result.scanned || 1,
         });
-        return;
+        return result;
       }
 
+      const summaryParts = [`${result.imported || 0} added`];
+      if (result.refreshed > 0) {
+        summaryParts.push(`${result.refreshed} refreshed`);
+      }
+      if (result.reviewQueued > 0) {
+        summaryParts.push(`${result.reviewQueued} need review`);
+      }
+      if (result.missingCount > 0) {
+        summaryParts.push(`${result.missingCount} with missing files`);
+      }
+      if (result.warningsCount > 0) {
+        summaryParts.push(`${result.warningsCount} warnings`);
+      }
       setImportProgress({
-        text:
-          result.warningsCount > 0
-            ? `Library rescan complete: ${result.imported} imported from ${result.scanned} detected (${result.warningsCount} warnings)`
-            : `Library rescan complete: ${result.imported} imported from ${result.scanned} detected`,
-        progress: result.imported || 0,
+        text: `Library rescan complete: ${summaryParts.join(", ")} (${result.scanned || 0} detected)`,
+        progress: (result.imported || 0) + (result.refreshed || 0),
         total: result.scanned || 1,
       });
+
+      if (result.missingCount > 0) {
+        appToast.warning(
+          `${result.missingCount} game${result.missingCount === 1 ? "" : "s"} in your library point to folders that no longer exist. Use the "Files missing" filter to reinstall or remove them.`,
+          { title: "Missing game files", duration: 8000 },
+        );
+      }
+      return result;
     } catch (error) {
       console.error("Failed to rescan library:", error);
       setImportProgress({
@@ -2061,6 +2159,7 @@ const App = () => {
         progress: 0,
         total: 1,
       });
+      return null;
     } finally {
       if (showDiscoveryRef.current) {
         loadDiscoveryCandidates();
@@ -2078,18 +2177,58 @@ const App = () => {
 
     window.electronAPI.showContextMenu([
       {
+        label: "Find New Games",
+        data: { action: "rescanLibrary" },
+      },
+      {
+        label: "Refresh Installed Games",
+        data: { action: "refreshLibrary" },
+      },
+      { type: "separator" },
+      {
         label: "Refresh Cached Screenshots",
         data: { action: "refreshLibraryPreviews" },
       },
       {
-        label: "Reset Cache & Rescan Library",
+        label: "Reset Scan Cache & Rescan",
         data: { action: "resetCacheAndRescanLibrary" },
       },
+      { type: "separator" },
       {
-        label: "Rescan Library",
-        data: { action: "rescanLibrary" },
+        label: "Rebuild Library From Scratch…",
+        data: { action: "resetLibrary" },
       },
     ]);
+  };
+
+  const closeLibraryResetModal = () => {
+    setLibraryResetModal({ isOpen: false, isRunning: false, error: "" });
+  };
+
+  const openLibraryResetModal = () => {
+    if (isLibraryScanRunningRef.current) {
+      appToast.info("A library scan is already running.");
+      return;
+    }
+    setLibraryResetModal({ isOpen: true, isRunning: false, error: "" });
+  };
+
+  const confirmLibraryReset = async () => {
+    setLibraryResetModal((previous) => ({
+      ...previous,
+      isRunning: true,
+      error: "",
+    }));
+    const result = await rescanLibrary({ mode: "reset_library", confirm: true });
+    if (result && !result.success && !result.cancelled) {
+      setLibraryResetModal((previous) => ({
+        ...previous,
+        isRunning: false,
+        error: result.error || "The library could not be rebuilt.",
+      }));
+      return;
+    }
+    closeLibraryResetModal();
   };
 
   const cancelLibraryScan = async () => {
@@ -2163,10 +2302,19 @@ const App = () => {
           games,
           deferredLibraryQuery,
           activeSection === SECTION_UPDATES,
+          activeSection === SECTION_LIBRARY
+            ? libraryInstallFilter
+            : LIBRARY_INSTALL_FILTERS.ALL,
         ),
         librarySortMode,
       ),
-    [games, deferredLibraryQuery, activeSection, librarySortMode],
+    [
+      games,
+      deferredLibraryQuery,
+      activeSection,
+      librarySortMode,
+      libraryInstallFilter,
+    ],
   );
   const favoriteLibraryGames = useMemo(
     () =>
@@ -2441,13 +2589,13 @@ const App = () => {
     () => games.filter((game) => game.isUpdateAvailable).length,
     [games],
   );
-  const installedGameCount = useMemo(
-    () =>
-      games.filter(
-        (game) => Array.isArray(game.versions) && game.versions.length > 0,
-      ).length,
+  const libraryInstallCounts = useMemo(
+    () => countLibraryInstallStates(games),
     [games],
   );
+  const installedGameCount = libraryInstallCounts.installed;
+  const missingGameCount = libraryInstallCounts.missing;
+  const notInstalledGameCount = libraryInstallCounts.not_installed;
 
   const activeFilterCount = useMemo(
     () => countActiveFilters(siteSearchFilters),
@@ -2593,6 +2741,44 @@ const App = () => {
           ))}
         </select>
       </label>
+      {activeSection === SECTION_LIBRARY && LIBRARY_INSTALL_FILTER_OPTIONS.length > 0 && (
+        <label
+          className={`flex items-center gap-2 border px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md transition-colors hover:border-accent/40 ${
+            libraryInstallFilter !== LIBRARY_INSTALL_FILTERS.ALL
+              ? "border-accent/60 bg-accent/10"
+              : "border-border bg-black/25"
+          }`}
+        >
+          <span className="uppercase tracking-[0.14em] text-text/60">Show</span>
+          <select
+            value={libraryInstallFilter}
+            onChange={(event) => setLibraryInstallFilter(event.target.value)}
+            title={
+              LIBRARY_INSTALL_FILTER_OPTIONS.find(
+                (option) => option.value === libraryInstallFilter,
+              )?.description || ""
+            }
+            className="min-w-[150px] cursor-pointer bg-transparent text-xs text-text outline-none"
+          >
+            {LIBRARY_INSTALL_FILTER_OPTIONS.map((option) => (
+              <option
+                key={option.value}
+                value={option.value}
+                className="bg-primary text-text"
+              >
+                {option.label}
+                {option.value === LIBRARY_INSTALL_FILTERS.MISSING && missingGameCount > 0
+                  ? ` (${missingGameCount})`
+                  : option.value === LIBRARY_INSTALL_FILTERS.NOT_INSTALLED && notInstalledGameCount > 0
+                    ? ` (${notInstalledGameCount})`
+                    : option.value === LIBRARY_INSTALL_FILTERS.INSTALLED
+                      ? ` (${installedGameCount})`
+                      : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <button
         type="button"
         onClick={toggleGameList}
@@ -3275,6 +3461,15 @@ const App = () => {
       </AppSafe>
 
       <AppSafe name="delete-modal" variant="silent">
+        <window.LibraryResetModal
+          isOpen={libraryResetModal.isOpen}
+          isRunning={libraryResetModal.isRunning}
+          error={libraryResetModal.error}
+          gameCount={games.length}
+          installedCount={installedGameCount}
+          onConfirm={confirmLibraryReset}
+          onClose={closeLibraryResetModal}
+        />
         <window.DeleteGameModal
           isOpen={deleteGameModal.isOpen}
           game={deleteGameModal.game}
@@ -3348,7 +3543,7 @@ const App = () => {
           <span className="truncate tabular-nums">
             {isGamesLoading && games.length === 0
               ? "Loading library…"
-              : `${games.length} in library · ${installedGameCount} installed · ${totalVersions} versions · ${updateAvailableCount} updates`}
+              : `${games.length} in library · ${installedGameCount} installed${missingGameCount > 0 ? ` · ${missingGameCount} missing files` : ""}${notInstalledGameCount > 0 ? ` · ${notInstalledGameCount} not installed` : ""} · ${totalVersions} versions · ${updateAvailableCount} updates`}
           </span>
         </div>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">

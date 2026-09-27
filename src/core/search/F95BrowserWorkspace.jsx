@@ -912,7 +912,11 @@ const F95BrowserWorkspace = () => {
                 : "border border-accent/30 bg-accent/10 text-text"
             }`}
           >
-            {threadInstallState.installed ? "Installed" : "In Library"}
+            {threadInstallState.installed
+              ? "Installed"
+              : threadInstallState.installState === "missing"
+                ? "Files missing"
+                : "In Library"}
           </div>
         )}
         {browserState.loading && (
@@ -935,7 +939,9 @@ const F95BrowserWorkspace = () => {
             ? threadInstallState.version
               ? ` is already installed in the library (${threadInstallState.version}).`
               : " is already installed in the library."
-            : " is already linked in your library but not installed on this PC."}
+            : threadInstallState.installState === "missing"
+              ? " was installed here before, but its files are missing. Install it again from this thread."
+              : " is already linked in your library but not installed on this PC."}
         </div>
       )}
 

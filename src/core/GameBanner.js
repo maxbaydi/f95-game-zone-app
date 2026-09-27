@@ -160,8 +160,20 @@ const getStatusBackgroundColor = (status) => {
   return statusColors[status] || "transparent";
 };
 
+// Install state of a library record on this PC (see shared/libraryInstallState).
+const getCardInstallState = (game) => {
+  if (window.libraryInstallState?.getLibraryInstallState) {
+    return window.libraryInstallState.getLibraryInstallState(game);
+  }
+  const versions = Array.isArray(game?.versions) ? game.versions : [];
+  if (versions.length === 0) return "not_installed";
+  return versions.some((version) => version?.isPresent !== false)
+    ? "installed"
+    : "missing";
+};
+
 const getNewestVersion = (versions) => {
-  if (!versions || versions.length === 0) return "V 1.0";
+  if (!versions || versions.length === 0) return "";
   let maxVersion = versions[0].version;
   let maxValue = 0;
   for (const version of versions) {
@@ -176,7 +188,7 @@ const getNewestVersion = (versions) => {
       maxVersion = version.version;
     }
   }
-  return maxVersion || "V 1.0";
+  return maxVersion || "";
 };
 
 const pickVersionForLaunch = (versions) => {
@@ -202,12 +214,22 @@ function AtlasF95BannerCard({
   onToggleFavorite,
 }) {
   const displayTitle = game.displayTitle || game.title || "Unknown";
+  const installState = getCardInstallState(game);
+  const isInstalled = installState === "installed";
+  const isMissing = installState === "missing";
+  const presentVersions = (Array.isArray(game.versions) ? game.versions : []).filter(
+    (version) => version?.isPresent !== false,
+  );
   const newestInstalledVersion =
-    game.newestInstalledVersion ||
-    (Array.isArray(game.versions) && game.versions.length > 0
-      ? getNewestVersion(game.versions)
-      : game.latestVersion || "Unknown");
-  const launchable = pickVersionForLaunch(game.versions);
+    game.newestInstalledVersion || getNewestVersion(presentVersions) || "";
+  // Text of the version chip: only games that are really on this PC show a
+  // version; the others explain why there is no "Play" button.
+  const versionChipText = isInstalled
+    ? newestInstalledVersion || "Installed"
+    : isMissing
+      ? "Files missing"
+      : "Not installed";
+  const launchable = isInstalled ? pickVersionForLaunch(presentVersions) : null;
   const canPlay = Boolean(launchable?.exec_path);
   const canInstall = !canPlay && Boolean(game.siteUrl);
   const primaryActionLabel = canPlay
@@ -215,6 +237,20 @@ function AtlasF95BannerCard({
     : canInstall
       ? "Install"
       : "Play";
+  const stateBadge = isMissing
+    ? {
+        text: "Files missing",
+        title: `The install folder was deleted, moved or is on a disconnected drive${game.lastKnownVersion ? ` (last installed: ${game.lastKnownVersion})` : ""}.`,
+        className:
+          "border-amber-400/80 text-amber-200 bg-black/55 hover:bg-amber-400/20",
+      }
+    : installState === "not_installed"
+      ? {
+          text: "Not installed",
+          title: "This game is in your library but was never installed on this PC.",
+          className: "border-white/35 text-white/80 bg-black/45",
+        }
+      : null;
   const isFavorite = Boolean(game.isFavorite);
   const favoriteActionLabel = isFavorite
     ? "Remove from Favorites"
@@ -292,7 +328,20 @@ function AtlasF95BannerCard({
   } else {
     thumbChildren.push(bannerPlaceholder);
   }
-  if (game.isUpdateAvailable) {
+  if (stateBadge) {
+    thumbChildren.push(
+      React.createElement(
+        "div",
+        {
+          key: "state",
+          className: `atlas-badge-enter absolute top-2 left-2 z-30 px-2 py-0.5 border text-[10px] backdrop-blur-sm ${stateBadge.className}`,
+          title: stateBadge.title,
+        },
+        stateBadge.text,
+      ),
+    );
+  }
+  if (game.isUpdateAvailable && isInstalled) {
     thumbChildren.push(
       React.createElement(
         "button",
@@ -397,9 +446,15 @@ function AtlasF95BannerCard({
               }),
             React.createElement("div", {
               key: "ver",
-              className: `bg-surfaceMuted text-white text-[10px] text-right truncate max-w-[100px] ${game.status ? "-ml-px" : ""} px-1.5 py-0.5`,
-              title: newestInstalledVersion,
-              children: newestInstalledVersion,
+              className: `${
+                isMissing
+                  ? "bg-amber-500/25 text-amber-100"
+                  : isInstalled
+                    ? "bg-surfaceMuted text-white"
+                    : "bg-surfaceMuted text-white/60"
+              } text-[10px] text-right truncate max-w-[100px] ${game.status ? "-ml-px" : ""} px-1.5 py-0.5`,
+              title: versionChipText,
+              children: versionChipText,
             }),
           ],
         ),
@@ -438,7 +493,9 @@ function AtlasF95BannerCard({
       },
       role: "button",
       tabIndex: 0,
-      "aria-label": `${displayTitle}${game.isUpdateAvailable ? " (update available)" : ""}`,
+      "aria-label": `${displayTitle}${
+        game.isUpdateAvailable && isInstalled ? " (update available)" : ""
+      }${isMissing ? " (files missing)" : installState === "not_installed" ? " (not installed)" : ""}`,
       onClick: onSelect,
       onKeyDown: handleCardKeyDown,
       onContextMenu: onContextMenu,
@@ -476,10 +533,13 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
     }
 
     const versions = Array.isArray(game.versions) ? game.versions : [];
-    const playableVersions = versions.filter((version) =>
+    const presentVersions = versions.filter(
+      (version) => version?.isPresent !== false,
+    );
+    const playableVersions = presentVersions.filter((version) =>
       Boolean(version?.exec_path),
     );
-    const folderVersions = versions.filter((version) =>
+    const folderVersions = presentVersions.filter((version) =>
       Boolean(version?.game_path),
     );
     const menuTemplate = [];
@@ -540,7 +600,7 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
       });
     }
 
-    if (game.isUpdateAvailable && game.siteUrl) {
+    if (game.isUpdateAvailable && playableVersions.length && game.siteUrl) {
       if (menuTemplate.length > 0) {
         menuTemplate.push({ type: "separator" });
       }
@@ -553,13 +613,17 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
       });
     }
 
+    // No playable copy on this PC (never installed, or the folder is gone):
+    // offer a fresh install instead of an update.
     if (!playableVersions.length && game.siteUrl) {
       if (menuTemplate.length > 0) {
         menuTemplate.push({ type: "separator" });
       }
 
       menuTemplate.push({
-        label: "Install",
+        label: game.latestVersion
+          ? `Install ${game.latestVersion}`
+          : "Install",
         data: { action: "updateGame", recordId: game.record_id },
       });
     }

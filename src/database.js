@@ -103,17 +103,18 @@ const GAME_METADATA_JOINS = `
   LEFT JOIN tags ON tag_mappings.tag_id = tags.tag_id
 `;
 
+// Values are bound as SQL parameters: they must never be escaped by hand.
+// Migration 010 repairs rows that older releases stored with doubled quotes.
 const addGame = (game) => {
   return new Promise((resolve, reject) => {
-    const { title, creator, engine } = game;
-    const escapedTitle = title.replace(/'/g, "''");
-    const escapedCreator = creator.replace(/'/g, "''");
-    const escapedEngine = engine.replace(/'/g, "''");
+    const title = String(game.title || "");
+    const creator = String(game.creator || "");
+    const engine = String(game.engine || "");
 
     // Check if game already exists
     db.get(
       `SELECT record_id FROM games WHERE title = ? AND creator = ?`,
-      [escapedTitle, escapedCreator],
+      [title, creator],
       (err, row) => {
         if (err) {
           console.error("Error checking existing game:", err);
@@ -132,7 +133,7 @@ const addGame = (game) => {
         db.run(
           `INSERT INTO games (title, creator, engine, last_played_r, total_playtime)
            VALUES (?, ?, ?, 0, 0)`,
-          [escapedTitle, escapedCreator, escapedEngine],
+          [title, creator, engine],
           function (err) {
             if (err) {
               console.error("Error inserting game:", err);
@@ -153,10 +154,10 @@ const addGame = (game) => {
 
 const updateGame = (game) => {
   return new Promise((resolve, reject) => {
-    const { record_id, title, creator, engine } = game;
-    const escapedTitle = title.replace(/'/g, "''");
-    const escapedCreator = creator.replace(/'/g, "''");
-    const escapedEngine = engine.replace(/'/g, "''");
+    const { record_id } = game;
+    const title = String(game.title || "");
+    const creator = String(game.creator || "");
+    const engine = String(game.engine || "");
 
     if (!record_id) {
       reject(new Error("updateGame requires record_id"));
@@ -167,7 +168,7 @@ const updateGame = (game) => {
       `UPDATE games
        SET title = ?, creator = ?, engine = ?
        WHERE record_id = ?`,
-      [escapedTitle, escapedCreator, escapedEngine, record_id],
+      [title, creator, engine, record_id],
       function (err) {
         if (err) {
           console.error("Error updating game:", err);
@@ -230,11 +231,9 @@ const addVersion = (game, recordId) => {
   const executable =
     game.selectedValue ||
     (executables && executables.length > 0 ? executables[0].value : "");
-  const escapedVersion = version.replace(/'/g, "''");
-  const escapedFolder = folder.replace(/'/g, "''");
-  const escapedExecPath = executable
-    ? path.join(folder, executable).replace(/'/g, "''")
-    : "";
+  const storedVersion = String(version || "");
+  const storedFolder = String(folder || "");
+  const storedExecPath = executable ? path.join(storedFolder, executable) : "";
   const dateAdded = Math.floor(Date.now() / 1000);
 
   console.log("adding version");
@@ -243,9 +242,9 @@ const addVersion = (game, recordId) => {
       `INSERT OR REPLACE INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`,
       [
         recordId,
-        escapedVersion,
-        escapedFolder,
-        escapedExecPath,
+        storedVersion,
+        storedFolder,
+        storedExecPath,
         true,
         dateAdded,
         folderSize,
@@ -263,15 +262,15 @@ const addVersion = (game, recordId) => {
 };
 
 const updateVersion = (version, record_id) => {
-  const escapedVersion = version.version.replace(/'/g, "''");
-  const escapedFolder = version.game_path.replace(/'/g, "''");
-  const escapedExecPath = version.exec_path.replace(/'/g, "''");
+  const storedVersion = String(version.version || "");
+  const storedFolder = String(version.game_path || "");
+  const storedExecPath = String(version.exec_path || "");
 
   console.log("updating version with id:", record_id);
   return new Promise((resolve, reject) => {
     db.run(
       `INSERT OR REPLACE INTO versions (record_id, version, game_path, exec_path) VALUES (?, ?, ?, ?)`,
-      [record_id, escapedVersion, escapedFolder, escapedExecPath],
+      [record_id, storedVersion, storedFolder, storedExecPath],
       (err) => {
         if (err) {
           console.error("Error updating version:", err);
@@ -916,17 +915,17 @@ const GetAtlasIDbyRecord = (recordId) => {
 
 const checkRecordExist = (title, creator, engine, version, path) => {
   return new Promise((resolve, reject) => {
-    const escapedTitle = title.trim().replace(/'/g, "''");
-    const escapedCreator = creator.trim().replace(/'/g, "''");
-    const escapedVersion = version.trim().replace(/'/g, "''");
-    const escapedVPath = path.trim().replace(/'/g, "''");
+    const trimmedTitle = String(title || "").trim();
+    const trimmedCreator = String(creator || "").trim();
+    const trimmedVersion = String(version || "").trim();
+    const trimmedPath = String(path || "").trim();
     db.get(
       `SELECT g.record_id
        FROM games g
        LEFT JOIN versions v ON g.record_id = v.record_id
-       WHERE TRIM(g.title) = ? AND TRIM(g.creator) = ? AND TRIM(v.version) = ?
+       WHERE (TRIM(g.title) = ? AND TRIM(g.creator) = ? AND TRIM(v.version) = ?)
        OR v.game_path = ?`,
-      [escapedTitle, escapedCreator, escapedVersion, escapedVPath],
+      [trimmedTitle, trimmedCreator, trimmedVersion, trimmedPath],
       (err, row) => {
         if (err) {
           console.error("Error checking record existence:", err);
@@ -1101,11 +1100,9 @@ const getScreensUrlList = (atlasId) => {
 
 const updateBanners = (recordId, bannerPath, type) => {
   return new Promise((resolve, reject) => {
-    const escapedPath = bannerPath.replace(/'/g, "''");
-    const escapedType = type.replace(/'/g, "''");
     db.run(
       `INSERT OR REPLACE INTO banners (record_id, path, type) VALUES (?, ?, ?)`,
-      [recordId, escapedPath, escapedType],
+      [recordId, String(bannerPath || ""), String(type || "")],
       (err) => {
         if (err) {
           console.error("Error updating banners:", err);
@@ -1120,10 +1117,9 @@ const updateBanners = (recordId, bannerPath, type) => {
 
 const updatePreviews = (recordId, previewPath) => {
   return new Promise((resolve, reject) => {
-    const escapedPath = previewPath.replace(/'/g, "''");
     db.run(
       `INSERT OR REPLACE INTO previews (record_id, path) VALUES (?, ?)`,
-      [recordId, escapedPath],
+      [recordId, String(previewPath || "")],
       (err) => {
         if (err) {
           console.error("Error updating previews:", err);
