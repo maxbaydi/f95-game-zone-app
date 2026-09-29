@@ -18,19 +18,18 @@ This project started from Atlas foundations, but it is now being shipped as its 
 - detects save locations for Ren'Py, RPG Maker, Unity, Unreal, Godot, Wolf RPG, KiriKiri, GameMaker, Flash and HTML games (game folder, AppData, LocalLow, Documents, Saved Games)
 - exports and imports saves as plain zip files, per game or for the whole library, with no account needed
 - backs up saves before destructive operations
-- syncs saves into a cloud you already own: OneDrive, Dropbox, Google Drive, Yandex.Disk and other desktop clients in one click, or any WebDAV server or S3 bucket, with optional end-to-end encryption and a connection card for your other PCs
-- keeps cloud account access in the main header and scan-source management inside Scan Hub instead of burying both in a generic settings window
+- syncs saves into a cloud you already own: OneDrive, Dropbox, Google Drive, Yandex.Disk and other desktop clients in one click, or any WebDAV server, S3 bucket or your own Supabase project, with optional end-to-end encryption and a connection card for your other PCs
+- works in the background: launch with Windows into the tray, automatic app updates, weekly library backups, thread checks and save sync after the PC wakes up, install notifications, archive passwords read from the thread
+- keeps the save storage state in the main header and scan-source management inside Scan Hub instead of burying both in a generic settings window
 
 ## Cloud saves
 
-F95Launcher runs no servers. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client, a WebDAV server or an S3-compatible bucket. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage offers the rest, including a passphrase for end-to-end encryption and a portable connection card. The account-based Supabase flow below remains available as an advanced option for people hosting their own project.
-
-Legacy account flow: a user signs in once, and the app can back up and restore that user's saves across machines.
+F95Launcher runs no servers and ships no cloud account. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client, a WebDAV server, an S3-compatible bucket or a bucket in the user's own Supabase project. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage offers the rest, including a passphrase for end-to-end encryption and a portable connection card.
 
 Current cloud-save behavior:
 
 - local save detection covers install-relative save folders and common Ren'Py AppData locations
-- the app now auto-reconciles saves on startup, after sign-in, and after install/update
+- the app auto-reconciles saves on startup, after install/update, after you play, and after the PC wakes up
 - when only one side exists, that side is used automatically
 - when both sides exist, the app compares manifest hashes and latest save-file mtimes to choose upload vs restore
 - upload creates a cloud backup from the current local save set

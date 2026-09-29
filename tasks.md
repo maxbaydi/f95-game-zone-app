@@ -1,6 +1,6 @@
 # Tasks
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 ## How To Read This File
 
@@ -4844,3 +4844,17 @@ Release path: pushing to `main` triggers `.github/workflows/main.yml`, which bui
 `Atlas Checks` on Windows failed one test after 1.6.0: `removeLibraryGame full cleanup …` returned `UNSAFE_SAVE_PATH`. The new Documents/Saved Games save detection scans the runner's real `Documents` and matched the creator "Studio" by overlap (e.g. "Visual Studio 2022"), and `collectExternalSaveDirectories` did not know the `documents`/`savedGames` base folders. Fix: exact name only at the Documents root; removal supports those base folders but never deletes `Documents`, `Documents\My Games` or `Saved Games` themselves; tests isolate the folders through `ATLAS_DOCUMENTS_DIR` / `ATLAS_SAVED_GAMES_DIR`. Screenshots and captions refreshed. Released as `v1.6.1` (same forum post, renamed to `f95zone-post-1.6.1.md`).
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests on Linux).
+
+## 2026-09-29 — 1.7.0: background automation, compact F95 browser, user-owned Supabase
+
+Аудит того, что ещё делается руками (`docs/ux-automation-backlog.md`), и реализация основной части:
+
+- F95‑браузер: один тулбар с иконками, адресная строка с бейджем состояния, чип передачи, плавающие уведомления вместо шести полос под шапкой (`docs/f95-browser-workspace.md`, снимок `09-f95-browser.png`, демо `?demo=1&f95=thread`).
+- Фоновая автоматика (`docs/background-automation.md`): Windows‑уведомления об установке (`Notifications.installs`), автоскачивание/установка обновлений приложения и перепроверка каждые 6 ч и после сна (`AppUpdates.autoDownload`, `periodicJob.js`), «Launch with Windows» + «Start in the tray», недельные автобэкапы базы с ротацией (`libraryAutoBackup.js`), фоновые проверки тем для всей библиотеки (`LiveUpdates.allGames`), скан новых игр при старте (`Library.autoScanOnStartup`), пароль архива из стартового поста с автоповтором распаковки (`threadPassword.js`).
+- Supabase: встроенный проект автора, вход по email/паролю, облачный каталог библиотеки и очередь удалений, `@supabase/supabase-js` — удалены (`cloudSaveSync.js`, `cloudLibraryCatalog.js` → `libraryIdentity.js`, `supabase/client.js`, `CloudAuthPanel.jsx`, `CloudSync.jsx`, `cloudSyncErrors.js`, `supabaseStorageErrors.js`, `db/cloudLibraryDeleteQueueStore.js`; таблица `cloud_library_delete_queue` остаётся в миграциях). Добавлен провайдер `supabase` в хранилище сохранений (свой проект пользователя: URL, ключ, bucket, автосоздание bucket) с формой в Settings → Save storage; кнопка облака в шапке показывает состояние хранилища.
+- Настройки: карточка General → Background work, строки автозапуска, пункт Notifications → «Finished and failed installs», секции `AppUpdates`/`LiveUpdates` в схеме `settingsPatch`.
+- Удалена лишняя ветка `claude/eloquent-babbage-poe8wo` (указывала на тот же коммит, что и `main`).
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 543 tests, 536 pass / 7 fail (the same pre-existing Windows-path tests on Linux; CI runs on Windows).
+
+Осталось (см. бэклог): лимит параллельных загрузок и пауза, докачка после перезапуска, «Update all», автоповтор по времени, очередь одобрения в Scan Hub, диалог конфликтов и история сохранений, ручной smoke автозапуска/уведомлений на Windows.

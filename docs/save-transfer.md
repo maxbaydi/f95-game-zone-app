@@ -1,7 +1,7 @@
 # Экспорт и импорт сохранений через файл
 
 **Статус:** active
-**Модули:** src/main/saveTransfer.js, src/main/saveTransferIpc.js, src/main/detectors/saveProfileDetector.js, src/main/detectors/renpySaveDetector.js, src/main/saveProfileStrategies.js, src/shared/cloudSyncErrors.js, src/core/library/LibrarySaveSyncPanel.jsx, src/core/cloud/CloudAuthPanel.jsx, src/renderer.js, src/web-preview-api.js
+**Модули:** src/main/saveTransfer.js, src/main/saveTransferIpc.js, src/main/detectors/saveProfileDetector.js, src/main/detectors/renpySaveDetector.js, src/main/saveProfileStrategies.js, src/core/library/LibrarySaveSyncPanel.jsx, src/renderer.js, src/web-preview-api.js
 **Тесты:** test/saveTransfer.test.js, test/saveProfileDetector.test.js, test/saveVault.test.js; `node --test test/saveTransfer.test.js test/saveProfileDetector.test.js test/saveVault.test.js`
 
 ## Назначение
@@ -13,7 +13,7 @@
 - **Export to file** — упаковать все найденные сохранения игры в один zip (по умолчанию в «Документы», имя вида `Название (автор) saves 2026-09-29.zip`). В архиве лежит `manifest.json` и файлы по местам (папка игры, AppData, Documents…).
 - **Import from file** — выбрать zip/7z/rar. Понимает и архивы F95Launcher, и «чужие»: zip, сделанный руками из папки `saves`, архив из другого лаунчера, набор файлов сохранений. Перед записью текущие сохранения копируются в локальное хранилище (vault), так что импорт можно откатить переустановкой из хранилища. Если архив с паролем — появится поле для пароля.
 - **Open** у каждого найденного места — открыть папку в проводнике.
-- **Back up to cloud / Restore from cloud** — как раньше, работают только при входе в аккаунт; при паузе облака сообщение объясняет, что локальные функции работают.
+- **Back up to <хранилище> / Restore from <хранилище>** — при подключённом хранилище сохранений (см. save-storage.md); без него одна кнопка «Connect your cloud».
 
 Окно аккаунта (кнопка облака в шапке) → **Export all saves to folder…** — по одному zip на каждую игру, у которой есть сохранения; аккаунт не нужен.
 
