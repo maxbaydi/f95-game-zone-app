@@ -20,7 +20,37 @@ const GeneralSettings = ({ settings, onRunSetup }) => {
             }
           />
         </window.SettingRow>
+        <window.SettingRow
+          title="Launch with Windows"
+          description="Starts F95Launcher when you sign in, so update checks, downloads and save sync run without you opening it."
+        >
+          <window.ToggleSwitch
+            label="Launch with Windows"
+            checked={Boolean(interfaceSettings.openAtLogin)}
+            onChange={(checked) =>
+              settings.update("Interface", {
+                openAtLogin: checked,
+                ...(checked ? { minimizeToTray: true } : {}),
+              })
+            }
+          />
+        </window.SettingRow>
+        <window.SettingRow
+          title="Start in the tray"
+          description="Opens hidden next to the clock. Needs the tray option above. Autostart always starts this way."
+        >
+          <window.ToggleSwitch
+            label="Start in the tray"
+            checked={Boolean(interfaceSettings.startMinimized)}
+            disabled={!interfaceSettings.minimizeToTray}
+            onChange={(checked) =>
+              settings.update("Interface", { startMinimized: checked })
+            }
+          />
+        </window.SettingRow>
       </window.SettingsCard>
+
+      <AutomationSettingsCard settings={settings} />
 
       {onRunSetup && (
         <window.SettingsCard
@@ -39,6 +69,73 @@ const GeneralSettings = ({ settings, onRunSetup }) => {
         </window.SettingsCard>
       )}
     </div>
+  );
+};
+
+/**
+ * Everything the launcher does on its own in the background. Each switch
+ * maps to one job in the main process; nothing here needs a restart.
+ */
+const AutomationSettingsCard = ({ settings }) => {
+  const library = settings.config?.Library || {};
+  const appUpdates = settings.config?.AppUpdates || {};
+  const liveUpdates = settings.config?.LiveUpdates || {};
+
+  return (
+    <window.SettingsCard
+      icon="autorenew"
+      title="Background work"
+      description="What F95Launcher does by itself while it runs. Turn off anything you would rather trigger by hand."
+    >
+      <window.SettingRow
+        title="Look for new games at startup"
+        description="A quick scan of your library and scan folders a few seconds after launch. Only clearly identified games are added; anything unsure waits in Scan Hub."
+      >
+        <window.ToggleSwitch
+          label="Look for new games at startup"
+          checked={library.autoScanOnStartup !== false}
+          onChange={(checked) =>
+            settings.update("Library", { autoScanOnStartup: checked })
+          }
+        />
+      </window.SettingRow>
+      <window.SettingRow
+        title="Check every installed game for updates"
+        description="The background check reads the F95 thread of favorites every 6 hours. With this on it also walks through the rest of the library, 40 games per run, and after the PC wakes up."
+      >
+        <window.ToggleSwitch
+          label="Check every installed game for updates"
+          checked={Boolean(liveUpdates.allGames)}
+          onChange={(checked) =>
+            settings.update("LiveUpdates", { allGames: checked })
+          }
+        />
+      </window.SettingRow>
+      <window.SettingRow
+        title="Download app updates automatically"
+        description="A new F95Launcher version is downloaded in the background and installed when you quit. Turn off to download and install by hand from the status bar."
+      >
+        <window.ToggleSwitch
+          label="Download app updates automatically"
+          checked={appUpdates.autoDownload !== false}
+          onChange={(checked) =>
+            settings.update("AppUpdates", { autoDownload: checked })
+          }
+        />
+      </window.SettingRow>
+      <window.SettingRow
+        title="Weekly library backup"
+        description="A snapshot of the library list once a week at startup; the last four automatic copies are kept. Backups you make yourself are never removed."
+      >
+        <window.ToggleSwitch
+          label="Weekly library backup"
+          checked={library.autoBackup !== false}
+          onChange={(checked) =>
+            settings.update("Library", { autoBackup: checked })
+          }
+        />
+      </window.SettingRow>
+    </window.SettingsCard>
   );
 };
 
@@ -72,6 +169,18 @@ const NotificationSettings = ({ settings }) => {
           checked={notifications.appUpdates !== false}
           onChange={(checked) =>
             settings.update("Notifications", { appUpdates: checked })
+          }
+        />
+      </window.SettingRow>
+      <window.SettingRow
+        title="Finished and failed installs"
+        description="When a download has been unpacked into your library, or stopped and needs you. Only while the F95Launcher window is not in front."
+      >
+        <window.ToggleSwitch
+          label="Install notifications"
+          checked={notifications.installs !== false}
+          onChange={(checked) =>
+            settings.update("Notifications", { installs: checked })
           }
         />
       </window.SettingRow>

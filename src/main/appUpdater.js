@@ -98,6 +98,7 @@ function buildLatestReleaseUrl(owner, repo) {
  *   owner?: string,
  *   repo?: string,
  *   onStateChanged?: ((nextState: any, previousState: any) => void) | null,
+ *   getAutoDownload?: (() => boolean) | null,
  * }} input
  */
 function createAppUpdaterController(input) {
@@ -120,6 +121,21 @@ function createAppUpdaterController(input) {
   /** @type {{ webContents?: { send: (channel: string, payload: any) => void } } | null} */
   let mainWindow = null;
   let listenersBound = false;
+  // Downloads start on their own once an update is found and the downloaded
+  // package is applied when the app quits, unless the user turned that off.
+  const isAutoDownloadEnabled = () => {
+    try {
+      return typeof input.getAutoDownload === "function"
+        ? input.getAutoDownload() !== false
+        : true;
+    } catch {
+      return true;
+    }
+  };
+  const syncAutoInstallFlag = () => {
+    autoUpdaterInstance.autoInstallOnAppQuit =
+      Boolean(input.app.isPackaged) && isAutoDownloadEnabled();
+  };
   let state = createInitialAppUpdateState({
     currentVersion: input.app.getVersion(),
     isPackaged: input.app.isPackaged,
@@ -157,7 +173,7 @@ function createAppUpdaterController(input) {
 
     listenersBound = true;
     autoUpdaterInstance.autoDownload = false;
-    autoUpdaterInstance.autoInstallOnAppQuit = false;
+    syncAutoInstallFlag();
 
     autoUpdaterInstance.on("error", (error) => {
       console.error("[app.updater] updater error", error);
@@ -190,6 +206,11 @@ function createAppUpdaterController(input) {
         supportsDownload: true,
         supportsInstall: false,
       });
+      if (input.app.isPackaged && isAutoDownloadEnabled()) {
+        Promise.resolve(autoUpdaterInstance.downloadUpdate()).catch((error) => {
+          console.error("[app.updater] automatic download failed", error);
+        });
+      }
     });
 
     autoUpdaterInstance.on("update-not-available", () => {
@@ -282,6 +303,7 @@ function createAppUpdaterController(input) {
       }
     }
 
+    syncAutoInstallFlag();
     await autoUpdaterInstance.checkForUpdates();
     return state;
   }

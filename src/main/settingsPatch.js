@@ -35,6 +35,8 @@ const MOTION_LEVELS = new Set(["auto", "full", "reduced", "off"]);
 const SETTINGS_SCHEMA = {
   Interface: {
     minimizeToTray: toBoolean,
+    openAtLogin: toBoolean,
+    startMinimized: toBoolean,
     showGameList: toBoolean,
     showDebugConsole: toBoolean,
     motion: (value) => {
@@ -48,10 +50,19 @@ const SETTINGS_SCHEMA = {
       normalizeExtensionList(value, DEFAULT_GAME_EXTENSIONS),
     extractionExtensions: (value) =>
       normalizeExtensionList(value, DEFAULT_ARCHIVE_EXTENSIONS),
+    autoScanOnStartup: toBoolean,
+    autoBackup: toBoolean,
   },
   Notifications: {
     appUpdates: toBoolean,
     libraryUpdates: toBoolean,
+    installs: toBoolean,
+  },
+  AppUpdates: {
+    autoDownload: toBoolean,
+  },
+  LiveUpdates: {
+    allGames: toBoolean,
   },
   Onboarding: {
     completed: toBoolean,

@@ -10,6 +10,7 @@ const {
   Tray,
   nativeImage,
   safeStorage,
+  powerMonitor,
 } = require("electron");
 
 app.setAppUserModelId("com.maxbaydi.f95launcher");
@@ -129,6 +130,13 @@ const {
 const {
   createLibraryUpdateNotificationController,
 } = require("./main/libraryUpdateNotificationController");
+const {
+  createInstallNotificationController,
+} = require("./main/installNotificationController");
+const { createPeriodicJob } = require("./main/periodicJob");
+const { runScheduledLibraryBackup } = require("./main/libraryAutoBackup");
+const { listLibraryBackups } = require("./main/libraryBackups");
+const { backupDatabaseFile } = require("./main/libraryReset");
 const { upsertSaveSyncState } = require("./main/db/saveSyncStateStore");
 const {
   listScanSources,
@@ -255,6 +263,32 @@ const f95InstallQueue = [];
 const f95InstallContexts = new Map();
 // Every download (active or retryable history entry) keyed by store id.
 const f95DownloadContexts = new Map();
+// Archive passwords read from thread posts, by thread URL: an encrypted
+// package is unpacked with it without asking the user.
+const f95ThreadArchivePasswords = new Map();
+const F95_THREAD_PASSWORD_CACHE_LIMIT = 200;
+
+function rememberThreadArchivePassword(threadUrl, password) {
+  const key = String(threadUrl || "").trim();
+  const value = String(password || "").trim();
+  if (!key) {
+    return;
+  }
+  if (!value) {
+    f95ThreadArchivePasswords.delete(key);
+    return;
+  }
+  f95ThreadArchivePasswords.delete(key);
+  f95ThreadArchivePasswords.set(key, value);
+  while (f95ThreadArchivePasswords.size > F95_THREAD_PASSWORD_CACHE_LIMIT) {
+    const oldest = f95ThreadArchivePasswords.keys().next().value;
+    f95ThreadArchivePasswords.delete(oldest);
+  }
+}
+
+function getThreadArchivePassword(threadUrl) {
+  return f95ThreadArchivePasswords.get(String(threadUrl || "").trim()) || "";
+}
 // Target paths handed out to in-flight downloads (their files may not exist yet).
 const f95ReservedDownloadPaths = new Set();
 const F95_DOWNLOADS_STATE_PATH = path.join(dataDir, "f95-downloads.json");
@@ -320,8 +354,67 @@ const libraryUpdateNotificationController =
     },
   });
 
+const installNotificationController = createInstallNotificationController({
+  Notification,
+  iconPath: APP_WINDOW_ICON_PATH,
+  isEnabled: () =>
+    (appConfig || defaultConfig)?.Notifications?.installs !== false,
+  isWindowFocused: () =>
+    Boolean(
+      mainWindow &&
+        !mainWindow.isDestroyed() &&
+        mainWindow.isVisible() &&
+        mainWindow.isFocused(),
+    ),
+  onClick: () => {
+    trayController.showMainWindow();
+  },
+});
+
+// "Launch with Windows" registers the app with the OS; "--hidden" is what the
+// autostart passes so the window stays in the tray until the user asks.
+const STARTUP_HIDDEN_ARG = "--hidden";
+
+function applyLoginItemSettings() {
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    return;
+  }
+  const config = appConfig || defaultConfig;
+  const openAtLogin = Boolean(config?.Interface?.openAtLogin);
+  try {
+    app.setLoginItemSettings({
+      openAtLogin,
+      args: openAtLogin ? [STARTUP_HIDDEN_ARG] : [],
+    });
+  } catch (error) {
+    console.warn("[startup] Could not update the login item:", error);
+  }
+}
+
+function shouldStartHidden() {
+  const config = appConfig || defaultConfig;
+  if (!isMinimizeToTrayEnabled(config)) {
+    return false;
+  }
+  return (
+    process.argv.includes(STARTUP_HIDDEN_ARG) ||
+    Boolean(config?.Interface?.startMinimized)
+  );
+}
+
+// Re-check the app release every few hours while the launcher runs (it may
+// sit in the tray for days) and again when the PC wakes up.
+const APP_UPDATE_RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const appUpdateRecheckJob = createPeriodicJob({
+  name: "app-update",
+  intervalMs: APP_UPDATE_RECHECK_INTERVAL_MS,
+  run: (reason) => runAppUpdateCheck(reason),
+});
+
 const appUpdater = createAppUpdaterController({
   app,
+  getAutoDownload: () =>
+    (appConfig || defaultConfig)?.AppUpdates?.autoDownload !== false,
   onStateChanged: (nextState, previousState) => {
     const config = appConfig || defaultConfig;
     if (config?.Notifications?.appUpdates === false) {
@@ -376,12 +469,14 @@ function resolveMainWindowBounds() {
 function createWindow() {
   const mainWindowBounds = resolveMainWindowBounds();
 
+  const startHidden = shouldStartHidden();
   mainWindow = new BrowserWindow({
     width: mainWindowBounds.width,
     height: mainWindowBounds.height,
     minWidth: mainWindowBounds.minWidth,
     minHeight: mainWindowBounds.minHeight,
     icon: APP_WINDOW_ICON_PATH,
+    show: !startHidden,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
@@ -1058,6 +1153,7 @@ async function inspectF95ThreadPayload(threadUrl) {
     throw new Error(payload?.error || "Failed to inspect the F95 thread.");
   }
 
+  rememberThreadArchivePassword(threadUrl, payload.archivePassword);
   const rememberedLink = pickPreferredThreadLink(
     threadUrl,
     payload.links || [],
@@ -1226,6 +1322,8 @@ function createLibraryLiveUpdateChecker() {
     },
     isAuthenticated: async () =>
       (await getF95AuthState(getReadyF95Session())).isAuthenticated,
+    favoritesOnly: () =>
+      (appConfig || defaultConfig)?.LiveUpdates?.allGames !== true,
     onRunFinished: (summary) => handleLiveUpdateRunFinished(summary),
   });
 }
@@ -1462,6 +1560,7 @@ function buildF95DownloadRequest(payload) {
     ).trim(),
     mirrorHost: String(payload?.mirrorHost || "").trim(),
     variantId: String(payload?.variantId || "").trim(),
+    archivePassword: String(payload?.archivePassword || "").trim(),
     // Other mirrors of the same build, tried in order when this one fails.
     fallbackLinks: buildMirrorCandidates(
       { url: normalizeF95DownloadUrl(payload?.downloadUrl) },
@@ -1494,6 +1593,10 @@ function createF95DownloadContext(request) {
       // Host of the thread link itself, used to remember the mirror choice.
       linkHost: request.mirrorHost || hostInfo.host || "",
       variantId: request.variantId || "",
+      // Password published in the thread, tried automatically on an
+      // encrypted archive before the user is asked.
+      archivePassword:
+        request.archivePassword || getThreadArchivePassword(request.threadUrl),
     },
     prepared: null,
     abortController: null,
@@ -1931,6 +2034,10 @@ function markF95DownloadFailed(context, error, phase = "download", extra = {}) {
     receivedBytes: extra.receivedBytes || 0,
     fileName,
   });
+  installNotificationController.notifyFailed({
+    title: context.metadata.title,
+    error: details.message,
+  });
 
   return details;
 }
@@ -2283,6 +2390,11 @@ async function finalizeF95DownloadedPackage({
       receivedBytes: receivedBytes || 0,
       fileName: path.basename(targetPath),
     });
+    installNotificationController.notifyCompleted({
+      title: context.metadata.title,
+      warning,
+      recordId: firstResult?.recordId ?? null,
+    });
   } catch (error) {
     console.error(
       "[f95.download] Failed to install downloaded package:",
@@ -2292,6 +2404,31 @@ async function finalizeF95DownloadedPackage({
     // (with a password, after freeing disk space ...) or unpack it by hand
     // instead of downloading it again. Only payloads that are not a game
     // package at all (HTML error pages, empty files) are removed.
+    const threadPassword = String(context.metadata?.archivePassword || "");
+    if (
+      !password &&
+      threadPassword &&
+      isArchiveError(error) &&
+      ["archive_encrypted", "archive_wrong_password"].includes(error.code)
+    ) {
+      console.info(
+        "[f95.download] The archive is encrypted; retrying with the password from the thread.",
+        { id: context.id },
+      );
+      f95DownloadsStore.installing(context.id, {
+        title: context.metadata.title,
+        text: `Unpacking ${context.metadata.title} with the password from the thread`,
+      });
+      broadcastF95Downloads();
+      return finalizeF95DownloadedPackage({
+        context,
+        targetPath,
+        totalBytes,
+        receivedBytes,
+        mimeType,
+        password: threadPassword,
+      });
+    }
     let packagePath = String(error?.packagePath || targetPath || "");
     if (error instanceof DownloadValidationError && error.cleanupFile) {
       await fs.promises.unlink(packagePath).catch(() => {});
@@ -2441,6 +2578,11 @@ async function installF95PackageFromFolder(context, folderPath) {
       totalBytes: 0,
       receivedBytes: 0,
       fileName: folderName,
+    });
+    installNotificationController.notifyCompleted({
+      title,
+      warning,
+      recordId: firstResult?.recordId ?? null,
     });
   } catch (error) {
     console.error("[f95.download] Failed to install from folder:", error);
@@ -3463,10 +3605,14 @@ const defaultConfig = {
     gameStartup: "Do Nothing",
     showDebugConsole: false,
     minimizeToTray: false,
+    openAtLogin: false,
+    startMinimized: false,
   },
   Library: {
     rootPath: dataDir,
     gameFolder: "",
+    autoScanOnStartup: true,
+    autoBackup: true,
   },
   Metadata: {
     downloadPreviews: true,
@@ -3477,6 +3623,13 @@ const defaultConfig = {
   Notifications: {
     appUpdates: true,
     libraryUpdates: true,
+    installs: true,
+  },
+  AppUpdates: {
+    autoDownload: true,
+  },
+  LiveUpdates: {
+    allGames: false,
   },
   Onboarding: {
     completed: false,
@@ -3810,6 +3963,7 @@ ipcMain.handle("update-settings", async (event, payload) => {
     );
     saveConfig();
     trayController.refresh();
+    applyLoginItemSettings();
     broadcastSettingsChanged();
     return { success: true, config: appConfig };
   } catch (error) {
@@ -6168,6 +6322,14 @@ function loadConfig() {
         ...defaultConfig.Notifications,
         ...(appConfig?.Notifications || {}),
       },
+      AppUpdates: {
+        ...defaultConfig.AppUpdates,
+        ...(appConfig?.AppUpdates || {}),
+      },
+      LiveUpdates: {
+        ...defaultConfig.LiveUpdates,
+        ...(appConfig?.LiveUpdates || {}),
+      },
       Onboarding: {
         ...defaultConfig.Onboarding,
         ...(appConfig?.Onboarding || {}),
@@ -6930,6 +7092,7 @@ app.whenReady().then(async () => {
     return;
   }
   loadConfig();
+  applyLoginItemSettings();
   databaseConnection = await initializeDatabase(appPaths);
   hydrateF95DownloadsStore();
   saveStorage?.start().catch((error) => {
@@ -6966,10 +7129,50 @@ app.whenReady().then(async () => {
   broadcastF95AuthState().catch((error) => {
     console.error("[f95.auth] Failed to initialize auth state:", error);
   });
-  runAppUpdateCheck("startup").catch((error) => {
-    console.error("Failed to initialize app updater:", error);
+  runAppUpdateCheck("startup")
+    .catch((error) => {
+      console.error("Failed to initialize app updater:", error);
+    })
+    .finally(() => {
+      appUpdateRecheckJob.start();
+    });
+  setTimeout(() => {
+    runStartupLibraryBackup().catch((error) => {
+      console.warn("[library.backups] Automatic backup failed:", error);
+    });
+  }, AUTO_BACKUP_STARTUP_DELAY_MS);
+  powerMonitor.on("resume", () => {
+    // The network needs a moment after wake-up; then re-check everything the
+    // launcher would have checked had it been running.
+    appUpdateRecheckJob.kick("resume", RESUME_RECHECK_DELAY_MS);
+    setTimeout(() => {
+      libraryLiveUpdateChecker?.runNow({ reason: "resume" }).catch((error) => {
+        console.error("[library.live] Thread check after wake-up failed:", error);
+      });
+      saveStorage?.scheduleSyncAll?.("resume");
+    }, RESUME_RECHECK_DELAY_MS);
   });
 });
+
+const AUTO_BACKUP_STARTUP_DELAY_MS = 45 * 1000;
+const RESUME_RECHECK_DELAY_MS = 60 * 1000;
+
+async function runStartupLibraryBackup() {
+  const config = appConfig || defaultConfig;
+  if (config?.Library?.autoBackup === false || !databaseConnection) {
+    return null;
+  }
+  return runScheduledLibraryBackup({
+    listBackups: () => listLibraryBackups({ appPaths }),
+    createBackup: ({ fileNamePrefix }) =>
+      backupDatabaseFile({
+        appPaths,
+        db: databaseConnection,
+        logger: console,
+        fileNamePrefix,
+      }),
+  });
+}
 
 app.on("before-quit", () => {
   flushF95DownloadsPersist();
@@ -6977,6 +7180,7 @@ app.on("before-quit", () => {
 });
 
 app.on("will-quit", () => {
+  appUpdateRecheckJob.stop();
   libraryLiveUpdateChecker?.stop();
   if (f95LoginLiveCheckTimer) {
     clearTimeout(f95LoginLiveCheckTimer);
