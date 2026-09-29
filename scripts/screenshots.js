@@ -422,6 +422,29 @@ async function shootOnboarding(context) {
   await page.close();
 }
 
+async function shootF95Browser(context) {
+  if (!wants("09-f95-browser")) {
+    return;
+  }
+  const page = await openApp(context, "demo=1&f95=thread");
+  await page.locator('nav[aria-label="Sections"] button[aria-label="Search"]').click();
+  const toolbar = page.locator('[role="toolbar"][aria-label="F95 browser"]');
+  await toolbar.waitFor({ timeout: 30000 });
+  await toolbar.getByRole("button", { name: "In library", exact: true }).waitFor({ timeout: 15000 });
+  // The demo emits one "downloading" progress event for the transfer chip.
+  await toolbar.locator(':text("Downloading 62%")').waitFor({ timeout: 15000 });
+  // Install → the demo mirror answers with a verification step, which shows
+  // the compact floating note over the page.
+  await toolbar.getByRole("button", { name: "Install", exact: true }).click();
+  await page.locator('[data-notice="captcha"]').waitFor({ timeout: 15000 });
+  await capture(
+    page,
+    "09-f95-browser",
+    "F95 browser: compact toolbar, library badge, transfer chip and a floating note",
+  );
+  await page.close();
+}
+
 async function main() {
   const { chromium } = loadPlaywright();
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -443,6 +466,7 @@ async function main() {
 
     await shootLibraryViews(context);
     await shootOnboarding(context);
+    await shootF95Browser(context);
     log("done");
   } finally {
     if (browser) {

@@ -96,12 +96,190 @@ const formatBytes = (bytes) => {
   }`;
 };
 
-const F95BrowserWorkspace = () => {
+const EMPTY_THREAD_INSTALL_STATE = {
+  checking: false,
+  inLibrary: false,
+  installed: false,
+  installState: "",
+  recordId: null,
+  title: "",
+  creator: "",
+  version: "",
+  gamePath: "",
+  siteUrl: "",
+};
+
+// How long a passing note (queued, added to library, …) stays on screen.
+// Notes that wait for the user (captcha, errors) never time out.
+const STATUS_NOTICE_DURATION = 7000;
+// A finished or failed transfer keeps its toolbar chip briefly so the outcome
+// is visible without opening the downloads panel.
+const TRANSFER_CHIP_LINGER = 6000;
+
+const splitUrlForDisplay = (value) => {
+  try {
+    const parsed = new URL(value);
+    const pathname = decodeURIComponent(
+      `${parsed.pathname}${parsed.search}`.replace(/\/$/, ""),
+    );
+    return { host: parsed.hostname.replace(/^www\./, ""), path: pathname };
+  } catch (_) {
+    return { host: "", path: String(value || "") };
+  }
+};
+
+const TRANSFER_PHASE_META = {
+  downloading: { icon: "", label: "Downloading", tone: "accent" },
+  installing: { icon: "", label: "Installing", tone: "accent" },
+  completed: { icon: "check_circle", label: "Installed", tone: "success" },
+  error: { icon: "error", label: "Failed", tone: "error" },
+  cancelled: { icon: "block", label: "Cancelled", tone: "muted" },
+};
+
+const CHIP_TONES = {
+  accent: "border-accent/40 bg-accent/10 text-text hover:bg-accent/20",
+  success:
+    "border-emerald-500/40 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20",
+  error: "border-red-500/40 bg-red-500/10 text-red-100 hover:bg-red-500/20",
+  muted: "border-border bg-white/5 text-text/70 hover:bg-white/10",
+};
+
+const ToolbarIconButton = ({
+  icon,
+  label,
+  onClick,
+  disabled = false,
+  active = false,
+  className = "",
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    title={label}
+    aria-label={label}
+    aria-pressed={active || undefined}
+    className={`flex h-8 w-8 flex-none items-center justify-center text-text/80 transition hover:bg-white/10 hover:text-text disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent ${
+      active ? "bg-white/10 text-accent" : ""
+    } ${className}`}
+  >
+    <span
+      className="material-symbols-outlined text-[20px] leading-none"
+      aria-hidden
+    >
+      {icon}
+    </span>
+  </button>
+);
+
+// One compact floating card. Reuses the app-wide toast styling so the
+// workspace notes look like every other notification in F95Launcher, but
+// they stay inside the browser area instead of the global toast stack.
+const WorkspaceNotice = ({ notice, onDismiss }) => {
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    if (!(notice.duration > 0)) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      dismissRef.current?.();
+    }, notice.duration);
+    return () => clearTimeout(timer);
+  }, [notice.key, notice.message, notice.duration]);
+
+  const iconName =
+    notice.icon ||
+    {
+      success: "check_circle",
+      error: "error",
+      warning: "shield",
+      info: "info",
+      loading: "",
+    }[notice.type] ||
+    "info";
+
+  return (
+    <div
+      className="atlas-toast pointer-events-auto"
+      data-type={notice.type}
+      role={notice.type === "error" ? "alert" : "status"}
+      data-notice={notice.key}
+    >
+      {notice.type === "loading" ? (
+        <span
+          className="atlas-toast__icon atlas-spinner atlas-keep-motion"
+          style={{ width: 16, height: 16, marginTop: 2, color: "#66c0f4" }}
+          aria-hidden
+        />
+      ) : (
+        <span
+          className="atlas-toast__icon material-symbols-outlined"
+          aria-hidden
+        >
+          {iconName}
+        </span>
+      )}
+      <div className="atlas-toast__body">
+        {notice.title && (
+          <div className="atlas-toast__title">{notice.title}</div>
+        )}
+        {notice.message && (
+          <div className="atlas-toast__message">{notice.message}</div>
+        )}
+        {Array.isArray(notice.actions) && notice.actions.length > 0 && (
+          <div className="atlas-toast__actions">
+            {notice.actions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                onClick={action.onClick}
+                disabled={action.disabled}
+                className="atlas-toast__action disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {notice.dismissible !== false && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="atlas-toast__close"
+          aria-label="Dismiss"
+          data-no-ripple=""
+        >
+          <span
+            className="material-symbols-outlined"
+            style={{ fontSize: 16 }}
+            aria-hidden
+          >
+            close
+          </span>
+        </button>
+      )}
+      {notice.duration > 0 && (
+        <div
+          className="atlas-toast__timer atlas-keep-motion"
+          style={{ animationDuration: `${notice.duration}ms` }}
+        />
+      )}
+    </div>
+  );
+};
+
+const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
   const hostRef = useRef(null);
   const webviewRef = useRef(null);
   const guestReadyRef = useRef(false);
   const authStatusRef = useRef(false);
   const captchaRetryKeyRef = useRef("");
+  const demoPage = window.__f95LauncherDemo?.enabled
+    ? window.__f95LauncherDemo.f95Page || null
+    : null;
   const [authState, setAuthState] = useState({
     isAuthenticated: false,
   });
@@ -115,7 +293,9 @@ const F95BrowserWorkspace = () => {
   const [browserKey, setBrowserKey] = useState(0);
   const [browserError, setBrowserError] = useState("");
   const [threadInfo, setThreadInfo] = useState(null);
-  const [statusMessage, setStatusMessage] = useState("");
+  // { text, tone: "info" | "success", sticky } — a passing note; sticky ones
+  // stay until the transfer reports itself or the user closes them.
+  const [statusNotice, setStatusNotice] = useState(null);
   const [installError, setInstallError] = useState("");
   const [isInspectingThread, setIsInspectingThread] = useState(false);
   const [isStartingInstall, setIsStartingInstall] = useState(false);
@@ -124,21 +304,14 @@ const F95BrowserWorkspace = () => {
     setThreadInfo(null),
   );
   const [downloadState, setDownloadState] = useState(null);
+  const [transferChipVisible, setTransferChipVisible] = useState(false);
   const [pendingCaptchaAction, setPendingCaptchaAction] = useState(null);
   const [selectedLinkUrl, setSelectedLinkUrl] = useState("");
   const { attemptEvents, beginAttempts, resetAttempts } =
     useWorkspaceInstallAttempts();
-  const [threadInstallState, setThreadInstallState] = useState({
-    checking: false,
-    inLibrary: false,
-    installed: false,
-    recordId: null,
-    title: "",
-    creator: "",
-    version: "",
-    gamePath: "",
-    siteUrl: "",
-  });
+  const [threadInstallState, setThreadInstallState] = useState(
+    EMPTY_THREAD_INSTALL_STATE,
+  );
 
   const currentUrl = browserState.url || F95_SEARCH_URL;
   const threadLinks = Array.isArray(threadInfo?.links) ? threadInfo.links : [];
@@ -148,6 +321,19 @@ const F95BrowserWorkspace = () => {
     threadLinks[0] ||
     null;
   const isThreadPage = F95_THREAD_PATTERN.test(currentUrl);
+
+  const setStatusMessage = (text, options = {}) => {
+    if (!text) {
+      setStatusNotice(null);
+      return;
+    }
+    setStatusNotice({
+      text,
+      tone: options.tone || "info",
+      sticky: Boolean(options.sticky),
+      nonce: Date.now(),
+    });
+  };
 
   const withWebview = (callback) => {
     const webview = webviewRef.current;
@@ -188,7 +374,11 @@ const F95BrowserWorkspace = () => {
     });
 
     window.electronAPI.onF95DownloadProgress((progressState) => {
+      if (!mounted) {
+        return;
+      }
       setDownloadState(progressState || null);
+      setTransferChipVisible(Boolean(progressState));
       // The "queued" / "your turn in the browser window" note is superseded
       // as soon as the progress line reports the transfer itself, otherwise
       // it lingers under a finished or failed download.
@@ -201,7 +391,7 @@ const F95BrowserWorkspace = () => {
           "cancelled",
         ].includes(progressState?.phase)
       ) {
-        setStatusMessage("");
+        setStatusNotice(null);
       }
     });
 
@@ -212,6 +402,22 @@ const F95BrowserWorkspace = () => {
     };
   }, []);
 
+  // Finished transfers leave the toolbar after a moment; the downloads panel
+  // and the global toasts keep the full history.
+  useEffect(() => {
+    if (
+      !transferChipVisible ||
+      !["completed", "error", "cancelled"].includes(downloadState?.phase)
+    ) {
+      return undefined;
+    }
+    const timer = setTimeout(
+      () => setTransferChipVisible(false),
+      TRANSFER_CHIP_LINGER,
+    );
+    return () => clearTimeout(timer);
+  }, [transferChipVisible, downloadState]);
+
   useEffect(() => {
     setThreadInfo(null);
     setInstallError("");
@@ -220,21 +426,16 @@ const F95BrowserWorkspace = () => {
     captchaRetryKeyRef.current = "";
   }, [browserKey, authState.isAuthenticated]);
 
+  // An error about the previous page is stale once the user moves on.
+  useEffect(() => {
+    setInstallError("");
+  }, [currentUrl]);
+
   useEffect(() => {
     let cancelled = false;
 
     if (!authState.isAuthenticated || !isThreadPage) {
-      setThreadInstallState({
-        checking: false,
-        inLibrary: false,
-        installed: false,
-        recordId: null,
-        title: "",
-        creator: "",
-        version: "",
-        gamePath: "",
-        siteUrl: "",
-      });
+      setThreadInstallState(EMPTY_THREAD_INSTALL_STATE);
       return undefined;
     }
 
@@ -257,6 +458,7 @@ const F95BrowserWorkspace = () => {
           checking: false,
           inLibrary: Boolean(payload?.inLibrary),
           installed: Boolean(payload?.installed),
+          installState: payload?.installState || "",
           recordId: payload?.recordId ?? null,
           title: payload?.title || "",
           creator: payload?.creator || "",
@@ -271,17 +473,7 @@ const F95BrowserWorkspace = () => {
         }
 
         console.error("Failed to resolve F95 thread install state:", error);
-        setThreadInstallState({
-          checking: false,
-          inLibrary: false,
-          installed: false,
-          recordId: null,
-          title: "",
-          creator: "",
-          version: "",
-          gamePath: "",
-          siteUrl: "",
-        });
+        setThreadInstallState(EMPTY_THREAD_INSTALL_STATE);
       });
 
     return () => {
@@ -313,6 +505,32 @@ const F95BrowserWorkspace = () => {
     hostElement.innerHTML = "";
     guestReadyRef.current = false;
     setBrowserError("");
+
+    // The browser preview (`index.html?demo=1`) has no <webview>; it shows a
+    // static demo page so the workspace chrome can be screenshotted.
+    if (demoPage) {
+      const frame = document.createElement("iframe");
+      frame.setAttribute("title", demoPage.title || "F95 demo page");
+      frame.setAttribute("sandbox", "");
+      frame.srcdoc = demoPage.html || "";
+      frame.className = "h-full w-full border-0";
+      frame.style.background = "#050608";
+      hostElement.appendChild(frame);
+      webviewRef.current = null;
+      setBrowserState({
+        url: demoPage.url || F95_SEARCH_URL,
+        title: demoPage.title || "",
+        loading: false,
+        canGoBack: true,
+        canGoForward: false,
+      });
+      return () => {
+        if (hostElement.contains(frame)) {
+          hostElement.removeChild(frame);
+        }
+      };
+    }
+
     setBrowserState({
       url: F95_SEARCH_URL,
       title: "",
@@ -446,33 +664,34 @@ const F95BrowserWorkspace = () => {
 
   const installButtonLabel = useMemo(() => {
     if (isInspectingThread || isStartingInstall) {
-      return "Preparing...";
+      return "Preparing…";
     }
 
     if (threadInstallState.checking && isThreadPage) {
-      return "Checking...";
+      return "Checking…";
     }
 
     if (threadInstallState.installed) {
-      return "Already Installed";
+      return "Installed";
     }
 
-    return "Install This Thread";
+    if (threadInstallState.installState === "missing") {
+      return "Install Again";
+    }
+
+    return "Install";
   }, [
     isInspectingThread,
     isStartingInstall,
     threadInstallState.checking,
     threadInstallState.installed,
+    threadInstallState.installState,
     isThreadPage,
   ]);
 
   const addButtonLabel = useMemo(() => {
-    if (isInspectingThread || isStartingInstall) {
-      return "Working...";
-    }
-
     if (threadInstallState.checking && isThreadPage) {
-      return "Checking...";
+      return "Checking…";
     }
 
     if (threadInstallState.inLibrary) {
@@ -480,18 +699,13 @@ const F95BrowserWorkspace = () => {
     }
 
     return "Add to Library";
-  }, [
-    isInspectingThread,
-    isStartingInstall,
-    threadInstallState.checking,
-    threadInstallState.inLibrary,
-    isThreadPage,
-  ]);
+  }, [threadInstallState.checking, threadInstallState.inLibrary, isThreadPage]);
 
   const openLoginWindow = async () => {
     setInstallError("");
     setStatusMessage(
       "Finish the login in the F95 window, then this page will refresh.",
+      { sticky: true },
     );
 
     try {
@@ -512,6 +726,7 @@ const F95BrowserWorkspace = () => {
       setAuthState(nextState || { isAuthenticated: false });
       setThreadInfo(null);
       setDownloadState(null);
+      setTransferChipVisible(false);
       setPendingCaptchaAction(null);
     } catch (error) {
       console.error("Failed to clear F95 session:", error);
@@ -601,6 +816,7 @@ const F95BrowserWorkspace = () => {
         nextState?.installed
           ? `${nextState.title || "This thread"} is already installed.`
           : `${nextState?.title || browserState.title || "This thread"} was added to your library.`,
+        { tone: "success" },
       );
     } catch (error) {
       console.error("Failed to add F95 thread to library:", error);
@@ -645,6 +861,8 @@ const F95BrowserWorkspace = () => {
       if (!result?.success) {
         if (result?.code === "captcha_required") {
           const captchaUrl = result?.actionUrl || link.url;
+          // The captcha card below carries the instructions; no second note.
+          setStatusMessage("");
           setPendingCaptchaAction({
             payload,
             link,
@@ -652,11 +870,6 @@ const F95BrowserWorkspace = () => {
             actionKind: result?.actionKind || "captcha",
           });
           setThreadInfo(null);
-          setStatusMessage(
-            result?.actionKind === "verification"
-              ? "This mirror wants a quick check in the browser below. After it, F95Launcher continues on its own, or just press Download on the page."
-              : "This mirror needs a captcha before F95Launcher can continue. Finish it in the browser below and the install resumes automatically.",
-          );
           withWebview((webview) => {
             webview.loadURL(captchaUrl);
           });
@@ -685,15 +898,21 @@ const F95BrowserWorkspace = () => {
       const fallbackNote = result?.fellBack
         ? `${requestedHostName} did not return the file, so F95Launcher switched to ${usedHostName}. `
         : "";
-      setStatusMessage(
-        result?.awaitingAction
-          ? `${fallbackNote}${result.hostLabel || usedHostName || "The mirror"} needs a quick step in the browser window that just opened. Finish it there and ${payload.title} downloads by itself.`
-          : result?.fellBack
+      if (result?.awaitingAction) {
+        setStatusMessage(
+          `${fallbackNote}${result.hostLabel || usedHostName || "The mirror"} needs a quick step in the browser window that just opened. Finish it there and ${payload.title} downloads by itself.`,
+          { sticky: true },
+        );
+      } else {
+        setStatusMessage(
+          result?.fellBack
             ? `${fallbackNote}${payload.title} is downloading and installs in the background.`
-            : `Queued ${payload.title} via ${
+            : `${payload.title} is queued via ${
                 usedHostName || result?.sourceHost || link.label
-              }. Download and install will continue in the background.`,
-      );
+              }. It downloads and installs in the background.`,
+          { tone: "success" },
+        );
+      }
     } catch (error) {
       console.error("Failed to queue F95 install:", error);
       setInstallError(error.message);
@@ -756,7 +975,7 @@ const F95BrowserWorkspace = () => {
     }
 
     captchaRetryKeyRef.current = retryKey;
-    setStatusMessage("Captcha confirmed. Resuming install...");
+    setStatusMessage("Captcha confirmed. Resuming install…", { sticky: true });
     void startInstall(pendingCaptchaAction.payload, pendingCaptchaAction.link, {
       overrideUrl: continuationUrl,
     });
@@ -767,55 +986,210 @@ const F95BrowserWorkspace = () => {
     isStartingInstall,
   ]);
 
+  const reloadPage = () => {
+    setBrowserError("");
+    withWebview((webview) => {
+      try {
+        webview.reload();
+      } catch (error) {
+        webview.loadURL(F95_SEARCH_URL);
+      }
+    });
+  };
+
+  const libraryBadge = useMemo(() => {
+    if (!threadInstallState.inLibrary || !isThreadPage) {
+      return null;
+    }
+    const title = threadInstallState.title || "This thread";
+    if (threadInstallState.installed) {
+      return {
+        label: "Installed",
+        icon: "check_circle",
+        tone: "success",
+        detail: threadInstallState.version
+          ? `${title} is installed (${threadInstallState.version}). Click to open it in the library.`
+          : `${title} is installed. Click to open it in the library.`,
+      };
+    }
+    if (threadInstallState.installState === "missing") {
+      return {
+        label: "Files missing",
+        icon: "folder_off",
+        tone: "error",
+        detail: `${title} was installed before, but its files are missing. Install it again from this thread.`,
+      };
+    }
+    return {
+      label: "In library",
+      icon: "bookmark_added",
+      tone: "accent",
+      detail: `${title} is in your library but not installed on this PC.`,
+    };
+  }, [threadInstallState, isThreadPage]);
+
+  const transferChip = useMemo(() => {
+    if (!transferChipVisible || !downloadState) {
+      return null;
+    }
+    const meta = TRANSFER_PHASE_META[downloadState.phase];
+    if (!meta) {
+      return null;
+    }
+    const percent =
+      typeof downloadState.percent === "number" &&
+      downloadState.phase === "downloading"
+        ? Math.max(0, Math.min(100, Math.round(downloadState.percent)))
+        : null;
+    const busy = ["downloading", "installing"].includes(downloadState.phase);
+    return {
+      ...meta,
+      busy,
+      percent,
+      text:
+        percent !== null
+          ? `${meta.label} ${percent}%`
+          : downloadState.phase === "downloading" && progressLabel
+            ? `${meta.label} ${progressLabel}`
+            : meta.label,
+      detail: [downloadState.text, progressLabel].filter(Boolean).join(" · "),
+    };
+  }, [transferChipVisible, downloadState, progressLabel]);
+
+  // Floating notes, most urgent first. Each one maps to a piece of state so
+  // dismissing a note clears the state behind it.
+  const notices = useMemo(() => {
+    const list = [];
+    if (browserError) {
+      list.push({
+        key: "browser-error",
+        type: "error",
+        icon: "wifi_off",
+        title: "Page did not load",
+        message: browserError,
+        actions: [{ label: "Reload page", onClick: reloadPage }],
+        onDismiss: () => setBrowserError(""),
+      });
+    }
+    if (pendingCaptchaAction) {
+      const verification = pendingCaptchaAction.actionKind === "verification";
+      list.push({
+        key: "captcha",
+        type: "warning",
+        icon: "verified_user",
+        title: verification ? "Quick check on the page" : "Captcha on the page",
+        message: verification
+          ? `Finish the check in the page below. ${pendingCaptchaAction.payload?.title || "The game"} then continues by itself, or press Download on the page.`
+          : `Finish the captcha in the page below. ${pendingCaptchaAction.payload?.title || "The install"} resumes automatically.`,
+        actions: [
+          {
+            label: verification ? "Open check page" : "Open captcha page",
+            onClick: reopenCaptchaPage,
+          },
+          {
+            label: isStartingInstall ? "Retrying…" : "Retry install",
+            onClick: retryPendingCaptchaInstall,
+            disabled: isStartingInstall,
+          },
+        ],
+        onDismiss: () => setPendingCaptchaAction(null),
+      });
+    }
+    if (installError && !threadInfo) {
+      list.push({
+        key: "install-error",
+        type: "error",
+        message: installError,
+        onDismiss: () => setInstallError(""),
+      });
+    }
+    if (statusNotice) {
+      list.push({
+        key: `status-${statusNotice.nonce}`,
+        type: statusNotice.sticky ? "loading" : statusNotice.tone,
+        message: statusNotice.text,
+        duration: statusNotice.sticky ? 0 : STATUS_NOTICE_DURATION,
+        onDismiss: () => setStatusNotice(null),
+      });
+    }
+    return list;
+  }, [
+    browserError,
+    pendingCaptchaAction,
+    isStartingInstall,
+    installError,
+    threadInfo,
+    statusNotice,
+  ]);
+
   if (!authState.isAuthenticated) {
     return (
       <div className="flex h-full items-center justify-center bg-tertiary px-8">
-        <div className="max-w-3xl rounded-3xl border border-border bg-primary/85 p-8 shadow-2xl">
+        <div className="max-w-3xl border border-border bg-primary/85 p-8 shadow-2xl">
           <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
             F95 Workspace
           </div>
           <h2 className="mt-3 text-3xl font-semibold text-text">
-            Real site search now lives behind the F95 session
+            Browse F95 and install games without leaving the launcher
           </h2>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-text/75">
-            `Latest Updates alpha` is login-only, so this page now uses a real
-            authenticated F95 browser instead of the fake local catalog search.
-            Once you log in, you can browse the live site here, open a thread,
-            and queue download + install directly into your library.
+            `Latest Updates` on F95 is login-only, so this page embeds the
+            real site behind your own F95 session. Once you log in, open any
+            game thread here and F95Launcher downloads, unpacks and adds it to
+            your library in the background.
           </p>
 
           <div className="mt-6 grid gap-3 text-sm text-text/80 md:grid-cols-3">
-            <div className="rounded-2xl border border-border bg-secondary/40 p-4">
-              Live F95 search
-            </div>
-            <div className="rounded-2xl border border-border bg-secondary/40 p-4">
-              Shared login session
-            </div>
-            <div className="rounded-2xl border border-border bg-secondary/40 p-4">
-              Download + auto install
-            </div>
+            {[
+              ["travel_explore", "Live F95 search"],
+              ["key", "One shared login session"],
+              ["download_done", "Download + install in one click"],
+            ].map(([icon, label]) => (
+              <div
+                key={label}
+                className="flex items-center gap-3 border border-border bg-secondary/40 p-4"
+              >
+                <span
+                  className="material-symbols-outlined text-[22px] text-accent"
+                  aria-hidden
+                >
+                  {icon}
+                </span>
+                {label}
+              </div>
+            ))}
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <button
               onClick={openLoginWindow}
-              className="rounded-xl bg-accent px-5 py-3 text-sm font-medium text-onAccent hover:brightness-110"
+              className="flex items-center gap-2 bg-accent px-5 py-3 text-sm font-medium text-onAccent hover:brightness-110"
             >
+              <span
+                className="material-symbols-outlined text-[18px] leading-none"
+                aria-hidden
+              >
+                login
+              </span>
               Log In To F95
             </button>
             <div className="text-sm text-text/60">
-              A dedicated F95 login window will open on the same persistent
+              A dedicated F95 login window opens on the same persistent
               session.
             </div>
           </div>
 
-          {statusMessage && (
-            <div className="mt-4 rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-text">
-              {statusMessage}
+          {statusNotice && (
+            <div className="mt-4 flex items-center gap-2 border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-text">
+              <span
+                className="atlas-spinner atlas-keep-motion text-accent"
+                aria-hidden
+              />
+              {statusNotice.text}
             </div>
           )}
           {installError && (
-            <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            <div className="mt-4 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
               {installError}
             </div>
           )}
@@ -824,248 +1198,241 @@ const F95BrowserWorkspace = () => {
     );
   }
 
+  const displayUrl = splitUrlForDisplay(currentUrl);
+  const primaryDisabled =
+    !isThreadPage ||
+    isInspectingThread ||
+    isStartingInstall ||
+    threadInstallState.checking ||
+    threadInstallState.installed;
+  const addDisabled =
+    !isThreadPage ||
+    isInspectingThread ||
+    isStartingInstall ||
+    threadInstallState.checking ||
+    threadInstallState.inLibrary;
+
   return (
     <div className="isolate flex h-full flex-col bg-tertiary">
-      <div className="relative z-10 flex flex-wrap items-center gap-2 border-b border-border bg-primary/90 px-4 py-2">
-        <button
+      <div
+        className="relative z-10 flex h-11 items-center gap-1 border-b border-border bg-primary/95 px-2"
+        role="toolbar"
+        aria-label="F95 browser"
+      >
+        <ToolbarIconButton
+          icon="arrow_back"
+          label="Back"
+          disabled={!browserState.canGoBack}
           onClick={() =>
             withWebview((webview) => webview.canGoBack() && webview.goBack())
           }
-          disabled={!browserState.canGoBack}
-          className="rounded border border-border bg-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 hover:bg-selected"
-        >
-          Back
-        </button>
-        <button
+        />
+        <ToolbarIconButton
+          icon="arrow_forward"
+          label="Forward"
+          disabled={!browserState.canGoForward}
           onClick={() =>
             withWebview(
               (webview) => webview.canGoForward() && webview.goForward(),
             )
           }
-          disabled={!browserState.canGoForward}
-          className="rounded border border-border bg-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 hover:bg-selected"
-        >
-          Forward
-        </button>
-        <button
-          onClick={() => withWebview((webview) => webview.reload())}
-          className="rounded border border-border bg-secondary px-3 py-2 text-sm hover:bg-selected"
-        >
-          Refresh
-        </button>
-        <button
-          onClick={navigateSearchHome}
-          className="rounded border border-border bg-secondary px-3 py-2 text-sm hover:bg-selected"
-        >
-          Latest Updates
-        </button>
-        <button
-          onClick={() => window.electronAPI.openExternalUrl(currentUrl)}
-          className="rounded border border-border bg-secondary px-3 py-2 text-sm hover:bg-selected"
-        >
-          Open Externally
-        </button>
-        <button
-          onClick={inspectCurrentThread}
-          disabled={
-            !isThreadPage ||
-            isInspectingThread ||
-            isStartingInstall ||
-            threadInstallState.checking ||
-            threadInstallState.installed
+        />
+        <ToolbarIconButton
+          icon={browserState.loading ? "close" : "refresh"}
+          label={browserState.loading ? "Stop loading" : "Reload"}
+          onClick={() =>
+            withWebview((webview) =>
+              browserState.loading ? webview.stop() : webview.reload(),
+            )
           }
-          className="rounded bg-accent px-4 py-2 text-sm font-medium text-onAccent disabled:cursor-not-allowed disabled:opacity-50 hover:brightness-110"
+        />
+        <ToolbarIconButton
+          icon="home"
+          label="Latest Updates"
+          active={!isThreadPage && currentUrl.startsWith(F95_SEARCH_URL)}
+          onClick={navigateSearchHome}
+        />
+
+        <div
+          className="mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 border border-border bg-canvas/60 px-3 text-xs"
+          title={currentUrl}
         >
+          <span
+            className="material-symbols-outlined flex-none text-[16px] text-text/50"
+            aria-hidden
+          >
+            {isThreadPage ? "forum" : "public"}
+          </span>
+          <span className="min-w-0 truncate font-medium text-text">
+            {browserState.title || displayUrl.host || "F95"}
+          </span>
+          {displayUrl.path && (
+            <span className="hidden min-w-0 truncate text-text/45 lg:inline">
+              {displayUrl.path}
+            </span>
+          )}
+          {libraryBadge && (
+            <button
+              type="button"
+              title={libraryBadge.detail}
+              onClick={() => {
+                if (threadInstallState.recordId != null) {
+                  onOpenLibraryRecord?.(threadInstallState.recordId);
+                }
+              }}
+              className={`ml-auto flex flex-none items-center gap-1 border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition ${
+                CHIP_TONES[libraryBadge.tone]
+              } ${onOpenLibraryRecord ? "cursor-pointer" : "cursor-default"}`}
+            >
+              <span
+                className="material-symbols-outlined text-[14px] leading-none"
+                aria-hidden
+              >
+                {libraryBadge.icon}
+              </span>
+              {libraryBadge.label}
+            </button>
+          )}
+        </div>
+
+        {transferChip && (
+          <button
+            type="button"
+            onClick={() => onOpenDownloads?.()}
+            title={transferChip.detail || "Open downloads"}
+            className={`atlas-rise-enter relative flex h-8 max-w-[220px] flex-none items-center gap-2 overflow-hidden border px-3 text-xs font-medium transition ${
+              CHIP_TONES[transferChip.tone]
+            }`}
+          >
+            {transferChip.busy ? (
+              <span
+                className="atlas-spinner atlas-keep-motion text-[12px] text-accent"
+                aria-hidden
+              />
+            ) : (
+              <span
+                className="material-symbols-outlined text-[16px] leading-none"
+                aria-hidden
+              >
+                {transferChip.icon}
+              </span>
+            )}
+            <span className="truncate tabular-nums">{transferChip.text}</span>
+            {transferChip.busy && (
+              <span
+                className={`absolute bottom-0 left-0 h-[2px] bg-accent ${
+                  transferChip.percent === null
+                    ? "atlas-progress-indeterminate atlas-keep-motion w-full"
+                    : "atlas-progress-fill"
+                }`}
+                style={
+                  transferChip.percent === null
+                    ? undefined
+                    : { width: `${transferChip.percent}%` }
+                }
+                aria-hidden
+              />
+            )}
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={inspectCurrentThread}
+          disabled={primaryDisabled}
+          title={
+            isThreadPage
+              ? "Pick a mirror and install this thread into the library"
+              : "Open a game thread to install it"
+          }
+          className="ml-1 flex h-8 flex-none items-center gap-1.5 bg-accent px-3 text-xs font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isInspectingThread || isStartingInstall ? (
+            <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+          ) : (
+            <span
+              className="material-symbols-outlined text-[18px] leading-none"
+              aria-hidden
+            >
+              {threadInstallState.installed ? "check" : "download"}
+            </span>
+          )}
           {installButtonLabel}
         </button>
         <button
+          type="button"
           onClick={addCurrentThreadToLibrary}
-          disabled={
-            !isThreadPage ||
-            isInspectingThread ||
-            isStartingInstall ||
-            threadInstallState.checking ||
+          disabled={addDisabled}
+          title={
             threadInstallState.inLibrary
+              ? "This thread is already in your library"
+              : "Add this thread to the library without downloading"
           }
-          className="rounded border border-border bg-secondary px-4 py-2 text-sm font-medium text-text disabled:cursor-not-allowed disabled:opacity-50 hover:bg-selected"
+          className="flex h-8 flex-none items-center gap-1.5 border border-border bg-secondary px-3 text-xs font-medium text-text transition hover:bg-selected disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {addButtonLabel}
+          <span
+            className="material-symbols-outlined text-[18px] leading-none"
+            aria-hidden
+          >
+            {threadInstallState.inLibrary ? "bookmark_added" : "bookmark_add"}
+          </span>
+          <span className="hidden xl:inline">{addButtonLabel}</span>
         </button>
-        <button
+
+        <span className="mx-1 h-5 w-px flex-none bg-border" aria-hidden />
+
+        <ToolbarIconButton
+          icon="open_in_new"
+          label="Open in system browser"
+          onClick={() => window.electronAPI.openExternalUrl(currentUrl)}
+        />
+        <ToolbarIconButton
+          icon="logout"
+          label={
+            authState.username
+              ? `Log out (${authState.username})`
+              : "Log out of F95"
+          }
           onClick={logout}
-          className="ml-auto rounded border border-border bg-secondary px-3 py-2 text-sm hover:bg-selected"
-        >
-          Log Out
-        </button>
-      </div>
+        />
 
-      <div className="relative z-10 flex items-center gap-2 border-b border-border bg-canvas/40 px-4 py-2 text-sm text-text/75">
-        <div className="truncate font-medium text-text">
-          {browserState.title || "F95"}
-        </div>
-        <div className="truncate opacity-55">{currentUrl}</div>
-        {threadInstallState.inLibrary && (
-          <div
-            className={`rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.16em] ${
-              threadInstallState.installed
-                ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                : "border border-accent/30 bg-accent/10 text-text"
-            }`}
-          >
-            {threadInstallState.installed
-              ? "Installed"
-              : threadInstallState.installState === "missing"
-                ? "Files missing"
-                : "In Library"}
-          </div>
-        )}
-        {browserState.loading && (
-          <div className="rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-text">
-            Loading
-          </div>
-        )}
-      </div>
-
-      {threadInstallState.inLibrary && isThreadPage && (
         <div
-          className={`relative z-10 border-b px-4 py-2 text-sm ${
-            threadInstallState.installed
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-              : "border-accent/30 bg-accent/10 text-text"
+          className={`absolute inset-x-0 bottom-[-1px] h-[2px] ${
+            browserState.loading
+              ? "atlas-progress-indeterminate atlas-keep-motion"
+              : ""
           }`}
-        >
-          {threadInstallState.title || "This thread"}
-          {threadInstallState.installed
-            ? threadInstallState.version
-              ? ` is already installed in the library (${threadInstallState.version}).`
-              : " is already installed in the library."
-            : threadInstallState.installState === "missing"
-              ? " was installed here before, but its files are missing. Install it again from this thread."
-              : " is already linked in your library but not installed on this PC."}
-        </div>
-      )}
-
-      {downloadState && (
-        <div
-          className={`relative z-10 border-b px-4 py-2 text-sm ${
-            downloadState.phase === "error"
-              ? "border-red-500/30 bg-red-500/10 text-red-100"
-              : downloadState.phase === "completed"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                : "border-accent/30 bg-accent/10 text-text"
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <div>{downloadState.text}</div>
-            {progressLabel && <div className="opacity-70">{progressLabel}</div>}
-            {typeof downloadState.percent === "number" && (
-              <div className="opacity-70">{downloadState.percent}%</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {statusMessage && (
-        <div className="relative z-10 border-b border-border bg-secondary/40 px-4 py-2 text-sm text-text/75">
-          {statusMessage}
-        </div>
-      )}
-
-      {pendingCaptchaAction && (
-        <div className="relative z-10 border-b border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-50">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-[280px]">
-              {pendingCaptchaAction.actionKind === "verification"
-                ? "Finish the check in the page below. F95Launcher continues automatically, or press Download on the page and the file is installed for you."
-                : "Finish the captcha in the page below. The install resumes automatically."}
-            </div>
-            <button
-              onClick={reopenCaptchaPage}
-              className="rounded border border-amber-300/30 bg-white/5 px-3 py-2 text-xs font-medium text-amber-50 transition hover:bg-white/10"
-            >
-              {pendingCaptchaAction.actionKind === "verification"
-                ? "Open Check Page"
-                : "Open Captcha Page"}
-            </button>
-            <button
-              onClick={retryPendingCaptchaInstall}
-              disabled={isStartingInstall}
-              className="rounded bg-accent px-3 py-2 text-xs font-medium text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isStartingInstall ? "Retrying..." : "Retry Install"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {installError && !threadInfo && (
-        <div
-          key={installError}
-          role="alert"
-          className="atlas-shake relative z-10 flex items-center gap-2 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
-        >
-          <span className="material-symbols-outlined text-[18px]" aria-hidden>
-            error
-          </span>
-          <span className="min-w-0 flex-1">{installError}</span>
-        </div>
-      )}
-
-      {browserError && (
-        <div
-          key={browserError}
-          role="alert"
-          className="atlas-rise-enter relative z-10 flex flex-wrap items-center gap-3 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-100"
-        >
-          <span className="material-symbols-outlined text-[18px]" aria-hidden>
-            wifi_off
-          </span>
-          <span className="min-w-0 flex-1">{browserError}</span>
-          <button
-            type="button"
-            onClick={() => {
-              setBrowserError("");
-              withWebview((webview) => {
-                try {
-                  webview.reload();
-                } catch (error) {
-                  webview.loadURL(F95_SEARCH_URL);
-                }
-              });
-            }}
-            className="inline-flex items-center gap-1 border border-red-200/30 bg-white/5 px-3 py-1 text-xs font-medium text-red-50 transition hover:bg-white/10"
-          >
-            <span
-              className="material-symbols-outlined text-[15px] leading-none"
-              aria-hidden
-            >
-              refresh
-            </span>
-            Reload page
-          </button>
-        </div>
-      )}
-
-      <div
-        className={`h-[2px] w-full ${
-          browserState.loading
-            ? "atlas-progress-indeterminate atlas-keep-motion"
-            : ""
-        }`}
-        aria-hidden
-      />
+          aria-hidden
+        />
+      </div>
 
       <div className="relative flex-1">
         <div ref={hostRef} className="h-full w-full bg-black" />
 
-        {!browserError && browserState.loading && (
+        {notices.length > 0 && (
+          <div
+            className="pointer-events-none absolute right-3 top-2 z-10 flex w-[min(380px,calc(100%-24px))] flex-col"
+            aria-live="polite"
+            aria-label="Browser notifications"
+          >
+            {notices.map((notice) => (
+              <WorkspaceNotice
+                key={notice.key}
+                notice={notice}
+                onDismiss={notice.onDismiss}
+              />
+            ))}
+          </div>
+        )}
+
+        {!browserError && browserState.loading && !browserState.title && (
           <div className="atlas-fade-enter pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
-            <div className="flex items-center gap-2 rounded-xl border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
+            <div className="flex items-center gap-2 border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
               <span
                 className="atlas-spinner atlas-keep-motion text-accent"
                 aria-hidden
               />
-              Loading F95...
+              Loading F95…
             </div>
           </div>
         )}
@@ -1082,26 +1449,44 @@ const F95BrowserWorkspace = () => {
             }}
           >
             <div
-              className="atlas-dialog flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary shadow-2xl"
+              className="atlas-dialog flex max-h-full w-full max-w-5xl flex-col overflow-hidden border border-border bg-primary shadow-2xl"
               data-state="open"
               role="dialog"
               aria-modal="true"
               aria-label="Thread install"
             >
-              <div className="border-b border-border px-6 py-4">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
-                  Thread Install
+              <div className="flex items-start gap-4 border-b border-border px-6 py-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
+                    Install from thread
+                  </div>
+                  <div className="mt-1 truncate text-xl font-semibold text-text">
+                    {threadInfo.title}
+                  </div>
+                  <div className="mt-1 text-xs text-text/65">
+                    {threadInfo.version && `Version ${threadInfo.version}`}
+                    {threadInfo.creator &&
+                      `${threadInfo.version ? " · " : ""}${threadInfo.creator}`}
+                  </div>
                 </div>
-                <div className="mt-2 text-2xl font-semibold text-text">
-                  {threadInfo.title}
-                </div>
-                <div className="mt-2 text-sm text-text/65">
-                  {threadInfo.version && `Version: ${threadInfo.version}`}
-                  {threadInfo.creator &&
-                    `${threadInfo.version ? " • " : ""}Creator: ${
-                      threadInfo.creator
-                    }`}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setThreadInfo(null);
+                    resetAttempts();
+                  }}
+                  disabled={isStartingInstall}
+                  title="Close (Esc)"
+                  aria-label="Close"
+                  className="flex h-8 w-8 flex-none items-center justify-center text-text/70 transition hover:bg-white/10 hover:text-text disabled:opacity-40"
+                >
+                  <span
+                    className="material-symbols-outlined text-[20px]"
+                    aria-hidden
+                  >
+                    close
+                  </span>
+                </button>
               </div>
 
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
@@ -1159,7 +1544,7 @@ const F95BrowserWorkspace = () => {
                   }}
                   disabled={isStartingInstall}
                   title="Cancel (Esc)"
-                  className="rounded border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-50"
+                  className="border border-border bg-secondary px-4 py-2 text-sm transition hover:bg-selected disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1170,7 +1555,7 @@ const F95BrowserWorkspace = () => {
                     startInstall(threadInfo, selectedThreadLink)
                   }
                   disabled={isStartingInstall || !selectedThreadLink}
-                  className="flex items-center gap-2 rounded bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex items-center gap-2 bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isStartingInstall ? (
                     <span
@@ -1188,7 +1573,7 @@ const F95BrowserWorkspace = () => {
                     </span>
                   )}
                   {isStartingInstall
-                    ? "Starting..."
+                    ? "Starting…"
                     : window.f95MirrorUi?.getActionLabel?.(
                         selectedThreadLink,
                       ) || "Install"}

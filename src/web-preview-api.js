@@ -1152,14 +1152,113 @@
     };
     WEB_PREVIEW_CONFIG.Onboarding = { completed: !DEMO_ONBOARDING_STEP };
 
+    // `?demo=1&f95=thread` opens the F95 workspace on a fictional game
+    // thread: the browser preview has no <webview>, so the workspace shows
+    // this static page instead and the chrome around it can be screenshotted.
+    const DEMO_F95_GAME = { ...findDemoGame(4), version: findDemoGame(4).latestVersion || "0.7.2" };
+    const DEMO_F95_THREAD = {
+      url: DEMO_F95_GAME.siteUrl,
+      title: `${DEMO_F95_GAME.title} [${DEMO_F95_GAME.version}] [${DEMO_F95_GAME.creator}] | F95zone`,
+      html: `<!doctype html><html><head><meta charset="utf-8"><style>
+        body{margin:0;background:#101010;color:#c7c7c7;font:14px/1.5 "Segoe UI",Arial,sans-serif}
+        .nav{background:#1c1c1c;border-bottom:1px solid #2c2c2c;padding:10px 24px;display:flex;gap:18px;font-size:13px;color:#8a8a8a}
+        .nav b{color:#e0e0e0}
+        .wrap{max-width:980px;margin:0 auto;padding:22px 24px}
+        h1{font-size:22px;color:#f2f2f2;margin:0 0 6px;font-weight:600}
+        .meta{font-size:12px;color:#8a8a8a;margin-bottom:14px}
+        .tags span{display:inline-block;background:#262626;color:#bdbdbd;font-size:11px;padding:2px 8px;margin:0 6px 6px 0;border-radius:2px}
+        .post{background:#181818;border:1px solid #2a2a2a;padding:18px 20px;margin-top:14px}
+        .post h3{margin:14px 0 6px;font-size:13px;color:#f2f2f2;text-transform:uppercase;letter-spacing:.08em}
+        .cover{height:220px;background:linear-gradient(135deg,#2b2f4a,#0f172a 60%,#1e293b);border:1px solid #2a2a2a;margin-bottom:16px}
+        .links a{color:#66c0f4;text-decoration:none;margin-right:14px}
+        p{margin:6px 0}
+      </style></head><body>
+        <div class="nav"><b>F95zone</b><span>Latest Updates</span><span>Games</span><span>Forums</span><span>Search</span></div>
+        <div class="wrap">
+          <h1>${DEMO_F95_GAME.title} [${DEMO_F95_GAME.version}] [${DEMO_F95_GAME.creator}]</h1>
+          <div class="meta">Thread starter ${DEMO_F95_GAME.creator} · Updated 3 days ago · ${DEMO_F95_GAME.engine}</div>
+          <div class="tags">${String(DEMO_F95_GAME.f95_tags || "").split(",").map((tag) => `<span>${tag.trim()}</span>`).join("")}</div>
+          <div class="post">
+            <div class="cover"></div>
+            <h3>Overview</h3>
+            <p>${DEMO_F95_GAME.description || "A fictional game thread used by the browser preview."}</p>
+            <h3>Changelog</h3>
+            <p>${DEMO_F95_GAME.version}: new chapter, three endings reworked, bug fixes.</p>
+            <h3>Download</h3>
+            <p>Win/Linux: <span class="links"><a href="#">MEGA</a><a href="#">PIXELDRAIN</a><a href="#">GOFILE</a><a href="#">WORKUPLOAD</a></span></p>
+            <p>Mac: <span class="links"><a href="#">MEGA</a><a href="#">PIXELDRAIN</a></span></p>
+          </div>
+        </div>
+      </body></html>`,
+    };
+    const DEMO_F95_MODE = String(DEMO_QUERY.get("f95") || "").trim();
+
     window.__f95LauncherDemo = {
       enabled: true,
       onboardingStep: DEMO_ONBOARDING_STEP,
       games: DEMO_GAMES,
       downloads: DEMO_DOWNLOADS,
+      f95Page: DEMO_F95_MODE === "thread" ? DEMO_F95_THREAD : null,
     };
 
+    const demoF95Api =
+      DEMO_F95_MODE === "thread"
+        ? {
+            getF95ThreadInstallState: () =>
+              isoDeep({
+                inLibrary: true,
+                installed: false,
+                installState: "not_installed",
+                recordId: DEMO_F95_GAME.record_id,
+                title: DEMO_F95_GAME.title,
+                creator: DEMO_F95_GAME.creator,
+                version: "",
+                gamePath: "",
+                siteUrl: DEMO_F95_GAME.siteUrl,
+              }),
+            inspectF95Thread: () =>
+              isoDeep({
+                success: true,
+                threadUrl: DEMO_F95_GAME.siteUrl,
+                title: DEMO_F95_GAME.title,
+                creator: DEMO_F95_GAME.creator,
+                version: DEMO_F95_GAME.version,
+                engine: DEMO_F95_GAME.engine,
+                preferredLinkUrl: "https://pixeldrain.com/u/demo",
+                links: [
+                  {
+                    url: "https://pixeldrain.com/u/demo",
+                    label: "PIXELDRAIN",
+                    host: "pixeldrain",
+                  },
+                ],
+                variants: [],
+              }),
+            installF95Thread: () =>
+              isoDeep({
+                success: false,
+                code: "captcha_required",
+                actionKind: "verification",
+                actionUrl: "https://pixeldrain.com/u/demo",
+              }),
+            onF95DownloadProgress: (callback) => {
+              setTimeout(() => {
+                callback({
+                  phase: "downloading",
+                  text: "Downloading Harbor Lights 0.10.0 from Pixeldrain",
+                  percent: 62,
+                  totalBytes: 2.4 * 1024 ** 3,
+                  receivedBytes: 1.49 * 1024 ** 3,
+                  fileName: "HarborLights-0.10.0-pc.zip",
+                });
+              }, 250);
+              return noop;
+            },
+          }
+        : {};
+
     return {
+      ...demoF95Api,
       getVersion: () => Promise.resolve(DEMO_APP_VERSION),
       getAppInfo: () =>
         Promise.resolve({
