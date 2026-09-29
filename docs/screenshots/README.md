@@ -23,3 +23,4 @@ Captions for the forum post:
 | `06-settings-save-storage.png` | Save storage: connected to your own OneDrive, sync status, connection card for another PC, and the catalog of backups from every PC. |
 | `07-settings-library-folders.png` | Library & folders: install folder health, scan folders with switches, games found on this PC, library backups. |
 | `08-onboarding-saves.png` | First launch: the "Saves" step detects the clouds already on the PC and connects one in a single click. |
+| `09-f95-browser.png` | The built-in F95 browser: one toolbar of icons, the thread's library badge in the address bar, the current download as a chip, and a compact card for the mirror's check step instead of banners. |

@@ -39,6 +39,7 @@ function makeClock() {
 test("periodic job repeats after the interval and never overlaps runs", async () => {
   const clock = makeClock();
   const runs = [];
+  /** @type {(value?: unknown) => void} */
   let resolveRun = () => {};
   const job = createPeriodicJob({
     name: "check",
