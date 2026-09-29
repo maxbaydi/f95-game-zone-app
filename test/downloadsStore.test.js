@@ -208,3 +208,65 @@ test("downloads store orders active entries before history and remove() drops an
   assert.equal(store.remove("a"), false);
   assert.equal(store.get("a"), null);
 });
+
+test("a failed install keeps the package path and exposes retry flags", () => {
+  const changes = [];
+  const store = createDownloadsStore({ onChange: (entries) => changes.push(entries.length) });
+  store.queue({ id: "dl-1", title: "Game", engine: "Unity" });
+  store.installing("dl-1", { text: "Installing" });
+  const failed = store.fail("dl-1", {
+    error: "The archive is password-protected.",
+    errorCode: "archive_encrypted",
+    packagePath: "C:/downloads/game.rar",
+    hint: "Enter the password from the thread.",
+  });
+
+  assert.equal(failed.status, "error");
+  assert.equal(failed.packagePath, "C:/downloads/game.rar");
+  assert.equal(failed.canInstallFromPackage, true);
+  assert.equal(failed.needsPassword, true);
+  assert.equal(failed.canInstallManually, true);
+  assert.equal(failed.hint, "Enter the password from the thread.");
+  assert.equal(failed.engine, "Unity");
+  assert.ok(changes.length >= 3, "every change notifies the persistence hook");
+
+  const installing = store.installing("dl-1", { text: "Unpacking with the password" });
+  assert.equal(installing.packagePath, "C:/downloads/game.rar", "installing keeps the package");
+  const done = store.complete("dl-1", { text: "Installed Game" });
+  assert.equal(done.packagePath, "");
+  assert.equal(done.canInstallFromPackage, false);
+  assert.equal(done.needsPassword, false);
+
+  store.fail("dl-1", { error: "boom", packagePath: "C:/downloads/game.rar" });
+  assert.equal(store.clearPackage("dl-1").packagePath, "");
+  assert.deepEqual(store.packagePaths(), []);
+});
+
+test("hydrate turns interrupted entries into failed ones and keeps packages that still exist", () => {
+  const store = createDownloadsStore();
+  const count = store.hydrate(
+    [
+      { id: "a", title: "A", status: "installing", packagePath: "/keep/a.zip", createdAt: 1, updatedAt: 1 },
+      { id: "b", title: "B", status: "downloading", createdAt: 2, updatedAt: 2 },
+      { id: "c", title: "C", status: "completed", recordId: 7, createdAt: 3, updatedAt: 3 },
+      { id: "d", title: "D", status: "error", packagePath: "/gone/d.zip", error: "x", createdAt: 4, updatedAt: 4 },
+      null,
+      { title: "no id" },
+    ],
+    (packagePath) => packagePath === "/keep/a.zip",
+  );
+  assert.equal(count, 4);
+  const byId = Object.fromEntries(store.list().map((entry) => [entry.id, entry]));
+  assert.equal(byId.a.status, "error");
+  assert.equal(byId.a.errorCode, "install_interrupted");
+  assert.equal(byId.a.canInstallFromPackage, true);
+  assert.equal(byId.a.canRetry, false, "no mirror context survives a restart");
+  assert.equal(byId.b.status, "error");
+  assert.equal(byId.b.errorCode, "download_interrupted");
+  assert.equal(byId.b.canInstallManually, true);
+  assert.equal(byId.c.status, "completed");
+  assert.equal(byId.c.recordId, 7);
+  assert.equal(byId.d.packagePath, "", "missing packages are dropped");
+  assert.deepEqual(store.packagePaths(), ["/keep/a.zip"]);
+  assert.equal(store.activeCount(), 0);
+});

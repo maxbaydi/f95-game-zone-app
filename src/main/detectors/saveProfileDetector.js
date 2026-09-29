@@ -20,11 +20,42 @@ const RPG_MAKER_FILE_PATTERNS = [
   "Save*.rxdata",
   "Save*.rvdata",
   "Save*.rvdata2",
+  "Save*.lsd",
   "file*.rpgsave",
   "global.rpgsave",
   "config.rpgsave",
   "*.rmmzsave",
 ];
+
+/** Words too generic to identify a game's folder in Documents or AppData. */
+const GENERIC_CANDIDATE_NAMES = new Set([
+  "game",
+  "games",
+  "play",
+  "start",
+  "launcher",
+  "setup",
+  "app",
+  "main",
+  "index",
+  "nw",
+  "win",
+  "pc",
+  "windows",
+  "final",
+  "unknown",
+]);
+
+/**
+ * Candidate names strong enough to match folders outside the install
+ * directory (Documents, Saved Games, Flash shared objects).
+ * @param {any} game
+ */
+function collectStrongCandidateNames(game) {
+  return collectGameCandidateNames(game).filter(
+    (name) => name.length >= 4 && !GENERIC_CANDIDATE_NAMES.has(name),
+  );
+}
 
 const RPG_MAKER_INSTALL_SAVE_PATHS = ["save", "www/save", "www/saves"];
 const UNREAL_INSTALL_SAVE_PATHS = ["Saved/SaveGames"];
@@ -178,12 +209,74 @@ function normalizeEngineFamily(engine) {
     normalizedEngine.includes("web") ||
     normalizedEngine.includes("electron") ||
     normalizedEngine.includes("nwjs") ||
-    normalizedEngine.includes("nw js")
+    normalizedEngine.includes("nw js") ||
+    normalizedEngine.includes("tyrano") ||
+    normalizedEngine.includes("construct") ||
+    normalizedEngine.includes("twine")
   ) {
     return "html";
   }
 
+  if (normalizedEngine.includes("wolf")) {
+    return "wolf";
+  }
+
+  if (normalizedEngine.includes("kirikiri") || normalizedEngine.includes("krkr")) {
+    return "kirikiri";
+  }
+
+  if (normalizedEngine.includes("flash") || normalizedEngine.includes("adobe air")) {
+    return "flash";
+  }
+
+  if (normalizedEngine.includes("gamemaker") || normalizedEngine.includes("game maker")) {
+    return "gamemaker";
+  }
+
   return "";
+}
+
+function isWolfLikeGame(game) {
+  const primaryPath = game?.primaryPath || "";
+  if (!primaryPath) {
+    return false;
+  }
+  if (pathExistsSync(path.join(primaryPath, "Data.wolf"))) {
+    return true;
+  }
+  return safeReadDir(path.join(primaryPath, "Data")).some(
+    (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".wolf"),
+  );
+}
+
+function isKiriKiriLikeGame(game) {
+  const primaryPath = game?.primaryPath || "";
+  if (!primaryPath) {
+    return false;
+  }
+  return safeReadDir(primaryPath).some(
+    (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".xp3"),
+  );
+}
+
+function isFlashLikeGame(game) {
+  const primaryPath = game?.primaryPath || "";
+  if (!primaryPath) {
+    return false;
+  }
+  return safeReadDir(primaryPath).some(
+    (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".swf"),
+  );
+}
+
+function isGameMakerLikeGame(game) {
+  const primaryPath = game?.primaryPath || "";
+  if (!primaryPath) {
+    return false;
+  }
+  return ["data.win", "game.unx", "audiogroup1.dat"].some((marker) =>
+    pathExistsSync(path.join(primaryPath, marker)),
+  );
 }
 
 function isRpgMakerLikeGame(game) {
@@ -271,6 +364,7 @@ function isHtmlLikeGame(game) {
     path.join(primaryPath, "nw.dll"),
     path.join(primaryPath, "www", "index.html"),
     path.join(primaryPath, "resources", "app.asar"),
+    path.join(primaryPath, "tyrano"),
   ];
 
   return markerCandidates.some((candidatePath) => pathExistsSync(candidatePath));
@@ -305,6 +399,22 @@ function detectEngineFamilies(game) {
 
   if (metadataFamily === "html" || isHtmlLikeGame(game)) {
     detectedFamilies.add("html");
+  }
+
+  if (metadataFamily === "wolf" || isWolfLikeGame(game)) {
+    detectedFamilies.add("wolf");
+  }
+
+  if (metadataFamily === "kirikiri" || isKiriKiriLikeGame(game)) {
+    detectedFamilies.add("kirikiri");
+  }
+
+  if (metadataFamily === "flash" || isFlashLikeGame(game)) {
+    detectedFamilies.add("flash");
+  }
+
+  if (metadataFamily === "gamemaker" || isGameMakerLikeGame(game)) {
+    detectedFamilies.add("gamemaker");
   }
 
   return [...detectedFamilies];
@@ -664,6 +774,156 @@ function detectHtmlStorageProfiles(game) {
   return profiles;
 }
 
+/**
+ * Games of any engine that keep saves under the user's Documents / Saved
+ * Games folders: `Documents/My Games/<Game>`, `Documents/<Game>`,
+ * `Saved Games/<Game>`. Only strong name matches count because those
+ * folders hold many unrelated things.
+ */
+function detectDocumentsProfiles(game) {
+  const candidates = collectStrongCandidateNames(game);
+  if (candidates.length === 0) {
+    return [];
+  }
+  const roots = [
+    { baseFolder: "documents", prefix: ["My Games"] },
+    { baseFolder: "documents", prefix: [] },
+    { baseFolder: "savedGames", prefix: [] },
+  ];
+  /** @type {DetectedSaveProfile[]} */
+  const profiles = [];
+
+  for (const root of roots) {
+    const baseRoot = getKnownFolderRoot(root.baseFolder);
+    if (!baseRoot) {
+      continue;
+    }
+    const scanRoot = path.join(baseRoot, ...root.prefix);
+    if (!pathExistsSync(scanRoot)) {
+      continue;
+    }
+    for (const entry of safeReadDir(scanRoot)) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const score = scoreCandidateTokenMatch(entry.name, candidates, 82, 56);
+      if (score.confidence < 56) {
+        continue;
+      }
+      profiles.push({
+        provider: root.baseFolder === "savedGames" ? "saved_games" : "documents",
+        rootPath: path.join(scanRoot, entry.name),
+        strategy: {
+          type: "windows-known-folder",
+          payload: {
+            baseFolder: root.baseFolder,
+            path: [...root.prefix, entry.name].join("/"),
+          },
+        },
+        confidence: Math.min(score.confidence + 8, 100),
+        reasons: [
+          root.baseFolder === "savedGames"
+            ? "found save folder in Saved Games"
+            : `found save folder in Documents${root.prefix.length ? "/My Games" : ""}`,
+          ...score.reasons,
+        ],
+      });
+    }
+  }
+
+  return profiles;
+}
+
+/**
+ * Flash Player keeps SharedObjects (`*.sol`) under
+ * `%APPDATA%/Macromedia/Flash Player/#SharedObjects/<random>/localhost/<path of
+ * the swf without drive letter>/<movie>.swf/`. The movie's folder mirrors the
+ * install path, so the install directory locates it exactly.
+ */
+function detectFlashSharedObjectProfiles(game) {
+  const appDataRoot = getKnownFolderRoot("appdata");
+  const primaryPath = game?.primaryPath || "";
+  if (!appDataRoot || !primaryPath) {
+    return [];
+  }
+  const sharedObjectsRoot = path.join(appDataRoot, "Macromedia", "Flash Player", "#SharedObjects");
+  if (!pathExistsSync(sharedObjectsRoot)) {
+    return [];
+  }
+  const parsed = path.parse(path.resolve(primaryPath));
+  const mirrorSegments = parsed.dir
+    .slice(parsed.root.length)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .concat(parsed.base ? [parsed.base] : []);
+  /** @type {DetectedSaveProfile[]} */
+  const profiles = [];
+
+  for (const randomEntry of safeReadDir(sharedObjectsRoot)) {
+    if (!randomEntry.isDirectory()) {
+      continue;
+    }
+    const mirrorRoot = path.join(sharedObjectsRoot, randomEntry.name, "localhost", ...mirrorSegments);
+    if (!pathExistsSync(mirrorRoot)) {
+      continue;
+    }
+    profiles.push({
+      provider: "flash_sharedobjects",
+      rootPath: mirrorRoot,
+      strategy: {
+        type: "windows-known-folder",
+        payload: {
+          baseFolder: "appdata",
+          path: ["Macromedia", "Flash Player", "#SharedObjects", randomEntry.name, "localhost", ...mirrorSegments].join("/"),
+        },
+      },
+      confidence: 96,
+      reasons: ["found Flash Player shared objects mirroring the game folder"],
+    });
+  }
+
+  return profiles;
+}
+
+/**
+ * GameMaker games write to `%LOCALAPPDATA%/<game name>/`.
+ */
+function detectGameMakerProfiles(game) {
+  const localAppDataRoot = getKnownFolderRoot("localAppData");
+  const candidates = collectStrongCandidateNames(game);
+  if (!localAppDataRoot || !pathExistsSync(localAppDataRoot) || candidates.length === 0) {
+    return [];
+  }
+  /** @type {DetectedSaveProfile[]} */
+  const profiles = [];
+  for (const entry of safeReadDir(localAppDataRoot)) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const score = scoreCandidateTokenMatch(entry.name, candidates, 80, 56);
+    if (score.confidence < 56) {
+      continue;
+    }
+    const rootPath = path.join(localAppDataRoot, entry.name);
+    // GameMaker stores flat files (save.ini, *.sav, *.dat) right in the folder.
+    const hasFlatFiles = safeReadDir(rootPath).some((child) => child.isFile());
+    if (!hasFlatFiles) {
+      continue;
+    }
+    profiles.push({
+      provider: "gamemaker_localappdata",
+      rootPath,
+      strategy: {
+        type: "windows-known-folder",
+        payload: { baseFolder: "localAppData", path: entry.name },
+      },
+      confidence: Math.min(score.confidence + 8, 100),
+      reasons: ["found GameMaker data folder in Local AppData", ...score.reasons],
+    });
+  }
+  return profiles;
+}
+
 function detectSaveProfiles(game, options = {}) {
   /** @type {DetectedSaveProfile[]} */
   const profiles = [...detectInstallRelativeSaveProfiles(game)];
@@ -693,22 +953,41 @@ function detectSaveProfiles(game, options = {}) {
     profiles.push(...detectHtmlStorageProfiles(game));
   }
 
+  if (engineFamilies.includes("flash")) {
+    profiles.push(...detectFlashSharedObjectProfiles(game));
+  }
+
+  if (engineFamilies.includes("gamemaker")) {
+    profiles.push(...detectGameMakerProfiles(game));
+  }
+
+  // Documents / Saved Games are used by Unity, Unreal, GameMaker, KiriKiri
+  // and custom engines alike.
+  profiles.push(...detectDocumentsProfiles(game));
+
   return dedupeProfiles(profiles);
 }
 
 module.exports = {
   COMMON_HTML_STORAGE_PATHS,
   RPG_MAKER_FILE_PATTERNS,
+  detectDocumentsProfiles,
   detectEngineFamilies,
+  detectFlashSharedObjectProfiles,
+  detectGameMakerProfiles,
   detectGodotProfiles,
   detectHtmlStorageProfiles,
   detectRpgMakerInstallProfiles,
   detectSaveProfiles,
   detectUnityLocalLowProfiles,
   detectUnrealProfiles,
+  isFlashLikeGame,
+  isGameMakerLikeGame,
   isGodotLikeGame,
   isHtmlLikeGame,
+  isKiriKiriLikeGame,
   isRpgMakerLikeGame,
   isUnityLikeGame,
+  isWolfLikeGame,
   normalizeEngineFamily,
 };

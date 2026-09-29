@@ -23,7 +23,13 @@ const { writeFileAtomicSync } = require("./main/atomicFile");
 const {
   createAppUpdateNotificationController,
 } = require("./main/appUpdateNotificationController");
-const { extractArchiveSafely } = require("./main/archive/extractArchive");
+const {
+  extractArchiveSafely,
+  isArchiveError,
+  isSupportedArchiveName,
+} = require("./main/archive/extractArchive");
+const { describeArchiveErrorCode } = require("./main/archive/archiveErrors");
+const { detectGameEngine } = require("./main/install/detectEngine");
 const { toStoredImagePath } = require("./main/assetPaths");
 const { createAppUpdaterController } = require("./main/appUpdater");
 const {
@@ -41,6 +47,7 @@ const { resetLibraryIndex } = require("./main/libraryReset");
 const {
   registerLibraryMaintenanceIpc,
 } = require("./main/libraryMaintenanceIpc");
+const { registerSaveTransferIpc } = require("./main/saveTransferIpc");
 const { createLiveUpdateChecker } = require("./main/liveUpdateCheck");
 const { upsertLiveVersion } = require("./main/db/liveVersionsStore");
 const { findExecutables } = require("./main/install/findExecutables");
@@ -76,7 +83,10 @@ const {
   getF95AuthState,
   getF95Session,
 } = require("./main/f95/session");
-const { createDownloadsStore } = require("./main/f95/downloadsStore");
+const {
+  createDownloadsStore,
+  isActiveStatus,
+} = require("./main/f95/downloadsStore");
 const {
   downloadToFile,
   selectTransferMode,
@@ -258,7 +268,12 @@ const f95InstallContexts = new Map();
 const f95DownloadContexts = new Map();
 // Target paths handed out to in-flight downloads (their files may not exist yet).
 const f95ReservedDownloadPaths = new Set();
-const f95DownloadsStore = createDownloadsStore();
+const F95_DOWNLOADS_STATE_PATH = path.join(dataDir, "f95-downloads.json");
+let f95DownloadsPersistTimer = null;
+let f95DownloadsPendingSnapshot = null;
+const f95DownloadsStore = createDownloadsStore({
+  onChange: (entries) => scheduleF95DownloadsPersist(entries),
+});
 let f95DownloadSequence = 0;
 let configExistedAtStartup = true;
 
@@ -1787,6 +1802,155 @@ function broadcastGameDeleted(recordId) {
   });
 }
 
+/**
+ * The downloads list survives restarts so a package kept after a failed
+ * install can still be installed later without downloading it again.
+ */
+function scheduleF95DownloadsPersist(entries) {
+  f95DownloadsPendingSnapshot = entries;
+  if (f95DownloadsPersistTimer) {
+    return;
+  }
+  f95DownloadsPersistTimer = setTimeout(() => {
+    f95DownloadsPersistTimer = null;
+    flushF95DownloadsPersist();
+  }, 300);
+}
+
+function flushF95DownloadsPersist() {
+  if (f95DownloadsPersistTimer) {
+    clearTimeout(f95DownloadsPersistTimer);
+    f95DownloadsPersistTimer = null;
+  }
+  if (!f95DownloadsPendingSnapshot) {
+    return;
+  }
+  const snapshot = f95DownloadsPendingSnapshot;
+  f95DownloadsPendingSnapshot = null;
+  try {
+    fs.mkdirSync(path.dirname(F95_DOWNLOADS_STATE_PATH), { recursive: true });
+    writeFileAtomicSync(
+      F95_DOWNLOADS_STATE_PATH,
+      JSON.stringify({ version: 1, entries: snapshot }),
+    );
+  } catch (error) {
+    console.warn("[f95.download] Failed to persist the downloads list:", error);
+  }
+}
+
+function isPathInsideDownloadsDir(candidatePath) {
+  const relative = path.relative(downloadsDir, String(candidatePath || ""));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/**
+ * Restores the downloads list from the previous run and removes leftovers
+ * in the downloads folder that no entry references any more (staging
+ * folders of interrupted installs, packages of forgotten entries).
+ */
+function hydrateF95DownloadsStore() {
+  let rawEntries = [];
+  try {
+    if (fs.existsSync(F95_DOWNLOADS_STATE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(F95_DOWNLOADS_STATE_PATH, "utf8"));
+      rawEntries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    }
+  } catch (error) {
+    console.warn("[f95.download] Failed to read the persisted downloads list:", error);
+  }
+  f95DownloadsStore.hydrate(rawEntries, (packagePath) => {
+    try {
+      return fs.statSync(packagePath).isFile();
+    } catch {
+      return false;
+    }
+  });
+
+  const referenced = new Set(
+    f95DownloadsStore.packagePaths().map((value) => path.resolve(value)),
+  );
+  try {
+    for (const entry of fs.readdirSync(downloadsDir, { withFileTypes: true })) {
+      const fullPath = path.join(downloadsDir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "_staging") {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+        continue;
+      }
+      if (!referenced.has(path.resolve(fullPath))) {
+        fs.rmSync(fullPath, { force: true });
+      }
+    }
+  } catch (error) {
+    console.warn("[f95.download] Failed to tidy the downloads folder:", error);
+  }
+}
+
+/**
+ * Deletes the package kept for an entry once the entry is forgotten.
+ */
+function removeF95RetainedPackage(entry) {
+  const packagePath = String(entry?.packagePath || "");
+  if (!packagePath || !isPathInsideDownloadsDir(packagePath)) {
+    return;
+  }
+  fs.promises.rm(packagePath, { force: true }).catch(() => {});
+}
+
+/**
+ * Rebuilds a download context for an entry restored from disk (the app was
+ * restarted): enough to install a kept package, a user's file or a folder,
+ * but not to re-resolve the mirror.
+ */
+function createF95ContextFromEntry(entry) {
+  const existing = f95DownloadContexts.get(entry.id);
+  if (existing) {
+    return existing;
+  }
+  const hostInfo = getMirrorHostInfo(entry.requestedUrl || "");
+  const context = {
+    id: entry.id,
+    request: {
+      downloadUrl: "",
+      threadUrl: entry.threadUrl || "",
+      title: entry.title || "F95 download",
+      creator: entry.creator || "",
+      version: entry.version || "",
+      engine: entry.engine || "",
+      downloadLabel: entry.sourceLabel || "",
+      platformHint: "",
+      mirrorHost: entry.sourceHost || "",
+      variantId: "",
+      fallbackLinks: [],
+    },
+    requestedUrl: entry.requestedUrl || "",
+    hostLabel: entry.hostLabel || hostInfo.label || "",
+    metadata: {
+      id: entry.id,
+      title: entry.title || "F95 download",
+      creator: entry.creator || "",
+      version: entry.version || "",
+      engine: resolveEngineLabel(entry.engine),
+      threadUrl: entry.threadUrl || "",
+      downloadLabel: entry.sourceLabel || "",
+      sourceHost: entry.sourceHost || "",
+      mirrorHost: entry.sourceHost || "",
+      linkHost: entry.sourceHost || "",
+      variantId: "",
+    },
+    prepared: null,
+    abortController: null,
+    downloadItem: null,
+    actionFlow: null,
+    cancelled: false,
+    targetPath: entry.packagePath || "",
+    reservedPath: "",
+  };
+  f95DownloadContexts.set(entry.id, context);
+  return context;
+}
+
 function buildF95DownloadRequest(payload) {
   const parsedThreadTitle = parseF95ThreadTitle(payload?.title || "");
   return {
@@ -2063,6 +2227,7 @@ function supersedeF95DownloadEntries(context) {
       entry.threadUrl === threadUrl &&
       (entry.status === "error" || entry.status === "cancelled")
     ) {
+      removeF95RetainedPackage(entry);
       f95DownloadsStore.remove(entry.id);
       f95DownloadContexts.delete(entry.id);
     }
@@ -2584,16 +2749,22 @@ async function finalizeF95DownloadedPackage({
   totalBytes,
   receivedBytes,
   mimeType,
+  password,
 }) {
   try {
-    const importResults = await importDownloadedF95Package(targetPath, {
-      ...context.metadata,
-      mimeType: mimeType || "",
-    });
+    const importResults = await importDownloadedF95Package(
+      targetPath,
+      {
+        ...context.metadata,
+        mimeType: mimeType || "",
+      },
+      { password: password || "" },
+    );
     const firstResult = Array.isArray(importResults) ? importResults[0] : null;
     if (firstResult && firstResult.success === false) {
       throw new Error(firstResult.error || "Unknown install error");
     }
+    const warning = String(firstResult?.warning || "");
 
     storePreferredF95Mirror({
       threadUrl: context.metadata.threadUrl,
@@ -2606,10 +2777,14 @@ async function finalizeF95DownloadedPackage({
     f95DownloadsStore.complete(context.id, {
       title: context.metadata.title,
       fileName: path.basename(targetPath),
-      text: `Installed ${context.metadata.title}`,
+      text: warning
+        ? `Installed ${context.metadata.title} (check the launcher in the library)`
+        : `Installed ${context.metadata.title}`,
       totalBytes: totalBytes || 0,
       receivedBytes: receivedBytes || 0,
       recordId: firstResult?.recordId ?? null,
+      warning,
+      packagePath: "",
     });
     broadcastF95Downloads();
     sendF95DownloadProgress({
@@ -2625,18 +2800,260 @@ async function finalizeF95DownloadedPackage({
       "[f95.download] Failed to install downloaded package:",
       error,
     );
+    // The package stays on disk after a failed install: the user can retry
+    // (with a password, after freeing disk space ...) or unpack it by hand
+    // instead of downloading it again. Only payloads that are not a game
+    // package at all (HTML error pages, empty files) are removed.
+    let packagePath = String(error?.packagePath || targetPath || "");
     if (error instanceof DownloadValidationError && error.cleanupFile) {
-      await fs.promises.unlink(targetPath).catch(() => {});
+      await fs.promises.unlink(packagePath).catch(() => {});
+      packagePath = "";
+    } else if (!fs.existsSync(packagePath)) {
+      packagePath = "";
     }
+    const hint = isArchiveError(error)
+      ? describeArchiveErrorCode(error.code, { password: Boolean(password) })
+      : error?.code === "no_executable"
+        ? "The package has no launcher the app recognises. Install it anyway from the unpacked folder, or pick the launcher in the library afterwards."
+        : "";
     context.abortController = null;
-    context.targetPath = targetPath;
+    context.targetPath = packagePath || targetPath;
     markF95DownloadFailed(context, error, "install", {
       totalBytes: totalBytes || 0,
       receivedBytes: receivedBytes || 0,
+      packagePath,
+      hint,
     });
   } finally {
     releaseF95DownloadPath(context);
   }
+}
+
+/**
+ * Re-runs the install for a package that is still in the downloads folder
+ * (a failed unpack, a password-protected archive, the app closed mid-way).
+ * @param {any} context
+ * @param {string} packagePath
+ * @param {{ password?: string }} options
+ */
+async function installF95RetainedPackage(context, packagePath, options = {}) {
+  stopF95MirrorActionFlow(context);
+  context.abortController = null;
+  context.cancelled = false;
+  context.downloadItem = null;
+  context.prepared = null;
+  context.targetPath = packagePath;
+  releaseF95DownloadPath(context);
+
+  let totalBytes = 0;
+  try {
+    totalBytes = (await fs.promises.stat(packagePath)).size;
+  } catch {
+    f95DownloadsStore.clearPackage(context.id);
+    markF95DownloadFailed(context, new Error("The downloaded package is no longer on disk. Download it again."), "install");
+    return;
+  }
+
+  const title = context.metadata.title;
+  f95DownloadsStore.installing(context.id, {
+    title,
+    fileName: path.basename(packagePath),
+    text: options.password ? `Unpacking ${title} with the password` : `Installing ${title} again`,
+    percent: 100,
+    totalBytes,
+    receivedBytes: totalBytes,
+    error: "",
+    errorCode: "",
+    hint: "",
+    actionUrl: "",
+    actionMode: "",
+  });
+  broadcastF95Downloads();
+  sendF95DownloadProgress({
+    phase: "installing",
+    text: `Installing ${title}`,
+    percent: 100,
+    totalBytes,
+    receivedBytes: totalBytes,
+    fileName: path.basename(packagePath),
+  });
+
+  await finalizeF95DownloadedPackage({
+    context,
+    targetPath: packagePath,
+    totalBytes,
+    receivedBytes: totalBytes,
+    mimeType: "",
+    password: options.password || "",
+  });
+}
+
+/**
+ * "Install from folder": the user unpacked the package themselves (or has
+ * the game folder from elsewhere). The folder is copied into the library
+ * unless it already lives inside it, then registered like any install.
+ * @param {any} context
+ * @param {string} folderPath
+ */
+async function installF95PackageFromFolder(context, folderPath) {
+  stopF95MirrorActionFlow(context);
+  context.abortController = null;
+  context.cancelled = false;
+  context.downloadItem = null;
+  context.prepared = null;
+  releaseF95DownloadPath(context);
+
+  const metadata = { ...context.metadata };
+  const title = metadata.title;
+  const folderName = path.basename(folderPath);
+  f95DownloadsStore.installing(context.id, {
+    title,
+    fileName: folderName,
+    text: `Installing ${title} from ${folderName}`,
+    percent: 100,
+    totalBytes: 0,
+    receivedBytes: 0,
+    error: "",
+    errorCode: "",
+    hint: "",
+    actionUrl: "",
+    actionMode: "",
+  });
+  broadcastF95Downloads();
+
+  try {
+    const importResults = await importGameFolderAsF95Package(folderPath, metadata);
+    const firstResult = Array.isArray(importResults) ? importResults[0] : null;
+    if (firstResult && firstResult.success === false) {
+      throw new Error(firstResult.error || "Unknown install error");
+    }
+    const warning = String(firstResult?.warning || "");
+    const retained = f95DownloadsStore.get(context.id)?.packagePath;
+    if (retained) {
+      // The package was unpacked by hand; its copy is no longer needed.
+      removeF95RetainedPackage({ packagePath: retained });
+    }
+    f95DownloadsStore.complete(context.id, {
+      title,
+      fileName: folderName,
+      text: warning
+        ? `Installed ${title} from folder (check the launcher in the library)`
+        : `Installed ${title} from folder`,
+      totalBytes: 0,
+      receivedBytes: 0,
+      recordId: firstResult?.recordId ?? null,
+      warning,
+      packagePath: "",
+    });
+    broadcastF95Downloads();
+    sendF95DownloadProgress({
+      phase: "completed",
+      text: `Installed ${title}`,
+      percent: 100,
+      totalBytes: 0,
+      receivedBytes: 0,
+      fileName: folderName,
+    });
+  } catch (error) {
+    console.error("[f95.download] Failed to install from folder:", error);
+    const retained = f95DownloadsStore.get(context.id)?.packagePath || "";
+    markF95DownloadFailed(context, error, "install", {
+      packagePath: retained && fs.existsSync(retained) ? retained : "",
+    });
+  }
+}
+
+/**
+ * Registers an already unpacked game folder for the thread the download
+ * belongs to. Shares the target/backup/executable/engine steps with the
+ * archive path.
+ */
+async function importGameFolderAsF95Package(folderPath, metadata) {
+  const librarySettings = appConfig?.Library || {};
+  const gameExtensions = parseConfiguredExtensions(
+    librarySettings.gameExtensions,
+    "exe,swf,flv,f4v,rag,cmd,bat,jar,html",
+  );
+  const sourceStats = await fs.promises.stat(folderPath);
+  if (!sourceStats.isDirectory()) {
+    throw new Error("Pick the folder that contains the unpacked game.");
+  }
+  const contentRoot = await resolveArchiveContentRoot(folderPath);
+  const atlasMetadata = await prepareDownloadedGameMetadata(metadata);
+  const fallbackName = path.basename(folderPath);
+  const title = metadata?.title || fallbackName;
+  const installTarget = await resolveF95InstallTarget(metadata, fallbackName);
+  const libraryFolder = getConfiguredLibraryFolder();
+  const insideLibrary =
+    !path.relative(libraryFolder, contentRoot).startsWith("..") &&
+    !path.isAbsolute(path.relative(libraryFolder, contentRoot)) &&
+    path.relative(libraryFolder, contentRoot) !== "";
+  // A folder that already lives in the library is registered where it is;
+  // anything else is copied so the user's folder stays untouched.
+  const installDirectory = insideLibrary ? contentRoot : installTarget.installDirectory;
+  const saveVaultInput = {
+    appPaths,
+    threadUrl: metadata?.threadUrl || "",
+    atlasId: atlasMetadata.atlasId,
+    title,
+    creator: metadata?.creator || "",
+    installDirectory,
+  };
+  if (!insideLibrary) {
+    const existingSaveSnapshot =
+      installTarget.existingGame?.record_id && databaseConnection
+        ? await getSaveProfileSnapshot(
+            appPaths,
+            databaseConnection,
+            installTarget.existingGame.record_id,
+          ).catch(() => null)
+        : null;
+    if (installTarget.existingGame && fs.existsSync(installDirectory)) {
+      await backupGameSaves({
+        ...saveVaultInput,
+        profiles: existingSaveSnapshot?.profiles || [],
+      }).catch((error) => {
+        console.warn("[save.vault] Failed to back up saves before folder install:", error);
+      });
+    }
+    await fs.promises.mkdir(installDirectory, { recursive: true });
+    await fs.promises.cp(contentRoot, installDirectory, {
+      recursive: true,
+      force: true,
+    });
+    await restoreGameSaves({
+      ...saveVaultInput,
+      overwrite: Boolean(installTarget.existingGame),
+    }).catch((error) => {
+      console.warn("[save.vault] Failed to restore saves after folder install:", error);
+    });
+  }
+
+  const executables = findExecutables(installDirectory, gameExtensions);
+  const detection = detectGameEngine(installDirectory, { executables });
+  const selectedValue = selectPreferredExecutable(executables, {
+    title,
+    creator: metadata?.creator || "",
+    preferredExecutables: detection.preferredExecutables,
+    ignoredExecutables: detection.ignoredExecutables,
+  });
+  const results = await persistF95InstalledGame({
+    title,
+    metadata,
+    installDirectory,
+    selectedValue,
+    detectedEngine: detection.engine || "Unknown",
+    executables: executables.map((value) => ({ key: value, value })),
+    existingGame: installTarget.existingGame,
+    reusedExisting: installTarget.reusedExisting,
+    staleInstallPaths: installTarget.staleInstallPaths,
+    gameExtensions,
+    atlasMetadata,
+  });
+  if (Array.isArray(results) && results[0] && executables.length === 0) {
+    results[0].warning = "no_executable";
+  }
+  return results;
 }
 
 async function startDirectF95Download(context, prepared) {
@@ -3100,7 +3517,7 @@ async function persistF95InstalledGame(payload) {
   return importResults;
 }
 
-async function importDownloadedF95Package(downloadPath, metadata) {
+async function importDownloadedF95Package(downloadPath, metadata, options = {}) {
   const librarySettings = appConfig?.Library || {};
   const archiveExtensions = parseConfiguredExtensions(
     librarySettings.extractionExtensions,
@@ -3119,6 +3536,18 @@ async function importDownloadedF95Package(downloadPath, metadata) {
   const atlasMetadata = await prepareDownloadedGameMetadata(metadata);
 
   let installSourcePath = downloadPath;
+  try {
+    return await importDownloadedF95PackageAt();
+  } catch (error) {
+    // The package may have been renamed to its real extension; report the
+    // path that is actually on disk so it can be retried later.
+    if (error && typeof error === "object") {
+      error.packagePath = installSourcePath;
+    }
+    throw error;
+  }
+
+  async function importDownloadedF95PackageAt() {
   const currentExtension = path
     .extname(installSourcePath)
     .replace(/^\./, "")
@@ -3203,24 +3632,38 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       ),
     );
 
+    // Everything is unpacked and checked in a staging folder first: the
+    // install folder (and an existing install being updated) is touched only
+    // once the package proved to be a usable game.
+    let stagedExecutables = [];
     try {
       await extractArchiveSafely({
         archivePath: installSourcePath,
         destinationPath: extractionStagingDirectory,
+        password: options.password || "",
       });
-      const archiveContentRoot = await resolveArchiveContentRoot(
+      let archiveContentRoot = await resolveArchiveContentRoot(
         extractionStagingDirectory,
       );
+      stagedExecutables = findExecutables(archiveContentRoot, gameExtensions);
+      if (stagedExecutables.length === 0) {
+        // "Archive inside an archive": unpack one nested level in place.
+        const nested = await unwrapNestedArchive(archiveContentRoot, {
+          password: options.password || "",
+        });
+        if (nested) {
+          archiveContentRoot = await resolveArchiveContentRoot(nested);
+          stagedExecutables = findExecutables(archiveContentRoot, gameExtensions);
+        }
+      }
 
       await moveDirectoryIntoPlace(archiveContentRoot, installDirectory);
-      if (archiveContentRoot !== extractionStagingDirectory) {
-        await fs.promises
-          .rm(extractionStagingDirectory, {
-            recursive: true,
-            force: true,
-          })
-          .catch(() => {});
-      }
+      await fs.promises
+        .rm(extractionStagingDirectory, {
+          recursive: true,
+          force: true,
+        })
+        .catch(() => {});
     } catch (error) {
       await fs.promises
         .rm(extractionStagingDirectory, {
@@ -3229,22 +3672,19 @@ async function importDownloadedF95Package(downloadPath, metadata) {
         })
         .catch(() => {});
       throw error;
-    } finally {
-      await fs.promises.unlink(installSourcePath).catch(() => {});
     }
+    // The install succeeded: the package is not needed any more.
+    await fs.promises.unlink(installSourcePath).catch(() => {});
 
     const executables = findExecutables(installDirectory, gameExtensions);
+    const detection = detectGameEngine(installDirectory, { executables });
     const selectedValue = selectPreferredExecutable(executables, {
       title,
       creator: metadata?.creator || "",
+      preferredExecutables: detection.preferredExecutables,
+      ignoredExecutables: detection.ignoredExecutables,
     });
-    const detectedEngine = selectedValue
-      ? Object.entries(engineMap).find(([, patterns]) =>
-          patterns.some((pattern) =>
-            selectedValue.toLowerCase().includes(pattern),
-          ),
-        )?.[0] || "Unknown"
-      : "Unknown";
+    const detectedEngine = detection.engine || "Unknown";
 
     await restoreGameSaves({
       ...saveVaultInput,
@@ -3256,7 +3696,7 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       );
     });
 
-    return persistF95InstalledGame({
+    const results = await persistF95InstalledGame({
       title,
       metadata,
       installDirectory,
@@ -3269,6 +3709,10 @@ async function importDownloadedF95Package(downloadPath, metadata) {
       gameExtensions,
       atlasMetadata,
     });
+    if (Array.isArray(results) && results[0] && executables.length === 0) {
+      results[0].warning = "no_executable";
+    }
+    return results;
   }
 
   const installedFilePath = await moveFileIntoDirectory(
@@ -3280,11 +3724,8 @@ async function importDownloadedF95Package(downloadPath, metadata) {
   );
   const relativeExecutable = path.basename(installedFilePath);
   const detectedEngine =
-    Object.entries(engineMap).find(([, patterns]) =>
-      patterns.some((pattern) =>
-        relativeExecutable.toLowerCase().includes(pattern),
-      ),
-    )?.[0] || "Unknown";
+    detectGameEngine(installDirectory, { executables: [relativeExecutable] }).engine ||
+    "Unknown";
 
   await restoreGameSaves({
     ...saveVaultInput,
@@ -3309,6 +3750,39 @@ async function importDownloadedF95Package(downloadPath, metadata) {
     gameExtensions,
     atlasMetadata,
   });
+  }
+}
+
+/**
+ * When an unpacked package holds nothing but another archive (zip inside a
+ * rar is common on mirrors), unpack that one next to it and return the new
+ * content root; otherwise null.
+ * @param {string} contentRoot
+ * @param {{ password?: string }} options
+ */
+async function unwrapNestedArchive(contentRoot, options = {}) {
+  const entries = await fs.promises.readdir(contentRoot, { withFileTypes: true });
+  const archives = entries.filter(
+    (entry) => entry.isFile() && isSupportedArchiveName(entry.name),
+  );
+  const others = entries.filter(
+    (entry) => !entry.isDirectory() && !isSupportedArchiveName(entry.name),
+  );
+  if (archives.length !== 1 || others.length > 3) {
+    return null;
+  }
+  const nestedPath = path.join(contentRoot, archives[0].name);
+  const nestedDestination = path.join(
+    contentRoot,
+    `${path.basename(archives[0].name, path.extname(archives[0].name))}`,
+  );
+  await extractArchiveSafely({
+    archivePath: nestedPath,
+    destinationPath: nestedDestination,
+    password: options.password || "",
+  });
+  await fs.promises.unlink(nestedPath).catch(() => {});
+  return nestedDestination;
 }
 
 const F95_SESSION_DOWNLOAD_MAX_RESUMES = 5;
@@ -4531,7 +5005,7 @@ ipcMain.handle("open-f95-download-action", async (event, id) => {
   }
 });
 
-const MANUAL_INSTALL_STATUSES = new Set(["error", "action"]);
+const MANUAL_INSTALL_STATUSES = new Set(["error", "action", "cancelled"]);
 const MANUAL_PACKAGE_EXTENSIONS = [
   "zip", "7z", "rar", "exe", "apk", "tar", "gz", "tgz", "bz2", "xz", "zst",
   "jar", "swf", "msi",
@@ -4540,8 +5014,7 @@ const MANUAL_PACKAGE_EXTENSIONS = [
 function findF95DownloadForManualStep(id) {
   const downloadId = String(id || "").trim();
   const entry = f95DownloadsStore.get(downloadId);
-  const context = f95DownloadContexts.get(downloadId);
-  if (!entry || !context?.request?.downloadUrl) {
+  if (!entry) {
     return {
       error:
         "This download can no longer be resumed. Start it again from the game thread.",
@@ -4550,8 +5023,79 @@ function findF95DownloadForManualStep(id) {
   if (!MANUAL_INSTALL_STATUSES.has(entry.status)) {
     return { error: "This download is still running." };
   }
+  // Entries restored after a restart have no live context; rebuild enough
+  // of one to install a file, a folder or the kept package.
+  const context = f95DownloadContexts.get(downloadId) || createF95ContextFromEntry(entry);
   return { entry, context };
 }
+
+/**
+ * Retry the install of the package kept after a failed attempt, optionally
+ * with an archive password. Nothing is downloaded again.
+ */
+ipcMain.handle("retry-f95-install", async (event, payload) => {
+  const id = typeof payload === "string" ? payload : payload?.id;
+  const password = typeof payload === "object" && payload ? String(payload.password || "") : "";
+  const found = findF95DownloadForManualStep(id);
+  if (!found.context) {
+    return { success: false, error: found.error };
+  }
+  const { entry, context } = found;
+  const packagePath = String(entry.packagePath || "");
+  if (!packagePath) {
+    return {
+      success: false,
+      error: "There is no downloaded package to install. Retry the download or pick the file yourself.",
+    };
+  }
+  if (!fs.existsSync(packagePath)) {
+    f95DownloadsStore.clearPackage(entry.id);
+    broadcastF95Downloads();
+    return {
+      success: false,
+      error: "The downloaded package is no longer on disk. Download it again.",
+    };
+  }
+  void installF95RetainedPackage(context, packagePath, { password });
+  return { success: true, queued: true, id: context.id, fileName: path.basename(packagePath) };
+});
+
+/**
+ * The user unpacked the package by hand: pick the game folder and register
+ * it for this download's thread.
+ */
+ipcMain.handle("install-f95-download-from-folder", async (event, id) => {
+  const found = findF95DownloadForManualStep(id);
+  if (!found.context) {
+    return { success: false, error: found.error };
+  }
+  const { context } = found;
+  const dialogOptions = {
+    title: `Pick the unpacked game folder for ${context.metadata.title}`,
+    defaultPath: getConfiguredLibraryFolder(),
+    buttonLabel: "Install",
+    properties: /** @type {Array<"openDirectory">} */ (["openDirectory"]),
+  };
+  const picked = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions);
+  if (picked.canceled || !picked.filePaths?.length) {
+    return { success: false, cancelled: true };
+  }
+  const recheck = findF95DownloadForManualStep(id);
+  if (!recheck.context) {
+    return { success: false, error: recheck.error };
+  }
+  const folderPath = picked.filePaths[0];
+  if (path.resolve(folderPath) === path.resolve(getConfiguredLibraryFolder())) {
+    return {
+      success: false,
+      error: "Pick the folder of this game, not the whole library folder.",
+    };
+  }
+  void installF95PackageFromFolder(context, folderPath);
+  return { success: true, queued: true, id: context.id, folderName: path.basename(folderPath) };
+});
 
 /**
  * The mirror cannot be finished in the embedded window (bot detection such
@@ -4647,11 +5191,19 @@ ipcMain.handle("install-f95-download-from-file", async (event, id) => {
 });
 
 ipcMain.handle("clear-f95-download-history", async () => {
+  const retained = f95DownloadsStore
+    .list()
+    .filter((entry) => entry.packagePath && !isActiveStatus(entry.status));
   const removedIds = f95DownloadsStore.clearHistory();
   for (const removedId of removedIds) {
     const context = f95DownloadContexts.get(removedId);
     releaseF95DownloadPath(context);
     f95DownloadContexts.delete(removedId);
+  }
+  for (const entry of retained) {
+    if (removedIds.includes(entry.id)) {
+      removeF95RetainedPackage(entry);
+    }
   }
   broadcastF95Downloads();
   return { success: true, removed: removedIds.length };
@@ -4659,10 +5211,14 @@ ipcMain.handle("clear-f95-download-history", async () => {
 
 ipcMain.handle("show-f95-download-in-folder", async (event, id) => {
   try {
-    const context = f95DownloadContexts.get(String(id || "").trim());
-    const candidatePaths = context?.targetPath
-      ? [context.targetPath, `${context.targetPath}.part`]
-      : [];
+    const downloadId = String(id || "").trim();
+    const context = f95DownloadContexts.get(downloadId);
+    const entry = f95DownloadsStore.get(downloadId);
+    const candidatePaths = [
+      entry?.packagePath || "",
+      context?.targetPath || "",
+      context?.targetPath ? `${context.targetPath}.part` : "",
+    ].filter(Boolean);
 
     for (const candidatePath of candidatePaths) {
       if (fs.existsSync(candidatePath)) {
@@ -5695,16 +6251,16 @@ const importGamesInternal = async (params) => {
 
         const execs = findExecutables(extractPath, gameExt);
         if (execs.length > 0) {
+          const detection = detectGameEngine(extractPath, { executables: execs });
           const selected = selectPreferredExecutable(execs, {
             title: resolvedGame.title,
             creator: resolvedGame.creator,
+            preferredExecutables: detection.preferredExecutables,
+            ignoredExecutables: detection.ignoredExecutables,
           });
           execPath = path.join(extractPath, selected);
-          for (const [eng, patterns] of Object.entries(engineMap)) {
-            if (patterns.some((p) => selected.toLowerCase().includes(p))) {
-              resolvedGame.engine = eng;
-              break;
-            }
+          if (detection.engine) {
+            resolvedGame.engine = detection.engine;
           }
           resolvedGame.executables = execs.map((e) => ({ key: e, value: e }));
           resolvedGame.selectedValue = selected;
@@ -6140,6 +6696,10 @@ ipcMain.handle("scan-library", async (event, request) => {
         removedImageDirectories: resetResult.removedImageDirectories.length,
       });
       mainWindow?.webContents.send("library-reset", libraryReset);
+      broadcastGamesLibrarySynced({ reason: "library-reset" });
+      // The live checker keeps the record ids of its last run in memory;
+      // after the wipe they belong to nobody (or to new games).
+      libraryLiveUpdateChecker?.forget?.();
       sendLibraryScanProgress(
         `Library index cleared: ${libraryReset.clearedGames} game(s) removed, backup saved. Scanning from scratch...`,
       );
@@ -6159,8 +6719,12 @@ ipcMain.handle("scan-library", async (event, request) => {
       }
 
       sendLibraryScanProgress(
-        `Library scan cache reset: ${resetResult.clearedCandidates} candidates and ${resetResult.clearedJobs} jobs cleared`,
+        `Library scan cache reset: ${resetResult.clearedCandidates} candidates, ${resetResult.clearedJobs} jobs and ${resetResult.clearedLiveVersions || 0} cached thread versions cleared`,
       );
+      mainWindow?.webContents.send("scan-cache-reset", {
+        clearedCandidates: resetResult.clearedCandidates,
+        clearedJobs: resetResult.clearedJobs,
+      });
     }
 
     const knownPathLookup = scanRequest.forceRescan
@@ -6178,11 +6742,17 @@ ipcMain.handle("scan-library", async (event, request) => {
       (!scanResult.games || scanResult.games.length === 0) &&
       !scanResult.cancelled
     ) {
+      // Nothing was imported; the renderer still needs to reload (the index
+      // may have been wiped by a rebuild).
+      mainWindow?.webContents.send("import-complete");
+      broadcastGamesLibrarySynced({ reason: "library-scan" });
       return { ...scanResult, mode: scanRequest.mode, libraryReset };
     }
 
     if (scanResult.cancelled) {
       sendLibraryScanProgress("Library rescan cancelled");
+      mainWindow?.webContents.send("import-complete");
+      broadcastGamesLibrarySynced({ reason: "library-scan" });
       return {
         success: false,
         cancelled: true,
@@ -6222,6 +6792,10 @@ ipcMain.handle("scan-library", async (event, request) => {
         moveToDefaultFolder: false,
         format: "",
       });
+    } else {
+      // importGamesInternal announces "import-complete" itself; without an
+      // import the renderer would keep the stale (or wiped) list.
+      mainWindow?.webContents.send("import-complete");
     }
 
     const duplicateCleanup = await runLibraryDuplicateCleanup();
@@ -6245,8 +6819,16 @@ ipcMain.handle("scan-library", async (event, request) => {
     });
     const duplicateMerges = summarizeDuplicateCleanup(duplicateCleanup);
 
+    const importedAny = importResults.some((result) => result?.success);
     const summary = {
-      success: scanResult.success,
+      // A source that failed while others were imported is a partial result,
+      // not a failed rebuild: report it as success with a warning text.
+      success: scanResult.success || importedAny,
+      partialFailure: !scanResult.success && importedAny,
+      error:
+        !scanResult.success && importedAny
+          ? `Some scan sources failed (${scanResult.errorsCount || 0} error(s)); games from the other sources were imported.`
+          : scanResult.error || "",
       mode: scanRequest.mode,
       warningsCount: scanResult.warningsCount || 0,
       scanned: scannedGames.length,
@@ -6274,6 +6856,7 @@ ipcMain.handle("scan-library", async (event, request) => {
       imported + refreshed,
       scannedGames.length || 0,
     );
+    broadcastGamesLibrarySynced({ reason: "library-scan" });
 
     return summary;
   } finally {
@@ -6291,6 +6874,22 @@ function getLibraryGameExtensions() {
 
 // Locate folder, choose launcher, library backups, catalog link and live
 // thread checks (see main/libraryMaintenanceIpc.js for the contracts).
+registerSaveTransferIpc({
+  ipcMain,
+  dialog,
+  shell,
+  app,
+  getParentWindow: (event) =>
+    BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined,
+  appPaths,
+  getDatabaseConnection: () => databaseConnection,
+  getSaveProfileSnapshot: (recordId) =>
+    getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
+  refreshSaveProfiles: (recordId) =>
+    refreshSaveProfiles(appPaths, databaseConnection, recordId),
+  listGames: () => getGames(appPaths, 0, null),
+});
+
 registerLibraryMaintenanceIpc({
   ipcMain,
   dialog,
@@ -6325,20 +6924,6 @@ registerLibraryMaintenanceIpc({
 // ────────────────────────────────────────────────
 // UTIL FUNCTIONS
 // ────────────────────────────────────────────────
-
-const engineMap = {
-  rpgm: [
-    "rpgmv.exe",
-    "rpgmk.exe",
-    "rpgvx.exe",
-    "rpgvxace.exe",
-    "rpgmktranspatch.exe",
-  ],
-  renpy: ["renpy.exe", "renpy.sh"],
-  unity: ["unityplayer.dll", "unitycrashhandler64.exe"],
-  html: ["index.html"],
-  flash: [".swf"],
-};
 
 function loadConfig() {
   try {
@@ -7157,6 +7742,7 @@ app.whenReady().then(async () => {
       console.error("[cloud.auth] Failed to broadcast auth state:", error);
     });
   });
+  hydrateF95DownloadsStore();
   f95Session = getReadyF95Session();
   attachF95DownloadListener();
   f95Session.cookies.on("changed", () => {
@@ -7204,6 +7790,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  flushF95DownloadsPersist();
   trayController.prepareForQuit();
 });
 

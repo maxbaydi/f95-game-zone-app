@@ -13,10 +13,10 @@
 - **Find New Games** — быстрый проход: добавляет игры из папок, которых библиотека ещё не знает. Ничего не меняет у существующих записей.
 - **Refresh Installed Games** — проверяет каждую папку заново: обновляет версию, исполняемый файл, движок, находит новые игры, чистит дубликаты и сообщает, у скольких игр пропали файлы. Название и автора игры, уже сопоставленной с каталогом или исправленной вручную, не портит.
 - **Refresh Cached Screenshots** — докачивает скриншоты.
-- **Reset Scan Cache & Rescan** — то же, что Refresh, но сначала стирает историю сканирований и кандидатов (Scan Hub).
+- **Reset Scan Cache & Rescan** — то же, что Refresh, но сначала стирает историю сканирований, кандидатов (Scan Hub) и кэш версий из живых тем (`library_live_versions`), чтобы следующая проверка обновлений прошла с нуля.
 - **Rebuild Library From Scratch…** — окно подтверждения с чек-боксом. Локальный индекс библиотеки очищается (записи, версии, кэш обложек, избранное, ссылки на темы), перед этим сохраняется резервная копия базы, затем папки сканируются с нуля. Файлы игр, сохранения и локальные бэкапы сохранений не трогаются. Игры из облачной библиотеки вернутся как «Not installed» после следующей синхронизации.
 
-Меню открывается над кнопкой внутри окна (см. library-toolbar-and-menus.md).
+Меню открывается над кнопкой внутри окна (см. library-toolbar-and-menus.md). Те же действия вынесены в **Scan Hub** (блок «Rescan and reset»: Refresh installed games, Reset cache & rescan, Rebuild library from scratch…), а кнопка **Find New Games** в его шапке запускает быстрый проход.
 
 По завершении внизу показывается итог: сколько добавлено (и сколько из них без совпадения с каталогом), сколько обновлено, сколько нужно проверить, сколько игр с отсутствующими файлами. Папки, которые явно являются играми, но не нашлись в каталоге, добавляются сразу с бейджем «Not matched» (привязка — library-catalog-link.md). Если есть папки для проверки — кнопка **Open Scan Hub**; если есть игры без файлов — предупреждение с кнопкой **Show them**; если объединены дубликаты — «Merged N duplicate entries» с кнопкой **Details**.
 
@@ -26,10 +26,10 @@
 
 ## Как это работает
 1. Рендерер вызывает `scanLibrary({ mode, confirm })`. `normalizeLibraryScanRequest` принимает и старые флаги `{ resetCache, forceRescan }`: `resetCache` → `reset_cache`, `forceRescan` → `refresh`. Явный `mode` важнее флагов; неизвестный режим = `incremental`.
-2. `reset_library` требует `confirm === true` иначе IPC возвращает `LIBRARY_RESET_NOT_CONFIRMED`. `resetLibraryIndex` делает `VACUUM INTO` в `backups/library_index/library-<дата>.db` (при неудаче — копия файла), затем в одной транзакции удаляет таблицы из `LIBRARY_RESET_TABLES` (mappings, save_profiles, save_sync_state, banners, previews, scan_candidates, scan_jobs, versions, games) и удаляет папки `cache/images/<record_id>`. Каталог Atlas/F95, `scan_sources`, `emulators`, `tags` и очередь облачных удалений не трогаются. Рендерер получает событие `library-reset` и очищает список.
+2. `reset_library` требует `confirm === true` иначе IPC возвращает `LIBRARY_RESET_NOT_CONFIRMED`. `resetLibraryIndex` делает `VACUUM INTO` в `backups/library_index/library-<дата>.db` (при неудаче — копия файла), затем в одной транзакции удаляет таблицы из `LIBRARY_RESET_TABLES` (mappings, save_profiles, save_sync_state, banners, previews, scan_candidates, scan_jobs, versions, library_live_versions, games) и удаляет **все** числовые папки `cache/images/<id>` (не только текущих записей: `record_id` после очистки снова начинается с 1, и старая обложка могла бы достаться новой игре). Каталог Atlas/F95, `scan_sources`, `emulators`, `tags` и очередь облачных удалений не трогаются. Рендерер получает событие `library-reset` и очищает список, очередь кандидатов, задания сканера и результат последней живой проверки; главный процесс сбрасывает состояние живой проверки (`forget()`), и уже идущий прогон перестаёт записывать результаты под старыми id.
 3. Сканер запускается с `forceRescan` для всех режимов кроме `incremental`. Для известных папок (индекс путей библиотеки) `splitAutoImportableScanGames` помечает кандидата `refreshExisting` и импортирует его независимо от уверенности совпадения с каталогом. Новые папки импортируются при `matchStatus = matched`, а без совпадения — если это не архив и `detectionScore >= 40` (помечаются `importUnmatched`); остальные ждут проверки в Scan Hub.
 4. При импорте в существующую запись `mergeRefreshedGameMetadata` берёт название/автора/движок сканера только при наличии `atlasId` (уверенное совпадение или выбор пользователя); иначе сохраняет ранее записанные значения и заменяет только «Unknown». Версия берётся из папки, а если папка версию не выдаёт — остаётся записанная для этой же папки.
-5. После импорта запускается чистка дубликатов по одинаковому пути и подсчёт состояний присутствия (`countLibraryInstallStates`), результат уходит в ответ и в строку прогресса. `summarizeDuplicateCleanup` превращает результат чистки в `duplicateMerges` (какая запись оставлена, какие объединены или не объединены).
+5. После импорта запускается чистка дубликатов по одинаковому пути и подсчёт состояний присутствия (`countLibraryInstallStates`), результат уходит в ответ и в строку прогресса. `summarizeDuplicateCleanup` превращает результат чистки в `duplicateMerges` (какая запись оставлена, какие объединены или не объединены). В любом исходе (нечего импортировать, отмена, ошибка источников) главный процесс шлёт `import-complete` и `games-library-synced`, чтобы список в окне перезагрузился, а не остался пустым после очистки. Если часть источников упала, но игры из остальных импортированы, ответ — `success: true, partialFailure: true, error: <текст>`; окно показывает предупреждение вместо «The library could not be rebuilt».
 
 ## Контракт
 IPC `scan-library` вход: `{ mode?: "incremental" | "refresh" | "reset_cache" | "reset_library", confirm?: boolean, resetCache?: boolean, forceRescan?: boolean }`.
@@ -38,7 +38,7 @@ IPC `scan-library` вход: `{ mode?: "incremental" | "refresh" | "reset_cache"
 
 Коды ошибок: `LIBRARY_RESET_NOT_CONFIRMED`, `LIBRARY_RESET_BACKUP_FAILED`, `LIBRARY_RESET_FAILED`, `SCAN_ALREADY_RUNNING`, `SCAN_CACHE_RESET_FAILED`.
 
-Событие `library-reset` → рендерер: `{ clearedGames, clearedVersions, backupPath }`.
+Событие `library-reset` → рендерер: `{ clearedGames, clearedVersions, backupPath }`. Событие `scan-cache-reset` → `{ clearedCandidates, clearedJobs }`. Ответ `scan-library` дополнен полями `partialFailure`, `error` (текст при частичном сбое).
 
 Резервные копии: `<userData>/backups/library_index/library-YYYYMMDD-HHmmss.db`; не удаляются автоматически, восстанавливаются из настроек (library-backups.md). Сброс очищает и `library_live_versions`.
 
@@ -60,5 +60,6 @@ IPC `scan-library` вход: `{ mode?: "incremental" | "refresh" | "reset_cache"
 Тесты: `libraryScanRequest.test.js` (нормализация режимов, совместимость флагов, подтверждение), `libraryReset.test.js` (очистка таблиц, сохранение каталога, резервная копия — реальная SQLite, откат при сбое, отказ без бэкапа), `scanCandidateImportPolicy.test.js` (обновление известных папок), `importMetadata.test.js` (слияние метаданных при обновлении). В браузере проверены меню, окно подтверждения и вызов `scanLibrary({ mode: "reset_library", confirm: true })`.
 
 ## История изменений
+- 2026-09-29 — действия сброса в Scan Hub; кнопка Scan Hub больше не передаёт событие клика в IPC (вызов падал); `reset_cache` чистит и кэш живых версий; полная очистка папок обложек при rebuild; `import-complete`/`games-library-synced` во всех исходах; частичный сбой источников не считается провалом rebuild; живая проверка не пишет под старыми id после очистки.
 - 2026-09-27 — добавлены режимы `refresh` и `reset_library`, обновление известных папок без «проверки», модальное окно сброса, итоговая сводка с количеством игр без файлов.
 - 2026-09-27 — автоимпорт явных игр без совпадения (`importedUnmatched`), сводка объединённых дубликатов (`duplicateMerges`), меню внутри окна, кнопки Open Scan Hub / Show them / Details в итоге.
