@@ -267,3 +267,102 @@ test("connection cards round-trip, sealed cards need the passphrase", () => {
   assert.equal(readConnectionCard(sealed, { passphrase: "card-pass" }).settings.bucket, "b");
   assert.throws(() => readConnectionCard({ format: "other" }), (error) => codeOf(error) === "invalid_card");
 });
+
+test("Supabase provider talks to the Storage REST API, creates the bucket once and walks folders", async () => {
+  const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
+  const calls = [];
+  const store = new Map();
+  let bucketExists = false;
+  const json = (value, status = 200) =>
+    new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const parsed = new URL(url);
+    calls.push({ method: init.method, path: parsed.pathname });
+    assert.equal(init.headers.apikey, "service-key");
+    assert.equal(init.headers.Authorization, "Bearer service-key");
+    const path = parsed.pathname.replace(/^\/storage\/v1/, "");
+    if (path === "/bucket/saves" && init.method === "GET") {
+      return bucketExists ? json({ id: "saves", name: "saves" }) : json({ statusCode: "404", error: "Bucket not found", message: "Bucket not found" }, 400);
+    }
+    if (path === "/bucket" && init.method === "POST") {
+      bucketExists = true;
+      return json({ name: "saves" });
+    }
+    if (path === "/object/list/saves" && init.method === "POST") {
+      const body = JSON.parse(init.body);
+      const prefix = body.prefix ? `${body.prefix}/` : "";
+      const seen = new Map();
+      for (const key of store.keys()) {
+        if (!key.startsWith(prefix)) continue;
+        const rest = key.slice(prefix.length);
+        const [head, ...tail] = rest.split("/");
+        if (tail.length === 0) {
+          seen.set(head, { name: head, id: `id-${key}`, updated_at: "2026-09-29T10:00:00Z", metadata: { size: store.get(key).length } });
+        } else if (!seen.has(head)) {
+          seen.set(head, { name: head, id: null, metadata: null });
+        }
+      }
+      return json([...seen.values()]);
+    }
+    const objectMatch = path.match(/^\/object\/saves\/(.+)$/);
+    if (objectMatch) {
+      const key = decodeURIComponent(objectMatch[1]);
+      if (init.method === "POST") {
+        assert.equal(init.headers["x-upsert"], "true");
+        store.set(key, Buffer.from(await new Response(init.body).arrayBuffer()));
+        return json({ Key: `saves/${key}` });
+      }
+      if (init.method === "GET") {
+        return store.has(key)
+          ? new Response(store.get(key), { status: 200 })
+          : json({ statusCode: "404", error: "not_found", message: "Object not found" }, 400);
+      }
+      if (init.method === "DELETE") {
+        store.delete(key);
+        return json({ message: "Successfully deleted" });
+      }
+    }
+    return new Response("", { status: 500 });
+  };
+  const provider = createSupabaseProvider({
+    url: "https://abc.supabase.co/",
+    key: "service-key",
+    bucket: "saves",
+    prefix: "f95launcher",
+    fetchImpl,
+  });
+  await provider.write("games/f95-1/latest.zip", Buffer.from("zip"));
+  await provider.write("catalog.json", Buffer.from("{}"));
+  assert.deepEqual(
+    calls.slice(0, 3).map((call) => `${call.method} ${call.path}`),
+    ["GET /storage/v1/bucket/saves", "POST /storage/v1/bucket", "POST /storage/v1/object/saves/f95launcher/games/f95-1/latest.zip"],
+  );
+  assert.equal(calls.filter((call) => call.path === "/storage/v1/bucket").length, 1, "bucket created once");
+  assert.equal((await provider.read("games/f95-1/latest.zip")).toString(), "zip");
+  assert.equal(await provider.read("games/f95-1/none.zip"), null);
+  assert.deepEqual((await provider.list("games")).map((entry) => entry.path), ["games/f95-1/latest.zip"]);
+  assert.deepEqual((await provider.list()).map((entry) => entry.path).sort(), ["catalog.json", "games/f95-1/latest.zip"]);
+  await provider.remove("games/f95-1/latest.zip");
+  await provider.remove("games/f95-1/latest.zip");
+  assert.deepEqual(await provider.list("games"), []);
+  assert.equal((await provider.test()).ok, true);
+});
+
+test("Supabase provider maps 401/403 to auth_failed and refuses bad input", async () => {
+  const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
+  const provider = createSupabaseProvider({
+    url: "https://abc.supabase.co",
+    key: "anon",
+    fetchImpl: async () => new Response(JSON.stringify({ message: "new row violates row-level security policy" }), { status: 403 }),
+  });
+  await assert.rejects(() => provider.read("catalog.json"), (error) => codeOf(error) === "auth_failed");
+  assert.throws(() => createSupabaseProvider({ url: "abc.supabase.co", key: "k" }), (error) => codeOf(error) === "invalid_config");
+  assert.throws(() => createSupabaseProvider({ url: "https://abc.supabase.co", key: "k", bucket: "bad name" }), (error) => codeOf(error) === "invalid_config");
+});
+
+test("Supabase connection splits into public settings and a secret key", () => {
+  const split = splitConnectionInput("supabase", { url: "https://abc.supabase.co", key: "service", bucket: "saves", prefix: "" });
+  assert.deepEqual(split.settings, { url: "https://abc.supabase.co", bucket: "saves", prefix: "" });
+  assert.deepEqual(split.secrets, { key: "service" });
+  assert.equal(describeConnection({ type: "supabase", settings: split.settings }), "Supabase · saves @ abc.supabase.co");
+});

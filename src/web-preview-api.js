@@ -15,23 +15,8 @@
     Library: { rootPath: "", gameFolder: "" },
     Metadata: { downloadPreviews: false },
     Performance: { maxHeapSize: 4096 },
-    CloudSync: {
-      enabled: false,
-      projectRef: "",
-      supabaseUrl: "",
-      publishableKey: "",
-      storageBucket: "",
-    },
     Onboarding: { completed: true },
     F95Mirrors: {},
-  };
-
-  const CLOUD_AUTH_STATE = {
-    configured: false,
-    authenticated: false,
-    user: null,
-    error: "",
-    settings: {},
   };
 
   const F95_LOGIN_PAGE_URL = "https://f95zone.to/login/";
@@ -129,25 +114,14 @@
     relaunchApp: pn,
     onSettingsChanged: listenUnsub,
     subscribeF95AuthChanged: listenUnsub,
-    getCloudAuthState: () =>
-      Promise.resolve({ success: true, state: CLOUD_AUTH_STATE }),
-    signInCloud: p({ success: false, error: "Desktop only", state: null }),
-    signUpCloud: p({ success: false, error: "Desktop only", state: null }),
-    signOutCloud: p({ success: true, state: CLOUD_AUTH_STATE }),
-    runBulkCloudSaveAction: p({ success: false, error: "Desktop only" }),
-    getCloudLibraryCatalog: () =>
-      Promise.resolve({ success: true, result: null }),
-    syncCloudLibraryCatalog: p({ success: false, error: "Desktop only" }),
     getSaveProfileSnapshot: () =>
       Promise.resolve({ success: true, snapshot: null }),
     refreshSaveProfiles: () =>
       Promise.resolve({ success: true, snapshot: null }),
-    uploadCloudSaves: p({ success: false, error: "Desktop only" }),
-    restoreCloudSaves: p({ success: false, error: "Desktop only" }),
     exportGameSaves: p({ success: false, error: "Desktop only" }),
     getSaveStorageState: p({
       success: true,
-      state: { connected: false, type: "", label: "", encrypted: false, locked: false, busy: false, lastError: "", lastSyncAt: "", description: "", settings: {}, encryptionEnabled: false, secretsEncrypted: false, deviceName: "", legacyCloudConfigured: false },
+      state: { connected: false, type: "", label: "", encrypted: false, locked: false, busy: false, lastError: "", lastSyncAt: "", description: "", settings: {}, encryptionEnabled: false, secretsEncrypted: false, deviceName: "" },
     }),
     detectSaveStorageFolders: p({ success: true, folders: [] }),
     testSaveStorageConnection: p({ success: false, error: "Desktop only" }),
@@ -314,8 +288,6 @@
     onLibraryReset: listenUnsub,
     onF95AuthChanged: listen,
     onF95DownloadsChanged: listen,
-    onCloudAuthChanged: listenUnsub,
-    onCloudBulkProgress: listenUnsub,
     onGamesLibrarySynced: listenUnsub,
     onF95DownloadProgress: listen,
     getUniqueFilterOptions: () =>
@@ -905,7 +877,6 @@
       encryptionEnabled: false,
       secretsEncrypted: true,
       deviceName: "DESKTOP-ALEX",
-      legacyCloudConfigured: false,
     };
     const DEMO_STORAGE_DISCONNECTED = {
       connected: false,
@@ -921,7 +892,6 @@
       encryptionEnabled: false,
       secretsEncrypted: true,
       deviceName: "DESKTOP-ALEX",
-      legacyCloudConfigured: false,
     };
     const demoStorageState = () =>
       DEMO_ONBOARDING_STEP ? DEMO_STORAGE_DISCONNECTED : DEMO_STORAGE_CONNECTED;

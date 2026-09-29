@@ -42,21 +42,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   getConfig: () => ipcRenderer.invoke("get-settings"),
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
-  getCloudAuthState: () => ipcRenderer.invoke("get-cloud-auth-state"),
-  signInCloud: (payload) => ipcRenderer.invoke("sign-in-cloud", payload),
-  signUpCloud: (payload) => ipcRenderer.invoke("sign-up-cloud", payload),
-  signOutCloud: () => ipcRenderer.invoke("sign-out-cloud"),
-  runBulkCloudSaveAction: (mode) =>
-    ipcRenderer.invoke("run-bulk-cloud-save-action", mode),
-  getCloudLibraryCatalog: () => ipcRenderer.invoke("get-cloud-library-catalog"),
-  syncCloudLibraryCatalog: () =>
-    ipcRenderer.invoke("sync-cloud-library-catalog"),
   getSaveProfileSnapshot: (recordId) =>
     ipcRenderer.invoke("get-save-profile-snapshot", recordId),
   refreshSaveProfiles: (recordId) =>
     ipcRenderer.invoke("refresh-save-profiles", recordId),
-  uploadCloudSaves: (recordId) =>
-    ipcRenderer.invoke("upload-cloud-saves", recordId),
   getSaveStorageState: () => ipcRenderer.invoke("get-save-storage-state"),
   detectSaveStorageFolders: () =>
     ipcRenderer.invoke("detect-save-storage-folders"),
@@ -95,8 +84,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   exportAllGameSaves: () => ipcRenderer.invoke("export-all-game-saves"),
   openSaveLocation: (recordId, rootPath) =>
     ipcRenderer.invoke("open-save-location", { recordId, rootPath }),
-  restoreCloudSaves: (recordId) =>
-    ipcRenderer.invoke("restore-cloud-saves", recordId),
   getScanSources: () => ipcRenderer.invoke("get-scan-sources"),
   addScanSource: (sourcePath) =>
     ipcRenderer.invoke("add-scan-source", sourcePath),
@@ -348,16 +335,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("f95-downloads-changed", (event, payload) =>
       callback(payload),
     ),
-  onCloudAuthChanged: (callback) => {
-    const listener = (event, payload) => callback(payload);
-    ipcRenderer.on("cloud-auth-changed", listener);
-    return () => ipcRenderer.removeListener("cloud-auth-changed", listener);
-  },
-  onCloudBulkProgress: (callback) => {
-    const listener = (event, payload) => callback(payload);
-    ipcRenderer.on("cloud-bulk-progress", listener);
-    return () => ipcRenderer.removeListener("cloud-bulk-progress", listener);
-  },
   onGamesLibrarySynced: (callback) => {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on("games-library-synced", listener);

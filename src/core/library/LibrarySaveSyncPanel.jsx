@@ -11,12 +11,6 @@ const formatSyncDate = (value) => {
   return date.toLocaleString();
 };
 
-const { getCloudSyncMessageIfPresent: sharedGetCloudSyncMessageIfPresent } =
-  window.cloudSyncErrors || {};
-const getCloudSyncMessageIfPresent =
-  sharedGetCloudSyncMessageIfPresent ||
-  ((error) => String(error?.message || error || "").trim());
-
 const SaveSyncPill = ({ children, tone = "neutral" }) => {
   const toneClass =
     tone === "accent"
@@ -121,20 +115,13 @@ const SaveActionButton = ({
   </button>
 );
 
-const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
+const LibrarySaveSyncPanel = ({ game, onOpenSaveStorage }) => {
   const storage = window.useSaveStorageState
     ? window.useSaveStorageState()
     : { state: null, refresh: () => Promise.resolve(null) };
   const storageState = storage.state;
   const storageReady = Boolean(storageState?.connected && !storageState?.locked);
   const [snapshot, setSnapshot] = window.React.useState(null);
-  const [authState, setAuthState] = window.React.useState({
-    configured: false,
-    authenticated: false,
-    user: null,
-    error: "",
-    settings: {},
-  });
   const [isLoading, setIsLoading] = window.React.useState(true);
   const [busyAction, setBusyAction] = window.React.useState("");
   const [message, setMessage] = window.React.useState("");
@@ -155,12 +142,9 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
       setErrorMessage("");
 
       try {
-        const [snapshotResult, authResult] = await Promise.all([
-          refreshProfiles
-            ? window.electronAPI.refreshSaveProfiles(game.record_id)
-            : window.electronAPI.getSaveProfileSnapshot(game.record_id),
-          window.electronAPI.getCloudAuthState(),
-        ]);
+        const snapshotResult = refreshProfiles
+          ? await window.electronAPI.refreshSaveProfiles(game.record_id)
+          : await window.electronAPI.getSaveProfileSnapshot(game.record_id);
 
         if (!snapshotResult?.success) {
           setErrorMessage(
@@ -169,18 +153,6 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
           setSnapshot(null);
         } else {
           setSnapshot(snapshotResult.snapshot);
-        }
-
-        if (authResult?.success && authResult.state) {
-          setAuthState(authResult.state);
-        } else {
-          setAuthState({
-            configured: false,
-            authenticated: false,
-            user: null,
-            error: authResult?.error || "",
-            settings: {},
-          });
         }
       } catch (error) {
         console.error("Failed to load save sync panel state:", error);
@@ -194,16 +166,6 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
 
   window.React.useEffect(() => {
     loadPanelState(false);
-
-    const unsubscribe = window.electronAPI.onCloudAuthChanged((state) => {
-      setAuthState(state || {});
-    });
-
-    return () => {
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
-      }
-    };
   }, [loadPanelState]);
 
   const callApi = async (method, ...args) => {
@@ -283,14 +245,9 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
 
   const profiles = snapshot?.profiles || [];
   const syncState = snapshot?.syncState || null;
-  const hasRemoteArchive = Boolean(syncState?.lastRemotePath);
-  const cloudReady = Boolean(authState.configured);
   const storageLabel = storageState?.label || "your storage";
   const userFacingError =
-    errorMessage ||
-    getCloudSyncMessageIfPresent(syncState?.lastError || authState.error, {
-      action: "upload",
-    });
+    errorMessage || String(syncState?.lastError || "").trim();
 
   return (
     <section className="border border-border bg-secondary/10 p-4">
@@ -306,7 +263,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
         </div>
         <button
           type="button"
-          onClick={() => (onOpenSaveStorage ? onOpenSaveStorage() : onOpenCloudAuth?.())}
+          onClick={() => onOpenSaveStorage?.()}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-secondary text-text hover:bg-selected"
           title={storageReady ? `Save storage: ${storageState.description || storageLabel}` : "Set up save storage"}
           aria-label={storageReady ? "Save storage settings" : "Set up save storage"}
@@ -332,9 +289,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
                   ? `Cloud: ${storageLabel}`
                   : storageState?.locked
                     ? "Cloud: locked"
-                    : authState.authenticated
-                      ? "Cloud: signed in"
-                      : "Cloud: off"}
+                    : "Cloud: off"}
               </SaveSyncPill>
               <SaveSyncPill
                 tone={
@@ -465,46 +420,13 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
                     }
                   />
                 </>
-              ) : authState.authenticated ? (
-                <>
-                  <SaveActionButton
-                    icon="cloud_upload"
-                    label="Back up to cloud"
-                    busyLabel="Backing up…"
-                    busy={busyAction === "upload"}
-                    disabled={busyAction !== "" || profiles.length === 0}
-                    title="Upload the current saves to your Supabase account"
-                    onClick={() =>
-                      handleAction("upload", () =>
-                        callApi("uploadCloudSaves", game.record_id),
-                      )
-                    }
-                  />
-                  <SaveActionButton
-                    icon="cloud_download"
-                    label="Restore from cloud"
-                    busyLabel="Restoring…"
-                    busy={busyAction === "restore"}
-                    disabled={busyAction !== "" || !hasRemoteArchive}
-                    title={
-                      hasRemoteArchive
-                        ? "Download the latest cloud backup onto this PC"
-                        : "No cloud backup for this game yet"
-                    }
-                    onClick={() =>
-                      handleAction("restore", () =>
-                        callApi("restoreCloudSaves", game.record_id),
-                      )
-                    }
-                  />
-                </>
               ) : (
                 <SaveActionButton
                   icon={storageState?.locked ? "lock_open" : "add_link"}
                   label={storageState?.locked ? "Unlock save storage" : "Connect your cloud"}
                   disabled={busyAction !== ""}
-                  title="OneDrive, Dropbox, Google Drive, a WebDAV server or an S3 bucket. Set up once, works on every PC."
-                  onClick={() => (onOpenSaveStorage ? onOpenSaveStorage() : onOpenCloudAuth?.())}
+                  title="OneDrive, Dropbox, Google Drive, a WebDAV server, an S3 bucket or your own Supabase project. Set up once, works on every PC."
+                  onClick={() => onOpenSaveStorage?.()}
                 />
               )}
               <span className="text-[11px] opacity-60">

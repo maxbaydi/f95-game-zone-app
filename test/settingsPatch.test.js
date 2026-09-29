@@ -10,7 +10,7 @@ const {
 test("applySettingsPatch merges one section without touching the rest", () => {
   const config = {
     Interface: { minimizeToTray: false, language: "English" },
-    CloudSync: { publishableKey: "secret" },
+    F95Mirrors: { "https://f95zone.to/threads/x.1/": "mega" },
   };
 
   const next = applySettingsPatch(config, "Interface", {
@@ -21,13 +21,13 @@ test("applySettingsPatch merges one section without touching the rest", () => {
     minimizeToTray: true,
     language: "English",
   });
-  assert.equal(next.CloudSync, config.CloudSync);
+  assert.equal(next.F95Mirrors, config.F95Mirrors);
   assert.equal(config.Interface.minimizeToTray, false);
 });
 
 test("applySettingsPatch rejects unknown sections and keys", () => {
   assert.throws(
-    () => applySettingsPatch({}, "CloudSync", { publishableKey: "x" }),
+    () => applySettingsPatch({}, "F95Mirrors", { "https://x": "mega" }),
     /Unknown settings section/,
   );
   assert.throws(

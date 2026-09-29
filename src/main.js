@@ -116,11 +116,7 @@ const {
 const { fetchWithCookieJar } = require("./main/f95/hosts/common");
 const { inspectF95Thread } = require("./main/f95/threadInspector");
 const { backupGameSaves, restoreGameSaves } = require("./main/saveVault");
-const { createCloudSaveService } = require("./main/cloudSaveSync");
-const {
-  buildCloudLibraryCatalogEntry,
-  buildCloudLibraryEntryIdentity,
-} = require("./main/cloudLibraryCatalog");
+const { buildLibraryIdentity } = require("./main/libraryIdentity");
 const {
   getSaveProfileSnapshot,
   refreshSaveProfiles,
@@ -134,14 +130,6 @@ const {
   createLibraryUpdateNotificationController,
 } = require("./main/libraryUpdateNotificationController");
 const { upsertSaveSyncState } = require("./main/db/saveSyncStateStore");
-const {
-  buildCloudLibraryDeleteRequest,
-  collectCloudLibraryDeleteCandidateKeys,
-  deletePendingCloudLibraryDeleteRequest,
-  listPendingCloudLibraryDeleteRequests,
-  queueCloudLibraryDeleteRequest,
-  setPendingCloudLibraryDeleteRequestError,
-} = require("./main/db/cloudLibraryDeleteQueueStore");
 const {
   listScanSources,
   createScanSource,
@@ -172,7 +160,6 @@ const {
   DEFAULT_PREVIEW_LIMIT,
   resolvePreviewDownloadCount,
 } = require("./main/previewLimit");
-const { resolveSupabaseSettings } = require("./main/supabase/client");
 const {
   startEnabledSourcesScan,
   getRecentScanJobs,
@@ -239,8 +226,6 @@ let settingsWindow;
 let importerWindow;
 let appConfig;
 let databaseConnection = null;
-let cloudSaveService = null;
-let cloudSaveQueue = Promise.resolve();
 // User-owned save storage (synced folder, WebDAV, S3); see src/main/saveStorage.
 let saveStorage = null;
 let libraryUpdateRefreshPromise = null;
@@ -678,10 +663,13 @@ function getPreferredInstalledPath(game) {
 }
 
 function getLibraryIdentityKey(game) {
-  return (
-    buildCloudLibraryCatalogEntry(game)?.identityKey ||
-    buildCloudLibraryEntryIdentity(game)
-  );
+  return buildLibraryIdentity({
+    atlasId: game?.atlas_id ? String(game.atlas_id) : "",
+    f95Id: game?.f95_id ? String(game.f95_id) : "",
+    siteUrl: String(game?.siteUrl || "").trim(),
+    title: String(game?.displayTitle || game?.title || "").trim(),
+    creator: String(game?.displayCreator || game?.creator || "").trim(),
+  });
 }
 
 function findMatchingLibraryGame(libraryGames, metadata, fallbackName = "") {
@@ -690,7 +678,7 @@ function findMatchingLibraryGame(libraryGames, metadata, fallbackName = "") {
     metadata?.title || fallbackName,
   );
   const normalizedCreator = normalizeLibraryMatchText(metadata?.creator || "");
-  const requestedIdentityKey = buildCloudLibraryEntryIdentity({
+  const requestedIdentityKey = buildLibraryIdentity({
     atlasId: metadata?.atlasId,
     f95Id: metadata?.f95Id || normalizedF95Id,
     siteUrl: metadata?.threadUrl || metadata?.siteUrl || "",
@@ -1028,10 +1016,6 @@ async function upsertLibraryGameFromMetadata(metadata, options = {}) {
     );
   }
 
-  if (options.scheduleCatalogSync !== false) {
-    scheduleCloudLibraryCatalogSync(options.reason || "library-upsert");
-  }
-
   return {
     recordId,
     added: !existingGame,
@@ -1052,58 +1036,6 @@ async function addF95ThreadToLibrary(input) {
   return {
     ...result,
     state,
-  };
-}
-
-async function materializeCloudLibraryCatalogEntries(entries, reason) {
-  const libraryGames = await getGames(appPaths, 0, null);
-  let added = 0;
-  let updated = 0;
-  let failed = 0;
-
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    try {
-      const result = await upsertLibraryGameFromMetadata(
-        {
-          threadUrl: entry?.siteUrl || "",
-          siteUrl: entry?.siteUrl || "",
-          title: entry?.title || "",
-          creator: entry?.creator || "",
-          engine: entry?.engine || "Unknown",
-          atlasId: entry?.atlasId || null,
-          f95Id: entry?.f95Id || "",
-        },
-        {
-          libraryGames,
-          emitEvent: true,
-          scheduleCatalogSync: false,
-          reason,
-        },
-      );
-
-      if (entry?.isFavorite && result?.recordId) {
-        await setGameFavorite(result.recordId, true).catch(() => {});
-      }
-
-      if (result.added) {
-        added += 1;
-      } else {
-        updated += 1;
-      }
-    } catch (error) {
-      failed += 1;
-      console.error("[cloud.library] Failed to materialize library entry:", {
-        title: entry?.title || "",
-        siteUrl: entry?.siteUrl || "",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return {
-    added,
-    updated,
-    failed,
   };
 }
 
@@ -1173,467 +1105,12 @@ function getF95ResolverSession() {
   return f95ResolverSession;
 }
 
-function getReadyCloudSaveService() {
-  if (!cloudSaveService) {
-    throw new Error("Cloud save service is not initialized yet.");
-  }
-
-  return cloudSaveService;
-}
-
-function queueCloudSaveTask(taskName, task) {
-  cloudSaveQueue = cloudSaveQueue
-    .catch(() => null)
-    .then(async () => {
-      try {
-        return await task();
-      } catch (error) {
-        console.error(`[cloud.sync] ${taskName} failed:`, error);
-        return null;
-      }
-    });
-
-  return cloudSaveQueue;
-}
-
-function broadcastCloudBulkProgress(payload) {
-  for (const windowInstance of [mainWindow, settingsWindow]) {
-    if (!windowInstance || windowInstance.isDestroyed()) {
-      continue;
-    }
-
-    windowInstance.webContents.send("cloud-bulk-progress", payload);
-  }
-}
-
-async function mapWithConcurrency(items, limit, worker) {
-  const list = Array.isArray(items) ? items : [];
-  const concurrency = Math.max(1, Math.min(limit || 1, list.length || 1));
-  let cursor = 0;
-
-  async function runWorker() {
-    while (cursor < list.length) {
-      const index = cursor;
-      cursor += 1;
-      await worker(list[index], index);
-    }
-  }
-
-  await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
-}
-
-async function runBulkCloudSaveAction(mode, options = {}) {
-  if (!databaseConnection) {
-    throw new Error("Database connection is not ready.");
-  }
-
-  const authState = await getReadyCloudSaveService().getAuthState();
-  if (!authState?.authenticated) {
-    throw new Error("Sign in to cloud saves first.");
-  }
-
-  const installedGames = (await getGames(appPaths, 0, null)).filter(
-    (game) =>
-      game?.record_id &&
-      Array.isArray(game?.versions) &&
-      game.versions.length > 0,
-  );
-  const total = installedGames.length;
-  const summary = {
-    mode,
-    total,
-    completed: 0,
-    uploaded: 0,
-    restored: 0,
-    synced: 0,
-    conflicts: 0,
-    skipped: 0,
-    failed: 0,
-    results: [],
-  };
-
-  const emitProgress = options.emitProgress !== false;
-  if (emitProgress) {
-    broadcastCloudBulkProgress({
-      active: true,
-      mode,
-      completed: 0,
-      total,
-      currentTitle: "",
-      summary,
-    });
-  }
-
-  await mapWithConcurrency(installedGames, 3, async (game) => {
-    let result = {
-      recordId: game.record_id,
-      title: game.displayTitle || game.title || "Unknown",
-      outcome: "skipped",
-      message: "",
-    };
-
-    try {
-      if (mode === "upload") {
-        const snapshot = await refreshSaveProfiles(
-          appPaths,
-          databaseConnection,
-          game.record_id,
-        );
-        if (!snapshot?.profiles?.length) {
-          result = {
-            ...result,
-            outcome: "skipped",
-            message: "No save profiles found on this PC.",
-          };
-        } else {
-          await getReadyCloudSaveService().uploadGameSaves({
-            recordId: game.record_id,
-            snapshot,
-          });
-          result = {
-            ...result,
-            outcome: "uploaded",
-            message: "Uploaded local saves to cloud.",
-          };
-        }
-      } else {
-        const reconcileResult =
-          await getReadyCloudSaveService().reconcileGameSaves({
-            recordId: game.record_id,
-          });
-        const action = reconcileResult?.action || "noop";
-        result = {
-          ...result,
-          outcome:
-            action === "upload"
-              ? "uploaded"
-              : action === "restore"
-                ? "restored"
-                : action === "conflict"
-                  ? "conflict"
-                  : "synced",
-          message: reconcileResult?.reason || "",
-        };
-      }
-    } catch (error) {
-      result = {
-        ...result,
-        outcome: "failed",
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
-
-    summary.completed += 1;
-    if (result.outcome === "uploaded") {
-      summary.uploaded += 1;
-    } else if (result.outcome === "restored") {
-      summary.restored += 1;
-    } else if (result.outcome === "conflict") {
-      summary.conflicts += 1;
-    } else if (result.outcome === "failed") {
-      summary.failed += 1;
-    } else if (result.outcome === "synced") {
-      summary.synced += 1;
-    } else {
-      summary.skipped += 1;
-    }
-    summary.results.push(result);
-
-    if (emitProgress) {
-      broadcastCloudBulkProgress({
-        active: summary.completed < total,
-        mode,
-        completed: summary.completed,
-        total,
-        currentTitle: result.title,
-        summary,
-      });
-    }
-  });
-
-  if (emitProgress) {
-    broadcastCloudBulkProgress({
-      active: false,
-      mode,
-      completed: summary.completed,
-      total,
-      currentTitle: "",
-      summary,
-    });
-  }
-
-  return summary;
-}
-
 function scheduleCloudSaveReconcile(recordId, reason) {
-  if (!recordId) {
+  if (!recordId || !saveStorage?.isReady()) {
     return Promise.resolve(null);
   }
 
-  if (saveStorage?.isReady()) {
-    return saveStorage.scheduleReconcile(recordId, reason);
-  }
-
-  return queueCloudSaveTask(
-    `auto reconcile record ${recordId} (${reason})`,
-    async () => {
-      const authState = await getReadyCloudSaveService().getAuthState();
-      if (!authState?.authenticated) {
-        return null;
-      }
-
-      return getReadyCloudSaveService().reconcileGameSaves({
-        recordId,
-      });
-    },
-  );
-}
-
-function scheduleCloudInstalledSavesReconcile(reason) {
-  if (saveStorage?.isReady()) {
-    return saveStorage.scheduleSyncAll(reason);
-  }
-  return queueCloudSaveTask(`auto reconcile library (${reason})`, async () => {
-    return runBulkCloudSaveAction("sync", {
-      emitProgress: false,
-    });
-  });
-}
-
-function normalizeCloudLibraryIdentityKeys(values) {
-  const normalizedKeys = [];
-  const seenKeys = new Set();
-
-  for (const rawValue of Array.isArray(values) ? values : []) {
-    const identityKey = String(rawValue || "").trim();
-    if (!identityKey || seenKeys.has(identityKey)) {
-      continue;
-    }
-
-    seenKeys.add(identityKey);
-    normalizedKeys.push(identityKey);
-  }
-
-  return normalizedKeys;
-}
-
-function normalizeCloudLibrarySyncOptions(options) {
-  return {
-    excludedIdentityKeys: normalizeCloudLibraryIdentityKeys(
-      options?.excludedIdentityKeys,
-    ),
-  };
-}
-
-function getConfiguredCloudProjectKey() {
-  const settings = resolveSupabaseSettings(appConfig);
-  return String(settings.projectRef || settings.url || "")
-    .trim()
-    .toLowerCase();
-}
-
-function buildGameCloudLibraryDeleteRequest(game) {
-  return buildCloudLibraryDeleteRequest({
-    cloudProjectKey: getConfiguredCloudProjectKey(),
-    recordId: game?.record_id || null,
-    atlasId: game?.atlas_id || "",
-    f95Id: game?.f95_id || "",
-    siteUrl: game?.siteUrl || "",
-    title: game?.displayTitle || game?.title || "",
-    creator: game?.displayCreator || game?.creator || "",
-  });
-}
-
-async function processPendingCloudLibraryDeletesNow(reason) {
-  if (!databaseConnection) {
-    throw new Error("Database connection is not ready.");
-  }
-
-  const cloudProjectKey = getConfiguredCloudProjectKey();
-  if (!cloudProjectKey) {
-    return {
-      processed: 0,
-      removed: 0,
-      failed: 0,
-      excludedIdentityKeys: [],
-      pending: 0,
-      reason,
-    };
-  }
-
-  const authState = await getReadyCloudSaveService().getAuthState();
-  if (!authState?.authenticated) {
-    return {
-      processed: 0,
-      removed: 0,
-      failed: 0,
-      excludedIdentityKeys: [],
-      pending: 0,
-      reason,
-    };
-  }
-
-  const pendingRequests = await listPendingCloudLibraryDeleteRequests(
-    databaseConnection,
-    cloudProjectKey,
-  );
-  if (pendingRequests.length === 0) {
-    return {
-      processed: 0,
-      removed: 0,
-      failed: 0,
-      excludedIdentityKeys: [],
-      pending: 0,
-      reason,
-    };
-  }
-
-  const processedExcludedIdentityKeys =
-    collectCloudLibraryDeleteCandidateKeys(pendingRequests);
-
-  try {
-    const result = await getReadyCloudSaveService().removeLibraryCatalogEntries(
-      {
-        targets: pendingRequests,
-      },
-    );
-
-    for (const request of pendingRequests) {
-      await deletePendingCloudLibraryDeleteRequest(
-        databaseConnection,
-        request.requestKey,
-      );
-    }
-
-    console.info("[cloud.library] processed pending deletes", {
-      reason,
-      requests: pendingRequests.length,
-      removed: result?.removedCount ?? 0,
-    });
-
-    return {
-      processed: pendingRequests.length,
-      removed: result?.removedCount ?? 0,
-      failed: 0,
-      excludedIdentityKeys: processedExcludedIdentityKeys,
-      pending: 0,
-      reason,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    for (const request of pendingRequests) {
-      await setPendingCloudLibraryDeleteRequestError(
-        databaseConnection,
-        request.requestKey,
-        errorMessage,
-      ).catch(() => {});
-    }
-
-    console.error("[cloud.library] Pending delete processing failed:", {
-      reason,
-      pending: pendingRequests.length,
-      error: errorMessage,
-    });
-
-    return {
-      processed: 0,
-      removed: 0,
-      failed: pendingRequests.length,
-      excludedIdentityKeys: [],
-      pending: pendingRequests.length,
-      reason,
-      error: errorMessage,
-    };
-  }
-}
-
-async function syncCloudLibraryCatalogNow(reason, options = {}) {
-  const authState = await getReadyCloudSaveService().getAuthState();
-  if (!authState?.authenticated) {
-    throw new Error("Cloud library sync requires a signed-in account.");
-  }
-
-  const pendingDeleteResult = await processPendingCloudLibraryDeletesNow(
-    `${reason}:pre-sync`,
-  );
-
-  const normalizedOptions = normalizeCloudLibrarySyncOptions({
-    ...options,
-    excludedIdentityKeys: normalizeCloudLibraryIdentityKeys([
-      ...(options?.excludedIdentityKeys || []),
-      ...(pendingDeleteResult?.excludedIdentityKeys || []),
-    ]),
-  });
-  const shouldMaterializeRemoteOnly = Boolean(options?.materializeRemoteOnly);
-  const result =
-    await getReadyCloudSaveService().syncLibraryCatalog(normalizedOptions);
-  const materialized = shouldMaterializeRemoteOnly
-    ? await materializeCloudLibraryCatalogEntries(
-        result?.remoteOnlyEntries || [],
-        `cloud-catalog-${reason}`,
-      )
-    : { added: 0, updated: 0, failed: 0 };
-
-  console.info("[cloud.library] catalog sync", {
-    reason,
-    local: result?.localEntries?.length ?? 0,
-    remote: result?.remoteEntries?.length ?? 0,
-    remoteOnly: result?.remoteOnlyEntries?.length ?? 0,
-    excluded: normalizedOptions.excludedIdentityKeys.length,
-    materializedEnabled: shouldMaterializeRemoteOnly,
-    materialized,
-  });
-
-  if (shouldMaterializeRemoteOnly) {
-    broadcastGamesLibrarySynced({ materialized, reason });
-  }
-
-  return {
-    ...result,
-    materialized,
-  };
-}
-
-function scheduleCloudLibraryCatalogSync(reason, options = {}) {
-  const normalizedOptions = normalizeCloudLibrarySyncOptions(options);
-  return queueCloudSaveTask(
-    `sync cloud library catalog (${reason})`,
-    async () => syncCloudLibraryCatalogNow(reason, normalizedOptions),
-  );
-}
-
-async function broadcastCloudAuthState() {
-  let authState = {
-    configured: false,
-    authenticated: false,
-    user: null,
-    error: "",
-    settings: {},
-  };
-
-  try {
-    authState = await getReadyCloudSaveService().getAuthState();
-  } catch (error) {
-    console.error("[cloud.auth] Failed to read auth state:", error);
-    authState = {
-      configured: false,
-      authenticated: false,
-      user: null,
-      error: error instanceof Error ? error.message : String(error),
-      settings: {},
-    };
-  }
-
-  for (const windowInstance of [mainWindow, settingsWindow]) {
-    if (!windowInstance || windowInstance.isDestroyed()) {
-      continue;
-    }
-
-    windowInstance.webContents.send("cloud-auth-changed", authState);
-  }
-
-  return authState;
+  return saveStorage.scheduleReconcile(recordId, reason);
 }
 
 function broadcastGamesLibrarySynced(payload) {
@@ -3457,7 +2934,6 @@ async function persistF95InstalledGame(payload) {
         "post-install-update",
       );
     }
-    scheduleCloudLibraryCatalogSync("post-install-update");
 
     mainWindow?.webContents.send(
       "game-imported",
@@ -3520,9 +2996,6 @@ async function persistF95InstalledGame(payload) {
       );
     });
     scheduleCloudSaveReconcile(importedRecordId, "post-install-import");
-  }
-  if (importedRecordId) {
-    scheduleCloudLibraryCatalogSync("post-install-import");
   }
 
   return importResults;
@@ -4001,13 +3474,6 @@ const defaultConfig = {
   Performance: {
     maxHeapSize: 4096,
   },
-  CloudSync: {
-    enabled: true,
-    projectRef: "jlwxwjgnujkenanohypr",
-    supabaseUrl: "",
-    publishableKey: "sb_publishable_HrdpFN4qdU010h9DNHR7OA_oZBZ1YLw",
-    storageBucket: "atlas-cloud-saves",
-  },
   Notifications: {
     appUpdates: true,
     libraryUpdates: true,
@@ -4028,7 +3494,6 @@ const defaultConfig = {
 
 ipcMain.handle("add-game", async (event, game) => {
   const recordId = await addGame(game);
-  scheduleCloudLibraryCatalogSync("manual-add-game");
   return recordId;
 });
 
@@ -4119,46 +3584,6 @@ ipcMain.handle("delete-game-completely", async (_, recordId) => {
 
 ipcMain.handle("remove-library-game", async (_, payload) => {
   try {
-    const targetRecordId = Number(payload?.recordId);
-    const cloudProjectKey = getConfiguredCloudProjectKey();
-    const gameBeforeRemoval =
-      Number.isInteger(targetRecordId) && targetRecordId > 0
-        ? await getGame(targetRecordId, appPaths).catch((error) => {
-            console.warn(
-              "[library.remove] Could not load game before deletion:",
-              error,
-            );
-            return null;
-          })
-        : null;
-    const pendingCloudDeleteRequest =
-      cloudProjectKey && gameBeforeRemoval
-        ? buildGameCloudLibraryDeleteRequest(gameBeforeRemoval)
-        : null;
-    const hasUnresolvableCloudDelete = Boolean(
-      cloudProjectKey && gameBeforeRemoval && !pendingCloudDeleteRequest,
-    );
-
-    if (pendingCloudDeleteRequest) {
-      try {
-        await queueCloudLibraryDeleteRequest(
-          databaseConnection,
-          pendingCloudDeleteRequest,
-        );
-      } catch (error) {
-        console.error(
-          "[cloud.library] Failed to persist pending cloud delete before local removal:",
-          error,
-        );
-        return {
-          success: false,
-          code: "CLOUD_DELETE_QUEUE_FAILED",
-          error:
-            "Couldn't prepare the account-wide removal, so nothing was deleted.",
-        };
-      }
-    }
-
     const result = await removeLibraryGame(payload || {}, {
       appPaths,
       libraryRoot: getConfiguredLibraryFolder(),
@@ -4169,82 +3594,8 @@ ipcMain.handle("remove-library-game", async (_, payload) => {
       deleteGameCompletely,
     });
 
-    if (!result?.success && pendingCloudDeleteRequest) {
-      await deletePendingCloudLibraryDeleteRequest(
-        databaseConnection,
-        pendingCloudDeleteRequest.requestKey,
-      ).catch((error) => {
-        console.warn(
-          "[cloud.library] Failed to roll back pending delete after local removal failure:",
-          error,
-        );
-      });
-    }
-
     if (result?.success) {
       broadcastGameDeleted(result.recordId);
-
-      if (pendingCloudDeleteRequest) {
-        const cloudAuthState = await getReadyCloudSaveService()
-          .getAuthState()
-          .catch((error) => {
-            console.warn(
-              "[cloud.library] Failed to check auth state after local removal:",
-              error,
-            );
-            return null;
-          });
-
-        if (cloudAuthState?.authenticated) {
-          const cloudRemovalResult = await scheduleCloudLibraryCatalogSync(
-            "post-library-remove",
-            {
-              excludedIdentityKeys:
-                pendingCloudDeleteRequest.candidateIdentityKeys || [],
-            },
-          );
-
-          if (!cloudRemovalResult || cloudRemovalResult.failed > 0) {
-            result.warnings = [
-              ...(Array.isArray(result.warnings) ? result.warnings : []),
-              "The game was removed from this PC, but it's still in your account library for now.",
-            ];
-          }
-        } else {
-          result.warnings = [
-            ...(Array.isArray(result.warnings) ? result.warnings : []),
-            "The game was removed from this PC. It will be removed from your account library after you sign in.",
-          ];
-        }
-
-        if (
-          cloudAuthState?.authenticated &&
-          pendingCloudDeleteRequest.requestKey
-        ) {
-          const remainingPendingDeletes =
-            await listPendingCloudLibraryDeleteRequests(
-              databaseConnection,
-              cloudProjectKey,
-            ).catch(() => []);
-
-          if (
-            remainingPendingDeletes.some(
-              (request) =>
-                request.requestKey === pendingCloudDeleteRequest.requestKey,
-            )
-          ) {
-            result.warnings = [
-              ...(Array.isArray(result.warnings) ? result.warnings : []),
-              "The game was removed from this PC. We'll keep trying to remove it from your account library.",
-            ];
-          }
-        }
-      } else if (hasUnresolvableCloudDelete) {
-        result.warnings = [
-          ...(Array.isArray(result.warnings) ? result.warnings : []),
-          "The game was removed from this PC, but we couldn't match it safely with the copy in your account library.",
-        ];
-      }
     }
 
     return result;
@@ -4551,99 +3902,10 @@ ipcMain.handle("save-settings", async (event, settings) => {
     appConfig = settings;
     writeFileAtomicSync(configPath, ini.stringify(settings));
     trayController.refresh();
-    await broadcastCloudAuthState().catch((error) => {
-      console.error(
-        "[cloud.auth] Failed to refresh auth state after settings save:",
-        error,
-      );
-    });
     return { success: true };
   } catch (err) {
     console.error("Error writing to config.ini:", err);
     return { success: false, error: err.message };
-  }
-});
-
-ipcMain.handle("get-cloud-auth-state", async () => {
-  try {
-    const state = await getReadyCloudSaveService().getAuthState();
-    return {
-      success: true,
-      state,
-    };
-  } catch (error) {
-    console.error("[cloud.auth] Failed to get auth state:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      state: null,
-    };
-  }
-});
-
-ipcMain.handle("sign-in-cloud", async (_, payload) => {
-  try {
-    await getReadyCloudSaveService().signInWithPassword(payload || {});
-    const state = await broadcastCloudAuthState();
-    if (state?.authenticated) {
-      scheduleCloudInstalledSavesReconcile("sign-in");
-      scheduleCloudLibraryCatalogSync("sign-in");
-    }
-    return {
-      success: true,
-      state,
-    };
-  } catch (error) {
-    console.error("[cloud.auth] Sign-in failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      state: null,
-    };
-  }
-});
-
-ipcMain.handle("sign-up-cloud", async (_, payload) => {
-  try {
-    const result = await getReadyCloudSaveService().signUpWithPassword(
-      payload || {},
-    );
-    const state = await broadcastCloudAuthState();
-    if (state?.authenticated) {
-      scheduleCloudInstalledSavesReconcile("sign-up");
-      scheduleCloudLibraryCatalogSync("sign-up");
-    }
-    return {
-      success: true,
-      state,
-      requiresEmailConfirmation: !result?.session,
-    };
-  } catch (error) {
-    console.error("[cloud.auth] Sign-up failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      state: null,
-      requiresEmailConfirmation: false,
-    };
-  }
-});
-
-ipcMain.handle("sign-out-cloud", async () => {
-  try {
-    await getReadyCloudSaveService().signOut();
-    const state = await broadcastCloudAuthState();
-    return {
-      success: true,
-      state,
-    };
-  } catch (error) {
-    console.error("[cloud.auth] Sign-out failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      state: null,
-    };
   }
 });
 
@@ -4697,100 +3959,6 @@ ipcMain.handle("refresh-save-profiles", async (_, recordId) => {
       success: false,
       error: error instanceof Error ? error.message : String(error),
       snapshot: null,
-    };
-  }
-});
-
-ipcMain.handle("upload-cloud-saves", async (_, recordId) => {
-  try {
-    const result = await getReadyCloudSaveService().uploadGameSaves({
-      recordId,
-    });
-    return {
-      success: true,
-      result,
-    };
-  } catch (error) {
-    console.error("[cloud.sync] Upload failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      result: null,
-    };
-  }
-});
-
-ipcMain.handle("restore-cloud-saves", async (_, recordId) => {
-  try {
-    const result = await getReadyCloudSaveService().restoreGameSaves({
-      recordId,
-    });
-    return {
-      success: true,
-      result,
-    };
-  } catch (error) {
-    console.error("[cloud.sync] Restore failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      result: null,
-    };
-  }
-});
-
-ipcMain.handle("run-bulk-cloud-save-action", async (_, mode) => {
-  try {
-    const normalizedMode = mode === "upload" ? "upload" : "sync";
-    const result = await runBulkCloudSaveAction(normalizedMode, {
-      emitProgress: true,
-    });
-    return {
-      success: true,
-      result,
-    };
-  } catch (error) {
-    console.error("[cloud.sync] Bulk action failed:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      result: null,
-    };
-  }
-});
-
-ipcMain.handle("get-cloud-library-catalog", async () => {
-  try {
-    const result = await getReadyCloudSaveService().getCloudLibraryCatalog();
-    return {
-      success: true,
-      result,
-    };
-  } catch (error) {
-    console.error("[cloud.library] Failed to load cloud catalog:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      result: null,
-    };
-  }
-});
-
-ipcMain.handle("sync-cloud-library-catalog", async () => {
-  try {
-    const result = await syncCloudLibraryCatalogNow("manual-panel-sync", {
-      materializeRemoteOnly: true,
-    });
-    return {
-      success: true,
-      result,
-    };
-  } catch (error) {
-    console.error("[cloud.library] Failed to sync cloud catalog:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-      result: null,
     };
   }
 });
@@ -6429,9 +5597,6 @@ const importGamesInternal = async (params) => {
     total,
   });
   mainWindow.webContents.send("import-complete");
-  if (results.some((result) => result.success)) {
-    scheduleCloudLibraryCatalogSync("post-import-batch");
-  }
 
   // Phase 2: Image downloads
   if (downloadBannerImages || downloadPreviewImages) {
@@ -6998,10 +6163,6 @@ function loadConfig() {
       Performance: {
         ...defaultConfig.Performance,
         ...(appConfig?.Performance || {}),
-      },
-      CloudSync: {
-        ...defaultConfig.CloudSync,
-        ...(appConfig?.CloudSync || {}),
       },
       Notifications: {
         ...defaultConfig.Notifications,
@@ -7770,22 +6931,6 @@ app.whenReady().then(async () => {
   }
   loadConfig();
   databaseConnection = await initializeDatabase(appPaths);
-  cloudSaveService = createCloudSaveService({
-    appPaths,
-    getConfig: () => appConfig,
-    getSaveProfileSnapshot: (recordId) =>
-      getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
-    refreshSaveProfiles: (recordId) =>
-      refreshSaveProfiles(appPaths, databaseConnection, recordId),
-    listGames: () => getGames(appPaths, 0, null),
-    upsertSaveSyncState: (input) =>
-      upsertSaveSyncState(databaseConnection, input),
-  });
-  cloudSaveService.onAuthStateChange(() => {
-    broadcastCloudAuthState().catch((error) => {
-      console.error("[cloud.auth] Failed to broadcast auth state:", error);
-    });
-  });
   hydrateF95DownloadsStore();
   saveStorage?.start().catch((error) => {
     console.error("[save.storage] Failed to start save storage:", error);
@@ -7818,16 +6963,6 @@ app.whenReady().then(async () => {
         console.warn("[library.size] Folder-size backfill failed:", error);
       });
   }, 1200);
-  const initialCloudAuthState = await broadcastCloudAuthState().catch(
-    (error) => {
-      console.error("[cloud.auth] Failed to initialize auth state:", error);
-      return null;
-    },
-  );
-  if (initialCloudAuthState?.authenticated) {
-    scheduleCloudInstalledSavesReconcile("startup");
-    scheduleCloudLibraryCatalogSync("startup");
-  }
   broadcastF95AuthState().catch((error) => {
     console.error("[f95.auth] Failed to initialize auth state:", error);
   });

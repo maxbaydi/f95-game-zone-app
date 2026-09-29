@@ -17,7 +17,7 @@ const SETTINGS_PAGES = [
     label: "Save storage",
     icon: "cloud_sync",
     description:
-      "Keep your saves in your own cloud (OneDrive, Dropbox, Google Drive, a WebDAV server or an S3 bucket) and get them back on any PC.",
+      "Keep your saves in your own cloud (OneDrive, Dropbox, Google Drive, a WebDAV server, an S3 bucket or your own Supabase project) and get them back on any PC.",
   },
   {
     id: "notifications",

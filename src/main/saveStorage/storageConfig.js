@@ -39,6 +39,10 @@ const CONNECTION_SHAPES = {
     settings: ["endpoint", "region", "bucket", "prefix", "forcePathStyle", "accessKeyId", "label"],
     secrets: ["secretAccessKey"],
   },
+  [SAVE_STORAGE_TYPES.SUPABASE]: {
+    settings: ["url", "bucket", "prefix", "label"],
+    secrets: ["key"],
+  },
 };
 
 /**
@@ -344,6 +348,8 @@ function describeConnection(connection) {
       return settings.label ? `${settings.label} · ${settings.url}` : String(settings.url || "");
     case SAVE_STORAGE_TYPES.S3:
       return `${settings.bucket || ""} @ ${String(settings.endpoint || "").replace(/^https?:\/\//, "")}`;
+    case SAVE_STORAGE_TYPES.SUPABASE:
+      return `Supabase · ${settings.bucket || "f95launcher-saves"} @ ${String(settings.url || "").replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
     default:
       return connection.type;
   }

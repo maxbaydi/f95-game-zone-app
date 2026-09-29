@@ -13,7 +13,8 @@
  * The sync engine (saveStorageSync.js) never touches transport details, so
  * a synced folder (Dropbox, OneDrive, Google Drive, Yandex.Disk, Syncthing
  * ...), a WebDAV server (Nextcloud, ownCloud, Yandex, Box, pCloud ...) and an
- * S3 bucket (Backblaze B2, Cloudflare R2, Wasabi, MinIO, AWS) behave alike.
+ * S3 bucket (Backblaze B2, Cloudflare R2, Wasabi, MinIO, AWS) and a bucket in
+ * the user's own Supabase project behave alike.
  */
 
 const fs = require("fs");
@@ -24,6 +25,7 @@ const SAVE_STORAGE_TYPES = /** @type {const} */ ({
   FOLDER: "folder",
   WEBDAV: "webdav",
   S3: "s3",
+  SUPABASE: "supabase",
 });
 
 /**
@@ -623,6 +625,259 @@ function createS3Provider(settings) {
   };
 }
 
+
+// ─── Supabase Storage (the user's own project) ───────────────────────────
+
+const SUPABASE_DEFAULT_BUCKET = "f95launcher-saves";
+
+/**
+ * @param {string} value
+ */
+function supabaseEncodePath(value) {
+  return value.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+/**
+ * Storage bucket in a Supabase project the user owns, through the Storage
+ * REST API (no SDK). The key is either the project's `service_role` secret
+ * (full access, the simplest choice for a private personal project) or a
+ * publishable/anon key together with storage policies that allow it.
+ * A missing bucket is created on first use when the key allows it.
+ *
+ * @param {{
+ *   url: string,
+ *   key: string,
+ *   bucket?: string,
+ *   prefix?: string,
+ *   label?: string,
+ *   fetchImpl?: typeof fetch,
+ * }} settings
+ * @returns {SaveStorageProvider}
+ */
+function createSupabaseProvider(settings) {
+  const projectUrlRaw = String(settings.url || "").trim().replace(/\/+$/, "");
+  const key = String(settings.key || "").trim();
+  const bucket = String(settings.bucket || "").trim() || SUPABASE_DEFAULT_BUCKET;
+  if (!/^https?:\/\//i.test(projectUrlRaw) || !key) {
+    throw new SaveStorageError("The project URL and an API key are required.", { code: "invalid_config" });
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{0,99}$/i.test(bucket)) {
+    throw new SaveStorageError("The bucket name may only contain letters, digits, dots, dashes and underscores.", { code: "invalid_config" });
+  }
+  const projectUrl = new URL(projectUrlRaw);
+  const storageBase = `${projectUrl.origin}${projectUrl.pathname.replace(/\/+$/, "")}/storage/v1`;
+  const keyPrefix = settings.prefix ? normalizeStoragePath(settings.prefix) : "";
+  const fetchImpl = settings.fetchImpl || fetch;
+  let bucketEnsured = false;
+
+  const objectKey = (relativePath) => {
+    const normalized = relativePath ? normalizeStoragePath(relativePath) : "";
+    return keyPrefix ? (normalized ? `${keyPrefix}/${normalized}` : keyPrefix) : normalized;
+  };
+
+  const request = async (method, pathname, options = {}) => {
+    const headers = {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      ...(options.headers || {}),
+    };
+    let response;
+    try {
+      response = await fetchImpl(`${storageBase}${pathname}`, {
+        method,
+        headers,
+        body: options.body,
+      });
+    } catch (error) {
+      throw new SaveStorageError("The Supabase project could not be reached. Check the project URL and your connection.", { code: "network", cause: error });
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new SaveStorageError(
+        "Supabase rejected the key. Use the project's service_role key, or add storage policies that let this key read and write the bucket.",
+        { code: "auth_failed", status: response.status },
+      );
+    }
+    return response;
+  };
+
+  /** @param {Response} response */
+  const readErrorBody = async (response) => {
+    try {
+      const text = await response.text();
+      try {
+        const parsed = JSON.parse(text);
+        return {
+          message: String(parsed?.message || parsed?.error || text || ""),
+          code: String(parsed?.statusCode || parsed?.error || ""),
+        };
+      } catch {
+        return { message: text, code: "" };
+      }
+    } catch {
+      return { message: "", code: "" };
+    }
+  };
+
+  const isBucketMissing = (error) => /bucket not found/i.test(String(error?.message || "")) || /bucket_not_found/i.test(String(error?.code || ""));
+  const isObjectMissing = (status, error) =>
+    status === 404 || /not.?found/i.test(String(error?.code || "")) || /object not found/i.test(String(error?.message || ""));
+
+  const describeFailure = (action, status, error) =>
+    new SaveStorageError(`${action} failed in the Supabase project (HTTP ${status}${error?.message ? `: ${error.message}` : ""}).`, {
+      code: status === 404 ? "not_found" : status === 507 || /exceeded|quota/i.test(String(error?.message || "")) ? "disk_full" : "storage_failed",
+      status,
+    });
+
+  const ensureBucket = async () => {
+    if (bucketEnsured) {
+      return;
+    }
+    const probe = await request("GET", `/bucket/${encodeURIComponent(bucket)}`);
+    if (probe.ok) {
+      bucketEnsured = true;
+      return;
+    }
+    const probeError = await readErrorBody(probe);
+    if (probe.status !== 404 && !isBucketMissing(probeError)) {
+      // Anon keys usually cannot read bucket metadata; the object calls decide.
+      bucketEnsured = probe.status === 400;
+      return;
+    }
+    const created = await request("POST", "/bucket", {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: bucket, name: bucket, public: false }),
+    });
+    if (!created.ok) {
+      const error = await readErrorBody(created);
+      if (!/already exists|duplicate/i.test(error.message)) {
+        throw new SaveStorageError(
+          `The bucket "${bucket}" does not exist and could not be created (${error.message || `HTTP ${created.status}`}). Create it in the Supabase dashboard or use the service_role key.`,
+          { code: "bucket_missing", status: created.status },
+        );
+      }
+    }
+    bucketEnsured = true;
+  };
+
+  /**
+   * One level of the bucket, as the Storage API lists it (folders have no id).
+   * @param {string} folder
+   */
+  const listFolder = async (folder) => {
+    /** @type {Array<{ name: string, id: string | null, size: number, mtimeMs: number }>} */
+    const items = [];
+    const pageSize = 1000;
+    let offset = 0;
+    for (;;) {
+      const response = await request("POST", `/object/list/${encodeURIComponent(bucket)}`, {
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prefix: folder, limit: pageSize, offset, sortBy: { column: "name", order: "asc" } }),
+      });
+      if (!response.ok) {
+        const error = await readErrorBody(response);
+        if (isBucketMissing(error)) {
+          return items;
+        }
+        throw describeFailure("Listing", response.status, error);
+      }
+      const page = /** @type {any[]} */ (await response.json().catch(() => []));
+      for (const entry of Array.isArray(page) ? page : []) {
+        const name = String(entry?.name || "");
+        if (!name || name === ".emptyFolderPlaceholder") {
+          continue;
+        }
+        items.push({
+          name,
+          id: entry?.id ? String(entry.id) : null,
+          size: Number(entry?.metadata?.size || entry?.metadata?.contentLength || 0) || 0,
+          mtimeMs: Date.parse(entry?.updated_at || entry?.created_at || "") || 0,
+        });
+      }
+      if (!Array.isArray(page) || page.length < pageSize) {
+        return items;
+      }
+      offset += pageSize;
+    }
+  };
+
+  return {
+    kind: SAVE_STORAGE_TYPES.SUPABASE,
+    label: settings.label || `${bucket} @ ${projectUrl.host}`,
+    async list(prefix = "") {
+      /** @type {StorageEntry[]} */
+      const entries = [];
+      const start = objectKey(prefix);
+      const walk = async (folder) => {
+        for (const item of await listFolder(folder)) {
+          const fullPath = folder ? `${folder}/${item.name}` : item.name;
+          if (item.id === null) {
+            await walk(fullPath);
+            continue;
+          }
+          entries.push({
+            path: keyPrefix ? fullPath.slice(keyPrefix.length + 1) : fullPath,
+            size: item.size,
+            mtimeMs: item.mtimeMs,
+          });
+        }
+      };
+      await walk(start);
+      return entries;
+    },
+    async read(relativePath) {
+      const response = await request("GET", `/object/${encodeURIComponent(bucket)}/${supabaseEncodePath(objectKey(relativePath))}`);
+      if (response.ok) {
+        return Buffer.from(await response.arrayBuffer());
+      }
+      const error = await readErrorBody(response);
+      if (isObjectMissing(response.status, error) || isBucketMissing(error)) {
+        return null;
+      }
+      throw describeFailure("Download", response.status, error);
+    },
+    async write(relativePath, data) {
+      await ensureBucket();
+      const response = await request("POST", `/object/${encodeURIComponent(bucket)}/${supabaseEncodePath(objectKey(relativePath))}`, {
+        body: data,
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-upsert": "true",
+          "cache-control": "no-cache",
+        },
+      });
+      if (!response.ok) {
+        throw describeFailure("Upload", response.status, await readErrorBody(response));
+      }
+    },
+    async remove(relativePath) {
+      const response = await request("DELETE", `/object/${encodeURIComponent(bucket)}/${supabaseEncodePath(objectKey(relativePath))}`);
+      if (response.ok) {
+        return;
+      }
+      const error = await readErrorBody(response);
+      if (isObjectMissing(response.status, error) || isBucketMissing(error)) {
+        return;
+      }
+      throw describeFailure("Delete", response.status, error);
+    },
+    async test() {
+      try {
+        const probe = `.f95launcher-write-test-${Date.now()}.txt`;
+        await this.write(probe, Buffer.from("ok"));
+        const back = await this.read(probe);
+        await this.remove(probe);
+        if (!back || back.toString() !== "ok") {
+          return { ok: false, message: "The bucket accepted the upload but returned different content." };
+        }
+        return { ok: true, message: `Connected to bucket ${bucket} in ${projectUrl.host}.`, details: { bucket, host: projectUrl.host } };
+      } catch (error) {
+        const anyError = /** @type {any} */ (error);
+        return { ok: false, message: anyError?.message || String(error), details: { code: anyError?.code || "" } };
+      }
+    },
+  };
+}
+
 /**
  * @param {{ type: string, settings: Record<string, any>, secrets?: Record<string, any> }} connection
  * @returns {SaveStorageProvider}
@@ -636,6 +891,8 @@ function createSaveStorageProvider(connection) {
       return createWebDavProvider(settings);
     case SAVE_STORAGE_TYPES.S3:
       return createS3Provider(settings);
+    case SAVE_STORAGE_TYPES.SUPABASE:
+      return createSupabaseProvider(settings);
     default:
       throw new SaveStorageError(`Unknown storage type: ${connection?.type}`, { code: "invalid_config" });
   }
@@ -643,10 +900,12 @@ function createSaveStorageProvider(connection) {
 
 module.exports = {
   SAVE_STORAGE_TYPES,
+  SUPABASE_DEFAULT_BUCKET,
   SaveStorageError,
   createFolderProvider,
   createS3Provider,
   createSaveStorageProvider,
+  createSupabaseProvider,
   createWebDavProvider,
   normalizeStoragePath,
   parseWebDavMultistatus,
