@@ -4810,3 +4810,31 @@ What was done:
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm test` 498 pass / 0 fail.
 
 Release path: pushing to `main` triggers `.github/workflows/main.yml`, which builds the packages and publishes `v1.5.0`.
+
+## 2026-09-29 — Install recovery, engine detection, file-based save transfer, reliable library reset
+
+What was done:
+
+- unpacking rewritten as a tool chain (bundled 7-Zip → node-unrar-js in a worker → PowerShell → adm-zip → system 7-Zip/WinRAR) with `ArchiveError` codes; RAR no longer needs an external `unrar`; tar/gz/bz2/xz/cab added; passwords, split volumes, locked files handled
+- a failed install keeps the downloaded package; Downloads panel gained Retry install, password prompt, Install from folder; downloads list persisted across restarts; nested archives unwrapped; staging verified before the install folder is touched
+- `detectGameEngine` (Ren'Py, RPGM MV/MZ/VX/XP/2003, Unity, Unreal, Godot, Wolf, KiriKiri, GameMaker, Tyrano, HTML/Twine/NW.js/Electron, Flash, Java, QSP/RAGS) drives the engine label and the launcher pick
+- per-game Export/Import of saves as zip, Export all saves to folder; save locations for Documents/My Games, Saved Games, Flash SharedObjects, GameMaker, KiriKiri, Wolf RPG, RPG Maker 2000/2003; paused Supabase explained instead of failing silently
+- Scan Hub exposes Refresh / Reset cache & rescan / Rebuild; the Rescan button no longer passes a click event over IPC; rebuild purges all image folders; renderer and live checker reset; partial source failures reported as warnings
+
+Checks (real output): `npm run lint` clean, `npm run check:jsx` clean, `npm run typecheck` clean, `npm test` 526 pass / 7 fail — the 7 (`appPaths`, `libraryCleanup`, `libraryDuplicates`, `libraryVersionRepair`, `libraryMaintenanceIpc`) fail identically on the previous commit: Windows path fixtures on Linux.
+
+Docs: `docs/install-recovery.md`, `docs/save-transfer.md`, updated `library-rescan-modes.md`, `mirror-manual-install.md`, README.
+
+## 2026-09-29 — User-owned save storage and release 1.6.0
+
+What was done:
+
+- the hosted Supabase cloud is retired as the default: saves sync into storage the user owns through one provider interface — a folder kept in sync by a desktop cloud client (OneDrive, Dropbox, Google Drive, Yandex.Disk, iCloud, MEGA, pCloud, Nextcloud, ownCloud, Box, Proton Drive detected and offered as one-click cards), a WebDAV server or an S3-compatible bucket (SigV4 without the AWS SDK)
+- sync engine on the file export format and the vault identity: `latest.zip` + manifest per game, five history archives, `catalog.json` for reconnects, optional AES-256-GCM encryption with a passphrase verified through the storage marker, `contentHash` in manifests so identical saves on two PCs are not re-uploaded
+- automatic reconcile on startup, after installs, after connect/unlock and after playing (save folders watched once a game is launched); secrets in one `safeStorage`-encrypted file; one connection at a time; portable connection card
+- UI: onboarding step "Saves", Settings → Save storage, game panel "Back up to <cloud>" / "Restore from <cloud>", Supabase kept as "advanced: own project"
+- bumped the app to 1.6.0
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests).
+
+Release path: pushing to `main` triggers `.github/workflows/main.yml`, which builds the packages and publishes `v1.6.0`; installed 1.3+ apps pick it up through electron-updater.

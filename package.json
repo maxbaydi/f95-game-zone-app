@@ -1,6 +1,6 @@
 {
   "name": "f95launcher",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
@@ -24,6 +24,7 @@
     "check:mirrors:app": "electron scripts/check-mirrors-electron.js",
     "typecheck": "tsc --project tsconfig.typecheck.json --noEmit",
     "check:jsx": "node scripts/check-jsx.js",
+    "screenshots": "node scripts/screenshots.js",
     "test": "node --test \"test/*.test.js\"",
     "ci:check": "npm run build:css && npm run lint && npm run check:jsx && npm run typecheck && npm run test"
   },
