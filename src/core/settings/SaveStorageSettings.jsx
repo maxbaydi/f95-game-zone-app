@@ -1,8 +1,9 @@
 /**
  * "Save storage": the user's own cloud for saves. One connection at a time:
  * a folder synced by a desktop cloud client (zero credentials), a WebDAV
- * server or an S3 bucket. Everything here is optional; local saves, the
- * vault and file export keep working without it.
+ * server, an S3 bucket or a bucket in the user's own Supabase project.
+ * Everything here is optional; local saves, the vault and file export keep
+ * working without it.
  *
  * Also exports SaveStorageQuickSetup, the trimmed version used by the first
  * launch assistant.
@@ -12,6 +13,7 @@ const SAVE_STORAGE_TYPE_META = {
   folder: { icon: "cloud_sync", label: "Synced folder" },
   webdav: { icon: "dns", label: "WebDAV server" },
   s3: { icon: "database", label: "S3 bucket" },
+  supabase: { icon: "deployed_code", label: "Supabase project" },
 };
 
 const saveStorageApi = () => window.electronAPI || {};
@@ -153,6 +155,7 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
   const [cardFilePath, setCardFilePath] = React.useState("");
   const [webdav, setWebdav] = React.useState({ url: "", username: "", password: "" });
   const [s3, setS3] = React.useState({ endpoint: "", region: "auto", bucket: "", prefix: "f95launcher-saves", accessKeyId: "", secretAccessKey: "" });
+  const [supabase, setSupabase] = React.useState({ url: "", key: "", bucket: "f95launcher-saves", prefix: "" });
   const [testResult, setTestResult] = React.useState(null);
 
   React.useEffect(() => {
@@ -369,6 +372,9 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
             <window.SettingsButton icon="database" variant={mode === "s3" ? "primary" : "secondary"} disabled={Boolean(busy)} onClick={() => setMode(mode === "s3" ? "pick" : "s3")}>
               S3 bucket
             </window.SettingsButton>
+            <window.SettingsButton icon="deployed_code" variant={mode === "supabase" ? "primary" : "secondary"} disabled={Boolean(busy)} onClick={() => setMode(mode === "supabase" ? "pick" : "supabase")}>
+              Supabase project
+            </window.SettingsButton>
           </>
         )}
       </div>
@@ -442,6 +448,43 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
               Test connection
             </window.SettingsButton>
             <window.SettingsButton variant="primary" icon="link" busy={busy === "s3"} disabled={Boolean(busy)} type="submit">
+              Connect
+            </window.SettingsButton>
+          </div>
+        </form>
+      )}
+
+      {mode === "supabase" && (
+        <form
+          className="space-y-3 border border-border bg-black/15 p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            connect(connectionPayload("supabase", supabase), "supabase");
+          }}
+        >
+          <div className="text-sm font-medium text-text">Your own Supabase project</div>
+          <div className="text-xs text-text/55">
+            A free project at supabase.com is enough. Open the project, go to Settings → API, and copy the project URL and the <span className="font-medium text-text/80">service_role</span> key (it stays on this PC, encrypted). The bucket is created for you on first use. Free projects pause after a week without traffic; the launcher wakes them up the next time it syncs.
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SaveStorageField label="Project URL">
+              <SaveStorageInput value={supabase.url} onChange={(event) => setSupabase({ ...supabase, url: event.target.value })} placeholder="https://xxxxxxxx.supabase.co" />
+            </SaveStorageField>
+            <SaveStorageField label="API key" hint="service_role for a private project, or a publishable key with storage policies">
+              <SaveStorageInput type="password" value={supabase.key} onChange={(event) => setSupabase({ ...supabase, key: event.target.value })} autoComplete="off" />
+            </SaveStorageField>
+            <SaveStorageField label="Bucket">
+              <SaveStorageInput value={supabase.bucket} onChange={(event) => setSupabase({ ...supabase, bucket: event.target.value })} placeholder="f95launcher-saves" />
+            </SaveStorageField>
+            <SaveStorageField label="Folder inside the bucket" hint="optional">
+              <SaveStorageInput value={supabase.prefix} onChange={(event) => setSupabase({ ...supabase, prefix: event.target.value })} />
+            </SaveStorageField>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <window.SettingsButton icon="network_check" busy={busy === "test"} disabled={Boolean(busy) || !supabase.url || !supabase.key} onClick={() => testRemote("supabase", supabase)}>
+              Test connection
+            </window.SettingsButton>
+            <window.SettingsButton variant="primary" icon="link" busy={busy === "supabase"} disabled={Boolean(busy) || !supabase.url || !supabase.key} type="submit">
               Connect
             </window.SettingsButton>
           </div>
@@ -552,7 +595,6 @@ const SaveStorageSettings = () => {
   const [cardPassphrase, setCardPassphrase] = React.useState("");
   const [showCardExport, setShowCardExport] = React.useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = React.useState(false);
-  const [showLegacy, setShowLegacy] = React.useState(false);
   const [progress, setProgress] = React.useState(null);
 
   React.useEffect(() => {
@@ -736,18 +778,9 @@ const SaveStorageSettings = () => {
         description="Every game's saves are packed into one zip with a manifest. After each install, after you play, and on every start the app compares your PC with the storage and copies the newer side. Before anything is overwritten the previous saves go to the local vault."
       >
         <window.SettingRow
-          title="Advanced: your own Supabase project"
-          description="The older account-based cloud. Only for people who host their own Supabase project; the public one is no longer maintained."
-        >
-          <window.SettingsButton icon={showLegacy ? "expand_less" : "expand_more"} onClick={() => setShowLegacy((previous) => !previous)}>
-            {showLegacy ? "Hide" : "Show"}
-          </window.SettingsButton>
-        </window.SettingRow>
-        {showLegacy && window.CloudAuthPanel && (
-          <div className="border-t border-border/60">
-            <window.CloudAuthPanel layout="panel" />
-          </div>
-        )}
+          title="F95Launcher runs no servers"
+          description="Your saves only ever go to the place you connected: a folder your cloud client syncs, your WebDAV server, your S3 bucket or your own Supabase project. Disconnecting leaves the files where they are."
+        />
       </window.SettingsCard>
     </div>
   );

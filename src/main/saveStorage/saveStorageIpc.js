@@ -108,7 +108,6 @@ function createSaveStorageController(deps) {
       encryptionEnabled: Boolean(connection?.encryption?.enabled),
       secretsEncrypted: secrets.isEncrypted,
       deviceName,
-      legacyCloudConfigured: Boolean(deps.getConfig()?.CloudSync?.publishableKey),
     };
   }
 
@@ -127,6 +126,9 @@ function createSaveStorageController(deps) {
     }
     if (type === SAVE_STORAGE_TYPES.S3 && (!split.settings.endpoint || !split.settings.bucket || !split.settings.accessKeyId || !split.secrets.secretAccessKey)) {
       throw new Error("Endpoint, bucket, access key and secret key are all required.");
+    }
+    if (type === SAVE_STORAGE_TYPES.SUPABASE && (!split.settings.url || !split.secrets.key)) {
+      throw new Error("The Supabase project URL and an API key are required.");
     }
     const passphrase = String(payload?.passphrase || "");
     return {

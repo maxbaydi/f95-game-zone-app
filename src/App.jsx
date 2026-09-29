@@ -89,14 +89,6 @@ const createDefaultDeleteGameModalState = () => ({
   saveProfiles: [],
 });
 
-const createDefaultHeaderCloudAuthState = () => ({
-  configured: false,
-  authenticated: false,
-  user: null,
-  error: "",
-  settings: {},
-});
-
 const getRendererErrorMessage = (error, fallbackMessage) => {
   if (typeof error === "string" && error.trim()) {
     return error.trim();
@@ -707,10 +699,8 @@ const App = () => {
     createDefaultDeleteGameModalState,
   );
   const [defaultGameFolder, setDefaultGameFolder] = useState("");
-  const [cloudAuthState, setCloudAuthState] = useState(
-    createDefaultHeaderCloudAuthState,
-  );
-  const [isCloudAuthOpen, setIsCloudAuthOpen] = useState(false);
+  const saveStorageHeader = (window.useSaveStorageState || (() => ({ state: null })))();
+  const saveStorageHeaderState = saveStorageHeader?.state || null;
   const gridRef = useRef(null);
   const gameGridRef = useRef(null);
   const resizeGridFrameRef = useRef(null);
@@ -2978,58 +2968,6 @@ const App = () => {
     };
   }, [scheduleGridResizeSync]);
 
-  useEffect(() => {
-    let mounted = true;
-
-    const applyCloudAuthState = (state) => {
-      if (!mounted) {
-        return;
-      }
-
-      setCloudAuthState(state || createDefaultHeaderCloudAuthState());
-    };
-
-    window.electronAPI
-      .getCloudAuthState()
-      .then((result) => {
-        if (!mounted) {
-          return;
-        }
-
-        if (result?.success && result.state) {
-          applyCloudAuthState(result.state);
-          return;
-        }
-
-        applyCloudAuthState({
-          ...createDefaultHeaderCloudAuthState(),
-          error: getRendererErrorMessage(result?.error, ""),
-        });
-      })
-      .catch((error) => {
-        console.error("Failed to load cloud auth state:", error);
-        applyCloudAuthState({
-          ...createDefaultHeaderCloudAuthState(),
-          error: getRendererErrorMessage(error, ""),
-        });
-      });
-
-    const unsubscribe = subscribeElectronEvent(
-      "onCloudAuthChanged",
-      "cloud-auth-changed",
-      (state) => {
-        applyCloudAuthState(state);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
-      }
-    };
-  }, []);
-
   const addGame = async () => {
     window.electronAPI.openImporter();
   };
@@ -3425,15 +3363,24 @@ const App = () => {
 
   const canCancelLibraryScan =
     isLibraryScanRunning && /scan/i.test(importProgress.text || "");
-  const cloudAuthButtonTitle = cloudAuthState.authenticated
-    ? `Cloud saves connected as ${cloudAuthState.user?.email || "your account"}`
-    : cloudAuthState.configured
-      ? "Sign in to cloud saves"
-      : "Cloud saves unavailable";
-  const cloudAuthButtonIcon = cloudAuthState.authenticated
-    ? "cloud_done"
-    : cloudAuthState.configured
-      ? "cloud"
+  const saveStorageReady = Boolean(
+    saveStorageHeaderState?.connected && !saveStorageHeaderState?.locked,
+  );
+  const saveStorageButtonTitle = saveStorageReady
+    ? `Saves sync to ${saveStorageHeaderState.label || "your storage"}${
+        saveStorageHeaderState.lastError ? ` · ${saveStorageHeaderState.lastError}` : ""
+      }`
+    : saveStorageHeaderState?.locked
+      ? "Save storage is locked: enter the passphrase in Settings"
+      : "Set up save storage (OneDrive, Dropbox, Google Drive, WebDAV, S3, Supabase)";
+  const saveStorageButtonIcon = saveStorageReady
+    ? saveStorageHeaderState.lastError
+      ? "cloud_alert"
+      : saveStorageHeaderState.busy
+        ? "cloud_sync"
+        : "cloud_done"
+    : saveStorageHeaderState?.locked
+      ? "lock"
       : "cloud_off";
 
   useEffect(() => {
@@ -4293,22 +4240,24 @@ const App = () => {
           <div className="absolute right-2 top-0 z-20 flex h-full items-center [-webkit-app-region:no-drag] gap-0.5">
             <button
               type="button"
-              title={cloudAuthButtonTitle}
-              aria-label={cloudAuthButtonTitle}
-              onClick={() => setIsCloudAuthOpen(true)}
+              title={saveStorageButtonTitle}
+              aria-label={saveStorageButtonTitle}
+              onClick={() => openSettingsPage("saves")}
               className={`mr-1 flex h-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border text-text transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
-                cloudAuthState.authenticated
+                saveStorageReady && !saveStorageHeaderState.lastError
                   ? "border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20"
-                  : cloudAuthState.configured
-                    ? "border-accent/35 bg-accent/10 hover:bg-accent/20"
+                  : saveStorageReady || saveStorageHeaderState?.locked
+                    ? "border-amber-400/35 bg-amber-500/10 hover:bg-amber-500/20"
                     : "border-border bg-white/5 hover:bg-white/10"
               }`}
             >
               <span
-                key={cloudAuthButtonIcon}
-                className="material-symbols-outlined atlas-pop text-[20px] leading-none"
+                key={saveStorageButtonIcon}
+                className={`material-symbols-outlined atlas-pop text-[20px] leading-none ${
+                  saveStorageHeaderState?.busy ? "animate-pulse atlas-keep-motion" : ""
+                }`}
               >
-                {cloudAuthButtonIcon}
+                {saveStorageButtonIcon}
               </span>
             </button>
             <button
@@ -4482,7 +4431,6 @@ const App = () => {
                   onToggleFavorite={toggleGameFavorite}
                   onRemoveGame={openDeleteGameModal}
                   onPreviewSelect={setPreviewModalIndex}
-                  onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
                   onOpenSaveStorage={() => openSettingsPage("saves")}
                   onLocateVersion={handleLocateVersion}
                   onGameChanged={applyUpdatedGameToState}
@@ -4528,14 +4476,6 @@ const App = () => {
           isOpen={onboarding.isOpen}
           initialStep={onboarding.step}
           onFinish={finishOnboarding}
-        />
-      </AppSafe>
-
-      <AppSafe name="cloud-auth" variant="silent">
-        <window.CloudAuthPanel
-          layout="modal"
-          isOpen={isCloudAuthOpen}
-          onClose={() => setIsCloudAuthOpen(false)}
         />
       </AppSafe>
 

@@ -490,7 +490,6 @@ const LibraryDetailsPanel = ({
   onToggleFavorite,
   onRemoveGame,
   onPreviewSelect,
-  onOpenCloudAuth,
   onOpenSaveStorage,
   onLocateVersion,
   onGameChanged,
@@ -1294,7 +1293,6 @@ const LibraryDetailsPanel = ({
 
                 <window.LibrarySaveSyncPanel
                   game={game}
-                  onOpenCloudAuth={onOpenCloudAuth}
                   onOpenSaveStorage={onOpenSaveStorage}
                 />
 
