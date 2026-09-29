@@ -57,3 +57,41 @@ test("app updater controller reports dev-mode release availability through GitHu
     "https://github.com/towerwatchman/Atlas/releases/tag/v1.2.0",
   );
 });
+
+test("app updater downloads a found update by itself when auto-download is on", async () => {
+  const handlers = {};
+  let downloads = 0;
+  const autoUpdaterInstance = {
+    autoDownload: true,
+    autoInstallOnAppQuit: false,
+    on(event, handler) {
+      handlers[event] = handler;
+      return this;
+    },
+    async checkForUpdates() {
+      handlers["update-available"]({ version: "2.0.0" });
+    },
+    async downloadUpdate() {
+      downloads += 1;
+    },
+  };
+  let autoDownload = true;
+  const controller = createAppUpdaterController({
+    app: { getVersion: () => "1.0.0", isPackaged: true },
+    autoUpdaterInstance,
+    getAutoDownload: () => autoDownload,
+  });
+
+  await controller.checkForUpdates();
+  await Promise.resolve();
+  assert.equal(autoUpdaterInstance.autoDownload, false, "the controller drives downloads itself");
+  assert.equal(autoUpdaterInstance.autoInstallOnAppQuit, true);
+  assert.equal(downloads, 1);
+  assert.equal(controller.getState().status, "available");
+
+  autoDownload = false;
+  await controller.checkForUpdates();
+  await Promise.resolve();
+  assert.equal(autoUpdaterInstance.autoInstallOnAppQuit, false);
+  assert.equal(downloads, 1, "no automatic download once the setting is off");
+});

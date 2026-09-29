@@ -28,6 +28,7 @@ const AppSafe =
 const CARD_STAGGER_LIMIT = 18;
 const LIST_STAGGER_LIMIT = 24;
 
+const STARTUP_SCAN_DELAY_MS = 8000;
 const SECTION_LIBRARY = "library";
 const SECTION_UPDATES = "updates";
 const SECTION_SEARCH = "search";
@@ -709,6 +710,9 @@ const App = () => {
   const f95CaptchaRetryKeyRef = useRef("");
   const deleteGameModalRef = useRef(createDefaultDeleteGameModalState());
   const isLibraryScanRunningRef = useRef(false);
+  // Set once rescanLibrary is defined below; the mount effect runs the
+  // startup scan through it.
+  const rescanLibraryRef = useRef(null);
   const showDiscoveryRef = useRef(false);
   const downloadStatusRef = useRef(null);
   const lastLibraryLoadAtRef = useRef(0);
@@ -2180,6 +2184,29 @@ const App = () => {
     return completed === true || String(completed).toLowerCase() === "true";
   };
 
+  // "Look for new games at startup": an incremental scan a few seconds after
+  // launch, for people who already have a library. The first-launch
+  // assistant owns the very first scan.
+  const scheduleStartupLibraryScan = async (gameCount) => {
+    if (gameCount <= 0) {
+      return;
+    }
+    const config = await window.electronAPI.getConfig().catch(() => null);
+    if (
+      !config ||
+      !isOnboardingCompleted(config) ||
+      config?.Library?.autoScanOnStartup === false
+    ) {
+      return;
+    }
+    setTimeout(() => {
+      if (isLibraryScanRunningRef.current) {
+        return;
+      }
+      void rescanLibraryRef.current?.({ mode: "incremental", reason: "startup" });
+    }, STARTUP_SCAN_DELAY_MS);
+  };
+
   const decideOnboarding = async (gameCount) => {
     const config = await window.electronAPI.getConfig().catch(() => null);
     if (!config || isOnboardingCompleted(config)) {
@@ -2498,7 +2525,9 @@ const App = () => {
         setTotalVersions(
           gamesArray.reduce((sum, game) => sum + (game.versionCount || 0), 0),
         );
-        void decideOnboarding(gamesArray.length);
+        void decideOnboarding(gamesArray.length).then(() =>
+          scheduleStartupLibraryScan(gamesArray.length),
+        );
       })
       .catch((error) => {
         console.error("Failed to fetch games:", error);
@@ -3168,6 +3197,8 @@ const App = () => {
       setIsLibraryScanRunning(false);
     }
   };
+
+  rescanLibraryRef.current = rescanLibrary;
 
   const openRescanLibraryMenu = () => {
     if (isLibraryScanRunning) {

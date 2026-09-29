@@ -3,7 +3,7 @@ const SETTINGS_PAGES = [
     id: "general",
     label: "General",
     icon: "tune",
-    description: "How the app window behaves, and the setup assistant.",
+    description: "Window and startup behaviour, what runs in the background, and the setup assistant.",
   },
   {
     id: "library",

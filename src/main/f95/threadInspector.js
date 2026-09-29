@@ -1,4 +1,5 @@
 const { normalizeThreadDownloadLinks } = require("./threadLinks");
+const { extractArchivePassword } = require("./threadPassword");
 
 const THREAD_INSPECTION_TIMEOUT_MS = 30000;
 
@@ -510,6 +511,8 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     version: parsedTitle.version,
     engine: parsedTitle.engine || "",
     links,
+    // Plain text of the starter post: archive passwords are read from it.
+    postText: String(firstPostRoot.innerText || firstPostRoot.textContent || "").slice(0, 40000),
   };
 })();`;
 
@@ -566,11 +569,13 @@ function inspectF95Thread({ BrowserWindow, threadUrl }) {
           EXTRACT_THREAD_DOWNLOADS_SCRIPT,
         );
         const normalizedDownloads = normalizeThreadDownloadLinks(rawPayload?.links || []);
+        const { postText, ...rest } = rawPayload || {};
         const payload = rawPayload?.success
           ? {
-              ...rawPayload,
+              ...rest,
               links: normalizedDownloads.links,
               variants: normalizedDownloads.variants,
+              archivePassword: extractArchivePassword(postText),
             }
           : rawPayload;
         cleanup();

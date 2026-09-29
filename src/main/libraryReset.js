@@ -112,7 +112,7 @@ function ensureUnusedFilePath(basePath) {
  * `VACUUM INTO` produces a clean snapshot even while the connection is open;
  * a plain file copy is the fallback for SQLite builds without it.
  *
- * @param {{ appPaths: { db: string, backups: string }, db: any, now?: () => Date, logger?: { warn: Function } }} input
+ * @param {{ appPaths: { db: string, backups: string }, db: any, now?: () => Date, logger?: { warn: Function }, fileNamePrefix?: string }} input
  * @returns {Promise<string>}
  */
 async function backupDatabaseFile(input) {
@@ -123,7 +123,10 @@ async function backupDatabaseFile(input) {
   );
   await fs.promises.mkdir(backupDirectory, { recursive: true });
   const targetPath = ensureUnusedFilePath(
-    path.join(backupDirectory, `library-${formatBackupStamp(now)}.db`),
+    path.join(
+      backupDirectory,
+      `${input.fileNamePrefix || "library"}-${formatBackupStamp(now)}.db`,
+    ),
   );
 
   try {

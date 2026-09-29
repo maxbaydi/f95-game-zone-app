@@ -133,7 +133,7 @@ function describeCheckError(error) {
  *   staleAfterMs?: number,
  *   delayBetweenMs?: number,
  *   limit?: number,
- *   favoritesOnly?: boolean,
+ *   favoritesOnly?: boolean | (() => boolean),
  *   now?: () => number,
  *   setTimer?: (callback: () => any, delay: number) => any,
  *   clearTimer?: (id: any) => void,
@@ -157,7 +157,18 @@ function createLiveUpdateChecker(options) {
     Number.isInteger(options.limit) && Number(options.limit) > 0
       ? Number(options.limit)
       : LIVE_UPDATE_DEFAULTS.limit;
-  const defaultFavoritesOnly = options.favoritesOnly !== false;
+  // A function is read on every run so a settings change applies without a
+  // restart ("check all installed games" vs. favorites only).
+  const resolveDefaultFavoritesOnly = () => {
+    if (typeof options.favoritesOnly === "function") {
+      try {
+        return options.favoritesOnly() !== false;
+      } catch {
+        return true;
+      }
+    }
+    return options.favoritesOnly !== false;
+  };
   const now = typeof options.now === "function" ? options.now : () => Date.now();
   const setTimer =
     typeof options.setTimer === "function"
@@ -341,7 +352,7 @@ function createLiveUpdateChecker(options) {
       favoritesOnly:
         typeof request.favoritesOnly === "boolean"
           ? request.favoritesOnly
-          : defaultFavoritesOnly,
+          : resolveDefaultFavoritesOnly(),
     };
 
     currentRun = executeRun(normalizedRequest)
