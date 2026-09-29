@@ -148,11 +148,21 @@ function buildStorageSection(connection) {
  */
 function createSecretsStore(deps) {
   const filePath = path.join(deps.dataDir, SECRETS_FILE_NAME);
-  const safe = deps.safeStorage && deps.safeStorage.isEncryptionAvailable() ? deps.safeStorage : null;
+  // Evaluated per call: Electron reports encryption as unavailable until the
+  // app is ready, and the store is created before that.
+  const getSafe = () => {
+    try {
+      return deps.safeStorage && deps.safeStorage.isEncryptionAvailable() ? deps.safeStorage : null;
+    } catch {
+      return null;
+    }
+  };
 
   return {
     filePath,
-    isEncrypted: Boolean(safe),
+    get isEncrypted() {
+      return Boolean(getSafe());
+    },
     /** @returns {{ secrets: Record<string, any>, passphrase: string } | null} */
     read() {
       try {
@@ -162,6 +172,7 @@ function createSecretsStore(deps) {
         const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
         let payload;
         if (raw?.encrypted && typeof raw.data === "string") {
+          const safe = getSafe();
           if (!safe) {
             return null;
           }
@@ -186,6 +197,7 @@ function createSecretsStore(deps) {
         secrets: payload.secrets || {},
         passphrase: payload.passphrase || "",
       });
+      const safe = getSafe();
       const document = safe
         ? { version: 1, encrypted: true, data: safe.encryptString(serialized).toString("base64") }
         : { version: 1, encrypted: false, data: JSON.parse(serialized) };
