@@ -13,11 +13,12 @@
  *   SCREENSHOT_OUT_DIR     output folder (default docs/screenshots)
  *   SCREENSHOT_ONLY        comma-separated shot ids to (re)capture
  *   PLAYWRIGHT_CHROMIUM    path to a Chromium/Chrome binary; when it is not
- *                          set the script uses Playwright's own browser, or
- *                          the first build found in PLAYWRIGHT_BROWSERS_PATH
+ *                          set the script uses Playwright's own browser, the
+ *                          first build found in PLAYWRIGHT_BROWSERS_PATH, or
+ *                          a Chrome/Edge/Chromium/Brave installed on the PC
  *
- * Playwright is not a project dependency: install it once with
- * `npm install --no-save playwright` (or `playwright-core` plus a Chromium).
+ * Playwright is not a project dependency: install it after each `npm ci`
+ * with `npm install --no-save playwright-core` (no browser download).
  */
 const fs = require("fs");
 const http = require("http");
@@ -64,7 +65,7 @@ function loadPlaywright() {
     }
   }
   throw new Error(
-    "Playwright is not installed. Run `npm install --no-save playwright` first.",
+    "Playwright is not installed. Run `npm install --no-save playwright-core` first (no browser download needed: an installed Chrome or Edge is used).",
   );
 }
 
@@ -77,7 +78,7 @@ function findChromiumExecutable() {
   }
   const browsersDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (!browsersDir || !fs.existsSync(browsersDir)) {
-    return "";
+    return findSystemBrowser();
   }
   const candidates = fs
     .readdirSync(browsersDir)
@@ -110,7 +111,44 @@ function findChromiumExecutable() {
       }
     }
   }
-  return "";
+  return findSystemBrowser();
+}
+
+// Chrome or Edge already installed on the machine, so nothing has to be
+// downloaded (Playwright's CDN is slow or blocked in some regions).
+function findSystemBrowser() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    const roots = [
+      process.env["ProgramFiles"],
+      process.env["ProgramFiles(x86)"],
+      process.env.LOCALAPPDATA,
+    ].filter(Boolean);
+    for (const root of roots) {
+      candidates.push(
+        path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
+        path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
+        path.join(root, "Chromium", "Application", "chrome.exe"),
+        path.join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+      );
+    }
+  } else if (process.platform === "darwin") {
+    candidates.push(
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    );
+  } else {
+    candidates.push(
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/microsoft-edge",
+      "/snap/bin/chromium",
+    );
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 
 async function launchBrowser(chromium) {

@@ -3,10 +3,13 @@
 Marketing screenshots of the renderer, taken from the browser preview in demo mode (fictional games, no real data). Regenerate with:
 
 ```powershell
-npm install --no-save playwright   # once; or set PLAYWRIGHT_CHROMIUM to a Chrome/Chromium binary
-npm run screenshots                # writes docs/screenshots/*.png
-SCREENSHOT_ONLY=03-downloads-panel npm run screenshots   # one shot
+npm run build:css                        # once per checkout; tailwind.output.css is not committed
+npm install --no-save playwright-core    # after every npm ci; no browser download, an installed Chrome/Edge is used
+npm run screenshots                      # writes docs/screenshots/*.png
+$env:SCREENSHOT_ONLY = "03-downloads-panel"; npm run screenshots   # one shot
 ```
+
+The script looks for Chrome, Edge, Chromium or Brave in the usual places. Point `PLAYWRIGHT_CHROMIUM` at a browser binary if yours lives elsewhere. If `npm install --no-save playwright` was used instead and its browser download timed out, that is fine: the system browser is used anyway.
 
 Captions for the forum post:
 
