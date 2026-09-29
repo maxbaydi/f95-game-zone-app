@@ -4121,7 +4121,10 @@ const App = () => {
     if (activeSection === SECTION_SEARCH) {
       return (
         <AppSafe name="search" title="The F95 workspace failed to load">
-          <window.F95BrowserWorkspace />
+          <window.F95BrowserWorkspace
+            onOpenDownloads={() => setDownloadsPanelOpen(true)}
+            onOpenLibraryRecord={openLibraryRecord}
+          />
         </AppSafe>
       );
     }
