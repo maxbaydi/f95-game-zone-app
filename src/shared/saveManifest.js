@@ -34,7 +34,28 @@ function buildSaveManifest(input) {
   return {
     ...manifest,
     manifestHash: createSaveManifestHash(manifest),
+    contentHash: createSaveContentHash(manifest),
   };
+}
+
+/**
+ * Hash of what the files contain, independent of where they live and when
+ * they were written: two machines holding the same saves agree on it even
+ * though their manifestHash (paths, mtimes) differs.
+ */
+function createSaveContentHash(manifest) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify(
+        sortManifestEntries(manifest.entries || []).map((entry) => [
+          entry.path,
+          Number(entry.size) || 0,
+          entry.sha256 || "",
+        ]),
+      ),
+    )
+    .digest("hex");
 }
 
 function createSaveManifestHash(manifest) {
@@ -51,5 +72,6 @@ function createSaveManifestHash(manifest) {
 
 module.exports = {
   buildSaveManifest,
+  createSaveContentHash,
   createSaveManifestHash,
 };

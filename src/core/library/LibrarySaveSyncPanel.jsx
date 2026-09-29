@@ -121,7 +121,12 @@ const SaveActionButton = ({
   </button>
 );
 
-const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
+const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth, onOpenSaveStorage }) => {
+  const storage = window.useSaveStorageState
+    ? window.useSaveStorageState()
+    : { state: null, refresh: () => Promise.resolve(null) };
+  const storageState = storage.state;
+  const storageReady = Boolean(storageState?.connected && !storageState?.locked);
   const [snapshot, setSnapshot] = window.React.useState(null);
   const [authState, setAuthState] = window.React.useState({
     configured: false,
@@ -242,9 +247,17 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
       }
 
       if (actionName === "upload") {
-        setMessage("Your saves were backed up to the cloud.");
+        setMessage(
+          storageReady
+            ? `Your saves were backed up to ${storageState.label || "your storage"}.`
+            : "Your saves were backed up to the cloud.",
+        );
       } else if (actionName === "restore") {
-        setMessage("Your latest cloud backup was restored.");
+        setMessage(
+          storageReady
+            ? `${result.result?.importedFiles ?? ""} file(s) restored from ${storageState.label || "your storage"}.`.trim()
+            : "Your latest cloud backup was restored.",
+        );
       } else if (actionName === "export") {
         setMessage(
           `${result.fileCount} save file(s) exported to ${result.archivePath}.`,
@@ -272,6 +285,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
   const syncState = snapshot?.syncState || null;
   const hasRemoteArchive = Boolean(syncState?.lastRemotePath);
   const cloudReady = Boolean(authState.configured);
+  const storageLabel = storageState?.label || "your storage";
   const userFacingError =
     errorMessage ||
     getCloudSyncMessageIfPresent(syncState?.lastError || authState.error, {
@@ -292,17 +306,13 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
         </div>
         <button
           type="button"
-          onClick={() => onOpenCloudAuth?.()}
+          onClick={() => (onOpenSaveStorage ? onOpenSaveStorage() : onOpenCloudAuth?.())}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-secondary text-text hover:bg-selected"
-          title={authState.authenticated ? "Manage cloud account" : "Cloud sync (optional)"}
-          aria-label={authState.authenticated ? "Manage cloud account" : "Cloud sync (optional)"}
+          title={storageReady ? `Save storage: ${storageState.description || storageLabel}` : "Set up save storage"}
+          aria-label={storageReady ? "Save storage settings" : "Set up save storage"}
         >
           <span className="material-symbols-outlined text-[20px] leading-none">
-            {authState.authenticated
-              ? "manage_accounts"
-              : cloudReady
-                ? "login"
-                : "cloud_off"}
+            {storageReady ? "cloud_done" : storageState?.locked ? "lock" : "cloud_off"}
           </span>
         </button>
       </div>
@@ -317,12 +327,14 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
                 {profiles.length} save{" "}
                 {profiles.length === 1 ? "location" : "locations"} found
               </SaveSyncPill>
-              <SaveSyncPill>
-                {authState.authenticated
-                  ? "Cloud: signed in"
-                  : cloudReady
-                    ? "Cloud: sign in required"
-                    : "Cloud: off"}
+              <SaveSyncPill tone={storageReady ? "accent" : "neutral"}>
+                {storageReady
+                  ? `Cloud: ${storageLabel}`
+                  : storageState?.locked
+                    ? "Cloud: locked"
+                    : authState.authenticated
+                      ? "Cloud: signed in"
+                      : "Cloud: off"}
               </SaveSyncPill>
               <SaveSyncPill
                 tone={
@@ -421,51 +433,80 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
             )}
 
             <div className="mt-3 text-[10px] uppercase tracking-[0.18em] opacity-55">
-              Cloud (optional)
+              {storageReady ? `Cloud · ${storageLabel}` : "Cloud (optional)"}
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <SaveActionButton
-                icon="cloud_upload"
-                label="Back up to cloud"
-                busyLabel="Backing up…"
-                busy={busyAction === "upload"}
-                disabled={
-                  busyAction !== "" ||
-                  !authState.authenticated ||
-                  profiles.length === 0
-                }
-                title={
-                  authState.authenticated
-                    ? "Upload the current saves to your account"
-                    : "Sign in to use cloud backups"
-                }
-                onClick={() =>
-                  handleAction("upload", () =>
-                    callApi("uploadCloudSaves", game.record_id),
-                  )
-                }
-              />
-              <SaveActionButton
-                icon="cloud_download"
-                label="Restore from cloud"
-                busyLabel="Restoring…"
-                busy={busyAction === "restore"}
-                disabled={
-                  busyAction !== "" ||
-                  !authState.authenticated ||
-                  !hasRemoteArchive
-                }
-                title={
-                  hasRemoteArchive
-                    ? "Download the latest cloud backup onto this PC"
-                    : "No cloud backup for this game yet"
-                }
-                onClick={() =>
-                  handleAction("restore", () =>
-                    callApi("restoreCloudSaves", game.record_id),
-                  )
-                }
-              />
+              {storageReady ? (
+                <>
+                  <SaveActionButton
+                    icon="cloud_upload"
+                    label={`Back up to ${storageLabel}`}
+                    busyLabel="Backing up…"
+                    busy={busyAction === "upload"}
+                    disabled={busyAction !== "" || profiles.length === 0}
+                    title="Pack the current saves and put them in your storage"
+                    onClick={() =>
+                      handleAction("upload", () =>
+                        callApi("syncSaveStorageGame", game.record_id, "upload"),
+                      )
+                    }
+                  />
+                  <SaveActionButton
+                    icon="cloud_download"
+                    label={`Restore from ${storageLabel}`}
+                    busyLabel="Restoring…"
+                    busy={busyAction === "restore"}
+                    disabled={busyAction !== ""}
+                    title="Bring the backup from your storage onto this PC (current saves go to the local vault first)"
+                    onClick={() =>
+                      handleAction("restore", () =>
+                        callApi("syncSaveStorageGame", game.record_id, "restore"),
+                      )
+                    }
+                  />
+                </>
+              ) : authState.authenticated ? (
+                <>
+                  <SaveActionButton
+                    icon="cloud_upload"
+                    label="Back up to cloud"
+                    busyLabel="Backing up…"
+                    busy={busyAction === "upload"}
+                    disabled={busyAction !== "" || profiles.length === 0}
+                    title="Upload the current saves to your Supabase account"
+                    onClick={() =>
+                      handleAction("upload", () =>
+                        callApi("uploadCloudSaves", game.record_id),
+                      )
+                    }
+                  />
+                  <SaveActionButton
+                    icon="cloud_download"
+                    label="Restore from cloud"
+                    busyLabel="Restoring…"
+                    busy={busyAction === "restore"}
+                    disabled={busyAction !== "" || !hasRemoteArchive}
+                    title={
+                      hasRemoteArchive
+                        ? "Download the latest cloud backup onto this PC"
+                        : "No cloud backup for this game yet"
+                    }
+                    onClick={() =>
+                      handleAction("restore", () =>
+                        callApi("restoreCloudSaves", game.record_id),
+                      )
+                    }
+                  />
+                </>
+              ) : (
+                <SaveActionButton
+                  icon={storageState?.locked ? "lock_open" : "add_link"}
+                  label={storageState?.locked ? "Unlock save storage" : "Connect your cloud"}
+                  disabled={busyAction !== ""}
+                  title="OneDrive, Dropbox, Google Drive, a WebDAV server or an S3 bucket. Set up once, works on every PC."
+                  onClick={() => (onOpenSaveStorage ? onOpenSaveStorage() : onOpenCloudAuth?.())}
+                />
+              )}
               <span className="text-[11px] opacity-60">
                 Last backup: {formatSyncDate(syncState?.lastUploadedAt)} · Last
                 restore: {formatSyncDate(syncState?.lastDownloadedAt)}

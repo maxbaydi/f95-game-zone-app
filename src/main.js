@@ -9,6 +9,7 @@ const {
   Notification,
   Tray,
   nativeImage,
+  safeStorage,
 } = require("electron");
 
 app.setAppUserModelId("com.maxbaydi.f95launcher");
@@ -48,6 +49,7 @@ const {
   registerLibraryMaintenanceIpc,
 } = require("./main/libraryMaintenanceIpc");
 const { registerSaveTransferIpc } = require("./main/saveTransferIpc");
+const { createSaveStorageController } = require("./main/saveStorage/saveStorageIpc");
 const { createLiveUpdateChecker } = require("./main/liveUpdateCheck");
 const { upsertLiveVersion } = require("./main/db/liveVersionsStore");
 const { findExecutables } = require("./main/install/findExecutables");
@@ -239,6 +241,8 @@ let appConfig;
 let databaseConnection = null;
 let cloudSaveService = null;
 let cloudSaveQueue = Promise.resolve();
+// User-owned save storage (synced folder, WebDAV, S3); see src/main/saveStorage.
+let saveStorage = null;
 let libraryUpdateRefreshPromise = null;
 // Background check of live F95 threads (see main/liveUpdateCheck.js).
 let libraryLiveUpdateChecker = null;
@@ -1366,6 +1370,10 @@ function scheduleCloudSaveReconcile(recordId, reason) {
     return Promise.resolve(null);
   }
 
+  if (saveStorage?.isReady()) {
+    return saveStorage.scheduleReconcile(recordId, reason);
+  }
+
   return queueCloudSaveTask(
     `auto reconcile record ${recordId} (${reason})`,
     async () => {
@@ -1382,6 +1390,9 @@ function scheduleCloudSaveReconcile(recordId, reason) {
 }
 
 function scheduleCloudInstalledSavesReconcile(reason) {
+  if (saveStorage?.isReady()) {
+    return saveStorage.scheduleSyncAll(reason);
+  }
   return queueCloudSaveTask(`auto reconcile library (${reason})`, async () => {
     return runBulkCloudSaveAction("sync", {
       emitProgress: false,
@@ -5829,6 +5840,9 @@ ipcMain.handle("open-directory", async (event, path) => {
 ipcMain.handle("launch-game", async (_, payload) => {
   try {
     await launchGame(payload || {});
+    // Games run outside the app: watch their save folders and back up once
+    // they go quiet after a change.
+    saveStorage?.watchAfterLaunch(payload?.recordId);
     return { success: true };
   } catch (error) {
     console.error("Error launching game:", error);
@@ -6874,6 +6888,36 @@ function getLibraryGameExtensions() {
 
 // Locate folder, choose launcher, library backups, catalog link and live
 // thread checks (see main/libraryMaintenanceIpc.js for the contracts).
+saveStorage = createSaveStorageController({
+  ipcMain,
+  dialog,
+  app,
+  safeStorage: safeStorage || null,
+  getParentWindow: (event) =>
+    BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined,
+  appPaths,
+  getConfig: () => appConfig || defaultConfig,
+  setStorageSection: (section) => {
+    appConfig = { ...(appConfig || defaultConfig), SaveStorage: section };
+    saveConfig();
+    broadcastSettingsChanged();
+  },
+  getDatabaseConnection: () => databaseConnection,
+  getSaveProfileSnapshot: (recordId) =>
+    getSaveProfileSnapshot(appPaths, databaseConnection, recordId),
+  refreshSaveProfiles: (recordId) =>
+    refreshSaveProfiles(appPaths, databaseConnection, recordId),
+  listGames: () => getGames(appPaths, 0, null),
+  upsertSaveSyncState: (input) => upsertSaveSyncState(databaseConnection, input),
+  broadcast: (channel, payload) => {
+    BrowserWindow.getAllWindows().forEach((windowInstance) => {
+      if (!windowInstance.isDestroyed()) {
+        windowInstance.webContents.send(channel, payload);
+      }
+    });
+  },
+});
+
 registerSaveTransferIpc({
   ipcMain,
   dialog,
@@ -7743,6 +7787,9 @@ app.whenReady().then(async () => {
     });
   });
   hydrateF95DownloadsStore();
+  saveStorage?.start().catch((error) => {
+    console.error("[save.storage] Failed to start save storage:", error);
+  });
   f95Session = getReadyF95Session();
   attachF95DownloadListener();
   f95Session.cookies.on("changed", () => {

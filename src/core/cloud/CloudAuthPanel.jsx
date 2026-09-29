@@ -465,12 +465,14 @@ const CloudAuthPanelContent = ({ onClose }) => {
         ) : null}
 
         <h4 className="mb-2 text-xs font-bold uppercase tracking-widest text-[#1999ff]">
-          Cloud Saves
+          Cloud Saves · own Supabase project
         </h4>
         <h1 className="mb-3 text-2xl font-light text-white">Account access</h1>
         <p className="max-w-2xl text-sm leading-relaxed text-[#8b929a]">
-          One account handles save backups and the cross-device library catalog
-          without leaking infrastructure details into the UI.
+          Advanced option for people who host their own Supabase project. For
+          everyone else the recommended way is Settings → Save storage: your
+          own OneDrive, Dropbox, Google Drive, WebDAV or S3, with no account
+          here.
         </p>
       </div>
 

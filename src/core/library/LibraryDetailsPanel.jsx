@@ -491,6 +491,7 @@ const LibraryDetailsPanel = ({
   onRemoveGame,
   onPreviewSelect,
   onOpenCloudAuth,
+  onOpenSaveStorage,
   onLocateVersion,
   onGameChanged,
   onLinkCatalog,
@@ -1294,6 +1295,7 @@ const LibraryDetailsPanel = ({
                 <window.LibrarySaveSyncPanel
                   game={game}
                   onOpenCloudAuth={onOpenCloudAuth}
+                  onOpenSaveStorage={onOpenSaveStorage}
                 />
 
                 <section className="rounded-2xl border border-border bg-secondary/10 p-4">

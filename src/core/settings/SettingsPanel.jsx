@@ -13,10 +13,11 @@ const SETTINGS_PAGES = [
       "Where games are installed and which folders are scanned for games you already have.",
   },
   {
-    id: "cloud",
-    label: "Cloud saves",
-    icon: "cloud",
-    description: "Back up your saves and library list to your account.",
+    id: "saves",
+    label: "Save storage",
+    icon: "cloud_sync",
+    description:
+      "Keep your saves in your own cloud (OneDrive, Dropbox, Google Drive, a WebDAV server or an S3 bucket) and get them back on any PC.",
   },
   {
     id: "notifications",
@@ -72,8 +73,10 @@ const SettingsPanel = ({
   const [indicator, setIndicator] = React.useState({ top: 0, height: 0 });
 
   React.useEffect(() => {
-    if (SETTINGS_PAGES.some((page) => page.id === initialPage)) {
-      setSelected(initialPage);
+    // Older callers still ask for the "cloud" page.
+    const requested = initialPage === "cloud" ? "saves" : initialPage;
+    if (SETTINGS_PAGES.some((page) => page.id === requested)) {
+      setSelected(requested);
     }
   }, [initialPage, pageRequest]);
 
@@ -123,8 +126,8 @@ const SettingsPanel = ({
             isScanRunning={isScanRunning}
           />
         );
-      case "cloud":
-        return <window.CloudSync />;
+      case "saves":
+        return <window.SaveStorageSettings />;
       case "notifications":
         return <window.NotificationSettings settings={pageSettings} />;
       case "appearance":

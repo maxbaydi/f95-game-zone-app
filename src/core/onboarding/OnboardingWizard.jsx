@@ -1,8 +1,9 @@
-const ONBOARDING_STEPS = ["welcome", "folder", "scan", "accounts", "done"];
+const ONBOARDING_STEPS = ["welcome", "folder", "scan", "saves", "accounts", "done"];
 const ONBOARDING_STEP_LABELS = {
   folder: "Games folder",
   scan: "Your games",
-  accounts: "Accounts",
+  saves: "Saves",
+  accounts: "F95 account",
   done: "Done",
 };
 
@@ -100,7 +101,7 @@ const OnboardingWelcomeStep = () => (
       <OnboardingFeature
         icon="cloud_sync"
         title="Keep your saves safe"
-        text="Back up saves to the cloud and restore them on another PC."
+        text="Back up saves to your own cloud folder and get them back on any PC."
       />
     </div>
   </div>
@@ -307,16 +308,30 @@ const OnboardingAccountCard = ({
   </div>
 );
 
-const OnboardingAccountsStep = ({
-  f95Connected,
-  cloudAuthState,
-  onOpenCloud,
-}) => (
+const OnboardingSavesStep = ({ onConnected }) => (
   <div>
-    <h2 className="text-2xl font-semibold text-text">Connect your accounts</h2>
+    <h2 className="text-2xl font-semibold text-text">Where should your saves live?</h2>
     <p className="mt-2 text-sm text-text/65">
-      Both are optional and free. You can connect later: F95 from Search, cloud
-      saves from the cloud button in the top bar.
+      Saves always stay on this PC and get a local safety copy before anything
+      overwrites them. To carry them to another PC, pick a cloud you already
+      use: F95Launcher keeps a folder there up to date and the cloud client
+      does the rest. No account with us. Optional, and easy to change later.
+    </p>
+    <div className="mt-5">
+      {window.SaveStorageQuickSetup ? (
+        <window.SaveStorageQuickSetup onConnected={onConnected} />
+      ) : (
+        <div className="text-sm text-text/60">Save storage is set up in Settings.</div>
+      )}
+    </div>
+  </div>
+);
+
+const OnboardingAccountsStep = ({ f95Connected }) => (
+  <div>
+    <h2 className="text-2xl font-semibold text-text">Connect your F95 account</h2>
+    <p className="mt-2 text-sm text-text/65">
+      Optional and free. You can also log in later from Search.
     </p>
     <div className="mt-5 grid gap-3 sm:grid-cols-2">
       <OnboardingAccountCard
@@ -327,15 +342,6 @@ const OnboardingAccountsStep = ({
         connectedText="Signed in. Downloads and updates are ready."
         actionLabel="Log in to F95"
         onAction={() => window.electronAPI.openF95Login()}
-      />
-      <OnboardingAccountCard
-        icon="cloud_sync"
-        title="Cloud saves"
-        text="Back up your saves and library list, and restore them on any PC."
-        connected={Boolean(cloudAuthState?.authenticated)}
-        connectedText={`Signed in${cloudAuthState?.user?.email ? ` as ${cloudAuthState.user.email}` : ""}.`}
-        actionLabel="Sign in or create account"
-        onAction={onOpenCloud}
       />
     </div>
   </div>
@@ -360,7 +366,7 @@ const OnboardingDoneStep = ({
   gameFolder,
   sourcesCount,
   f95Connected,
-  cloudConnected,
+  saveStorageState,
   settings,
 }) => {
   const interfaceSettings = settings.config?.Interface || {};
@@ -405,8 +411,12 @@ const OnboardingDoneStep = ({
           }
         />
         <OnboardingSummaryRow
-          ok={cloudConnected}
-          text={cloudConnected ? "Cloud saves are on" : "Cloud saves are off"}
+          ok={Boolean(saveStorageState?.connected)}
+          text={
+            saveStorageState?.connected
+              ? `Saves are backed up to ${saveStorageState.label || "your storage"}`
+              : "Saves stay on this PC only: connect a cloud folder any time in Settings → Save storage."
+          }
         />
       </ul>
 
@@ -443,11 +453,12 @@ const OnboardingDoneStep = ({
 const OnboardingWizard = ({
   isOpen,
   initialStep = "welcome",
-  cloudAuthState,
-  onOpenCloud,
   onFinish,
 }) => {
   const settings = window.settingsKit.useAppSettings();
+  const saveStorage = window.useSaveStorageState
+    ? window.useSaveStorageState()
+    : { state: null, refresh: () => Promise.resolve(null) };
   const [step, setStep] = React.useState(initialStep);
   const [suggestions, setSuggestions] = React.useState([]);
   const [selectedPath, setSelectedPath] = React.useState("");
@@ -680,6 +691,11 @@ const OnboardingWizard = ({
       run: checkedPaths.length > 0 ? addCheckedFolders : goNext,
       disabled: detected === null,
     },
+    saves: {
+      label: saveStorage.state?.connected ? "Continue" : "Keep saves on this PC",
+      icon: "arrow_forward",
+      run: goNext,
+    },
     accounts: { label: "Continue", icon: "arrow_forward", run: goNext },
     done: {
       label: sourcesCount > 0 ? "Scan & open my library" : "Open my library",
@@ -741,19 +757,18 @@ const OnboardingWizard = ({
               onAddFolder={addAnotherFolder}
             />
           )}
+          {step === "saves" && (
+            <OnboardingSavesStep onConnected={() => saveStorage.refresh()} />
+          )}
           {step === "accounts" && (
-            <OnboardingAccountsStep
-              f95Connected={f95Connected}
-              cloudAuthState={cloudAuthState}
-              onOpenCloud={onOpenCloud}
-            />
+            <OnboardingAccountsStep f95Connected={f95Connected} />
           )}
           {step === "done" && (
             <OnboardingDoneStep
               gameFolder={gameFolder}
               sourcesCount={sourcesCount}
               f95Connected={f95Connected}
-              cloudConnected={Boolean(cloudAuthState?.authenticated)}
+              saveStorageState={saveStorage.state}
               settings={settings}
             />
           )}
@@ -779,7 +794,7 @@ const OnboardingWizard = ({
               Back
             </window.SettingsButton>
           )}
-          {(step === "scan" || step === "accounts") && (
+          {(step === "scan" || step === "accounts" || step === "saves") && (
             <button
               type="button"
               onClick={goNext}
