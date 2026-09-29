@@ -332,6 +332,45 @@ const CloudAuthPanelContent = ({ onClose }) => {
     }
   };
 
+  const [isExportingAll, setIsExportingAll] = useState(false);
+
+  // File export does not need an account: every game with detected saves
+  // gets its own zip in the chosen folder.
+  const handleExportAllSaves = async () => {
+    if (isExportingAll) {
+      return;
+    }
+    setErrorMessage("");
+    setStatusMessage("");
+    setIsExportingAll(true);
+    try {
+      const api = window.electronAPI;
+      if (typeof api?.exportAllGameSaves !== "function") {
+        throw new Error("This action needs a newer F95Launcher build.");
+      }
+      const result = await api.exportAllGameSaves();
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.success) {
+        setErrorMessage(result?.error || "Saves could not be exported.");
+        return;
+      }
+      const exported = result.exported?.length || 0;
+      const skipped = result.skipped?.length || 0;
+      setStatusMessage(
+        `${exported} save archive(s) written to ${result.folder}${
+          skipped ? `, ${skipped} game(s) skipped (no save files)` : ""
+        }.`,
+      );
+    } catch (error) {
+      console.error("Bulk save export failed:", error);
+      setErrorMessage(error?.message || "Saves could not be exported.");
+    } finally {
+      setIsExportingAll(false);
+    }
+  };
+
   const handleBulkAction = async (mode) => {
     setErrorMessage("");
     setStatusMessage("");
@@ -454,10 +493,34 @@ const CloudAuthPanelContent = ({ onClose }) => {
         />
       </div>
 
+      <div className="mx-8 mb-4 flex flex-wrap items-center justify-between gap-3 border border-[#32353c] bg-[#1a1d24] px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-white">Save files on this PC</div>
+          <div className="text-xs text-[#8b929a]">
+            No account needed: export every game's saves as zip archives, or
+            import one per game from its library page.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="flex shrink-0 items-center gap-2 border border-[#32353c] bg-[#212429] px-4 py-1.5 text-sm text-[#dcdedf] transition-all hover:bg-[#2b2f37] hover:text-white disabled:opacity-60"
+          onClick={handleExportAllSaves}
+          disabled={isExportingAll}
+        >
+          <SteamIcon
+            name={isExportingAll ? "progress_activity" : "folder_zip"}
+            className={`text-[16px] ${isExportingAll ? "animate-spin" : ""}`}
+          />
+          {isExportingAll ? "Exporting…" : "Export all saves to folder…"}
+        </button>
+      </div>
+
       {!authState.configured ? (
         <>
           <div className="mx-8 mb-6 border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-            Cloud saves are temporarily unavailable.
+            Cloud saves are unavailable right now (the cloud database may be
+            paused or the connection is down). Local backups, file export and
+            import keep working.
           </div>
           {alertBlock}
         </>

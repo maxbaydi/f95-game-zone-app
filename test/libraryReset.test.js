@@ -82,6 +82,11 @@ test("resetLibraryIndex clears library tables, keeps catalog data and backs the 
   ensureAppDirs(appPaths);
   const db = await openDatabase(appPaths);
   const { recordId, imageDir } = await seedLibrary(db, appPaths);
+  const orphanImageDir = path.join(appPaths.images, "42");
+  fs.mkdirSync(orphanImageDir, { recursive: true });
+  fs.writeFileSync(path.join(orphanImageDir, "banner_mc.webp"), "old");
+  const keptImageDir = path.join(appPaths.images, "templates");
+  fs.mkdirSync(keptImageDir, { recursive: true });
 
   const result = await resetLibraryIndex({ appPaths, db });
 
@@ -107,7 +112,12 @@ test("resetLibraryIndex clears library tables, keeps catalog data and backs the 
   assert.equal(await countRows(db, "atlas_data"), 1);
 
   assert.equal(fs.existsSync(imageDir), false, "image folder of the record was removed");
-  assert.deepEqual(result.removedImageDirectories, [imageDir]);
+  assert.equal(fs.existsSync(orphanImageDir), false, "leftover image folders go too (ids restart at 1)");
+  assert.equal(fs.existsSync(keptImageDir), true, "non-record folders are untouched");
+  assert.deepEqual(
+    [...result.removedImageDirectories].sort(),
+    [imageDir, orphanImageDir].sort(),
+  );
   assert.equal(result.removedRecordIds.length, 1);
   assert.equal(result.removedRecordIds[0], recordId);
 

@@ -117,6 +117,22 @@ function getKnownFolderRoot(baseFolder) {
     return path.join(userProfile, "AppData", "LocalLow");
   }
 
+  if (baseFolder === "documents") {
+    if (!userProfile) {
+      return "";
+    }
+
+    return process.env.ATLAS_DOCUMENTS_DIR || path.join(userProfile, "Documents");
+  }
+
+  if (baseFolder === "savedGames") {
+    if (!userProfile) {
+      return "";
+    }
+
+    return process.env.ATLAS_SAVED_GAMES_DIR || path.join(userProfile, "Saved Games");
+  }
+
   return "";
 }
 
@@ -196,6 +212,14 @@ function getVaultBaseFolderToken(baseFolder) {
 
   if (baseFolder === "localLow") {
     return "local-low";
+  }
+
+  if (baseFolder === "documents") {
+    return "documents";
+  }
+
+  if (baseFolder === "savedGames") {
+    return "saved-games";
   }
 
   return "misc";

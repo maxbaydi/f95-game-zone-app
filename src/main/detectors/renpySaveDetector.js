@@ -11,6 +11,11 @@ const COMMON_INSTALL_SAVE_PATHS = [
   "www/saves",
   "userdata/save",
   "userdata/saves",
+  // KiriKiri, Wolf RPG, TyranoBuilder and hand-rolled engines
+  "savedata",
+  "savegames",
+  "data/save",
+  "www/savedata",
 ];
 
 function normalizeToken(value) {

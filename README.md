@@ -15,9 +15,10 @@ This project started from Atlas foundations, but it is now being shipped as its 
 - opens live F95 threads inside the app through a logged-in session
 - installs or updates games from thread mirrors into the correct library folder
 - keeps a downloads queue with background progress and history
-- detects save locations in both the game folder and common `%AppData%/RenPy/...` paths
+- detects save locations for Ren'Py, RPG Maker, Unity, Unreal, Godot, Wolf RPG, KiriKiri, GameMaker, Flash and HTML games (game folder, AppData, LocalLow, Documents, Saved Games)
+- exports and imports saves as plain zip files, per game or for the whole library, with no account needed
 - backs up saves before destructive operations
-- supports account-based cloud saves through Supabase
+- optionally syncs saves through a Supabase account
 - keeps cloud account access in the main header and scan-source management inside Scan Hub instead of burying both in a generic settings window
 
 ## Cloud saves
@@ -49,7 +50,9 @@ It is still safety-first, not a blind merge engine. If local and cloud copies di
 - choose a mirror by platform
 - resolve masked F95 links and supported host flows
 - queue the download
-- unpack or move the payload into the library
+- unpack or move the payload into the library (zip, 7z, rar, tar.gz and more, no external archiver needed; password prompts, disk-full and damaged-download diagnostics)
+- keep the downloaded package after a failed install so it can be retried, unpacked with a password or installed from a folder you unpacked yourself
+- detect the engine and launcher from the unpacked files (Unity player, Unreal bootstrap, RPG Maker `Game.exe`, `index.html` ...)
 - register the installed version in the local database
 
 When a mirror requires captcha confirmation, the app now keeps that flow resumable instead of dumping the user into a dead end.

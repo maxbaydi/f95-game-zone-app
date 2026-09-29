@@ -194,3 +194,97 @@ test("detectSaveProfiles finds packaged HTML app storage", () => {
     process.env.LOCALAPPDATA = previousLocalAppData;
   }
 });
+
+test("detectSaveProfiles finds Documents/My Games, Saved Games and GameMaker folders by strong name matches", () => {
+  const tempRoot = makeTempDir();
+  const previous = {
+    USERPROFILE: process.env.USERPROFILE,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    ATLAS_DOCUMENTS_DIR: process.env.ATLAS_DOCUMENTS_DIR,
+    ATLAS_SAVED_GAMES_DIR: process.env.ATLAS_SAVED_GAMES_DIR,
+  };
+  const installRoot = path.join(tempRoot, "Crimson High");
+  const documents = path.join(tempRoot, "Documents");
+  const savedGames = path.join(tempRoot, "Saved Games");
+  const localAppData = path.join(tempRoot, "AppData", "Local");
+  fs.mkdirSync(installRoot, { recursive: true });
+  fs.writeFileSync(path.join(installRoot, "data.win"), "");
+  fs.mkdirSync(path.join(documents, "My Games", "Crimson High"), { recursive: true });
+  fs.mkdirSync(path.join(documents, "Game"), { recursive: true });
+  fs.mkdirSync(path.join(savedGames, "CrimsonHigh"), { recursive: true });
+  fs.mkdirSync(path.join(localAppData, "Crimson_High"), { recursive: true });
+  fs.writeFileSync(path.join(localAppData, "Crimson_High", "save.ini"), "");
+  fs.mkdirSync(path.join(localAppData, "Microsoft"), { recursive: true });
+
+  process.env.USERPROFILE = tempRoot;
+  process.env.LOCALAPPDATA = localAppData;
+  process.env.ATLAS_DOCUMENTS_DIR = documents;
+  process.env.ATLAS_SAVED_GAMES_DIR = savedGames;
+  try {
+    const profiles = detectSaveProfiles({
+      title: "Crimson High",
+      creator: "Studio X",
+      engine: "",
+      primaryPath: installRoot,
+      versions: [{ game_path: installRoot, exec_path: path.join(installRoot, "Game.exe") }],
+    });
+    const roots = profiles.map((profile) => profile.rootPath);
+    assert.ok(roots.includes(path.join(documents, "My Games", "Crimson High")), "Documents/My Games");
+    assert.ok(roots.includes(path.join(savedGames, "CrimsonHigh")), "Saved Games");
+    assert.ok(roots.includes(path.join(localAppData, "Crimson_High")), "GameMaker LocalAppData");
+    assert.equal(roots.includes(path.join(documents, "Game")), false, "generic names never match");
+    assert.equal(roots.includes(path.join(localAppData, "Microsoft")), false);
+    const documentsProfile = profiles.find((profile) => profile.provider === "documents");
+    assert.deepEqual(documentsProfile.strategy, {
+      type: "windows-known-folder",
+      payload: { baseFolder: "documents", path: "My Games/Crimson High" },
+    });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("detectSaveProfiles finds Flash shared objects mirroring the install path and KiriKiri/Wolf save folders", () => {
+  const tempRoot = makeTempDir();
+  const previousAppData = process.env.APPDATA;
+  const appData = path.join(tempRoot, "Roaming");
+  const installRoot = path.join(tempRoot, "Games", "Flashy");
+  fs.mkdirSync(installRoot, { recursive: true });
+  fs.writeFileSync(path.join(installRoot, "game.swf"), "");
+  const parsed = path.parse(path.resolve(installRoot));
+  const mirror = parsed.dir.slice(parsed.root.length).split(/[\\/]+/).filter(Boolean).concat([parsed.base]);
+  const sharedRoot = path.join(appData, "Macromedia", "Flash Player", "#SharedObjects", "ABCDEFGH", "localhost", ...mirror);
+  fs.mkdirSync(path.join(sharedRoot, "game.swf"), { recursive: true });
+  fs.writeFileSync(path.join(sharedRoot, "game.swf", "save.sol"), "");
+
+  process.env.APPDATA = appData;
+  try {
+    const profiles = detectSaveProfiles({
+      title: "Flashy",
+      engine: "Flash",
+      primaryPath: installRoot,
+      versions: [],
+    });
+    const flash = profiles.find((profile) => profile.provider === "flash_sharedobjects");
+    assert.ok(flash, "flash profile detected");
+    assert.equal(flash.rootPath, sharedRoot);
+    assert.equal(flash.strategy.payload.baseFolder, "appdata");
+  } finally {
+    process.env.APPDATA = previousAppData;
+  }
+
+  const kirikiri = path.join(tempRoot, "Kiri");
+  fs.mkdirSync(path.join(kirikiri, "savedata"), { recursive: true });
+  fs.writeFileSync(path.join(kirikiri, "data.xp3"), "");
+  const kiriProfiles = detectSaveProfiles({ title: "Kiri", engine: "", primaryPath: kirikiri, versions: [] });
+  assert.ok(kiriProfiles.some((profile) => profile.rootPath === path.join(kirikiri, "savedata")));
+
+  const wolf = path.join(tempRoot, "Wolf");
+  fs.mkdirSync(path.join(wolf, "save"), { recursive: true });
+  fs.writeFileSync(path.join(wolf, "Data.wolf"), "");
+  const wolfProfiles = detectSaveProfiles({ title: "Wolf", engine: "Wolf RPG", primaryPath: wolf, versions: [] });
+  assert.ok(wolfProfiles.some((profile) => profile.rootPath === path.join(wolf, "save")));
+});

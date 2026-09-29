@@ -34,25 +34,21 @@ const SaveSyncPill = ({ children, tone = "neutral" }) => {
   );
 };
 
+const SAVE_PROVIDER_LABELS = {
+  renpy_appdata: "Ren'Py save data",
+  unity_locallow: "Unity save data",
+  unreal_localappdata: "Unreal save data",
+  godot_appdata: "Godot save data",
+  html_appdata: "HTML app storage",
+  flash_sharedobjects: "Flash shared objects",
+  gamemaker_localappdata: "GameMaker save data",
+  documents: "Documents saves",
+  saved_games: "Saved Games folder",
+};
+
 const getProfileLabel = (profile) => {
-  if (profile?.provider === "renpy_appdata") {
-    return "Ren'Py save data";
-  }
-
-  if (profile?.provider === "unity_locallow") {
-    return "Unity save data";
-  }
-
-  if (profile?.provider === "unreal_localappdata") {
-    return "Unreal save data";
-  }
-
-  if (profile?.provider === "godot_appdata") {
-    return "Godot save data";
-  }
-
-  if (profile?.provider === "html_appdata") {
-    return "HTML app storage";
+  if (profile?.provider && SAVE_PROVIDER_LABELS[profile.provider]) {
+    return SAVE_PROVIDER_LABELS[profile.provider];
   }
 
   if (profile?.strategy?.type === "windows-known-folder") {
@@ -94,6 +90,37 @@ const getSyncStatusLabel = (syncStatus) => {
   return "Ready";
 };
 
+const SaveActionButton = ({
+  icon,
+  label,
+  busyLabel,
+  busy,
+  disabled,
+  onClick,
+  primary,
+  title,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className={`inline-flex items-center gap-1 border px-2 py-1 text-xs transition disabled:opacity-60 ${
+      primary
+        ? "border-accent/50 bg-accent text-onAccent hover:brightness-110"
+        : "border-border bg-secondary text-text hover:bg-selected"
+    }`}
+    title={title || label}
+  >
+    <span
+      className={`material-symbols-outlined text-[16px] leading-none ${busy ? "animate-spin" : ""}`}
+      aria-hidden
+    >
+      {busy ? "progress_activity" : icon}
+    </span>
+    {busy ? busyLabel || label : label}
+  </button>
+);
+
 const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
   const [snapshot, setSnapshot] = window.React.useState(null);
   const [authState, setAuthState] = window.React.useState({
@@ -107,6 +134,9 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
   const [busyAction, setBusyAction] = window.React.useState("");
   const [message, setMessage] = window.React.useState("");
   const [errorMessage, setErrorMessage] = window.React.useState("");
+  const [importPassword, setImportPassword] = window.React.useState("");
+  const [needsImportPassword, setNeedsImportPassword] =
+    window.React.useState(false);
 
   const loadPanelState = window.React.useCallback(
     async (refreshProfiles = false) => {
@@ -171,6 +201,28 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
     };
   }, [loadPanelState]);
 
+  const callApi = async (method, ...args) => {
+    const api = window.electronAPI;
+    if (!api || typeof api[method] !== "function") {
+      throw new Error("This action needs a newer F95Launcher build.");
+    }
+    return api[method](...args);
+  };
+
+  const describeImportResult = (result) => {
+    const parts = [`${result.importedFiles} file(s) imported`];
+    if (result.skippedFiles > 0) {
+      parts.push(`${result.skippedFiles} skipped`);
+    }
+    if (result.backedUpPaths?.length) {
+      parts.push("previous saves backed up to the local vault");
+    }
+    const destinations = (result.destinations || [])
+      .map((entry) => entry.rootPath)
+      .filter(Boolean);
+    return `${parts.join(", ")}${destinations.length ? ` → ${destinations.join(", ")}` : ""}.`;
+  };
+
   const handleAction = async (actionName, action) => {
     setBusyAction(actionName);
     setMessage("");
@@ -178,23 +230,39 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
 
     try {
       const result = await action();
+      if (result?.cancelled) {
+        return;
+      }
       if (!result?.success) {
-        setErrorMessage(result?.error || "Cloud save action failed.");
+        if (actionName === "import" && result?.needsPassword) {
+          setNeedsImportPassword(true);
+        }
+        setErrorMessage(result?.error || "Save action failed.");
         return;
       }
 
       if (actionName === "upload") {
-        setMessage("Your saves were backed up.");
+        setMessage("Your saves were backed up to the cloud.");
       } else if (actionName === "restore") {
-        setMessage("Your latest backup was restored.");
+        setMessage("Your latest cloud backup was restored.");
+      } else if (actionName === "export") {
+        setMessage(
+          `${result.fileCount} save file(s) exported to ${result.archivePath}.`,
+        );
+      } else if (actionName === "import") {
+        setNeedsImportPassword(false);
+        setImportPassword("");
+        setMessage(describeImportResult(result));
+      } else if (actionName === "open") {
+        return;
       } else {
         setMessage("Save files were scanned again.");
       }
 
       await loadPanelState(false);
     } catch (error) {
-      console.error("Cloud save action failed:", error);
-      setErrorMessage(error.message || "Cloud save action failed.");
+      console.error("Save action failed:", error);
+      setErrorMessage(error.message || "Save action failed.");
     } finally {
       setBusyAction("");
     }
@@ -203,6 +271,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
   const profiles = snapshot?.profiles || [];
   const syncState = snapshot?.syncState || null;
   const hasRemoteArchive = Boolean(syncState?.lastRemotePath);
+  const cloudReady = Boolean(authState.configured);
   const userFacingError =
     errorMessage ||
     getCloudSyncMessageIfPresent(syncState?.lastError || authState.error, {
@@ -214,23 +283,24 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
       <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.18em] opacity-55">
-            Cloud Saves
+            Saves
           </div>
           <div className="mt-1 text-xs leading-snug text-text/75">
-            Scan folders, back up to cloud, restore when needed.
+            Export and import save files, or keep them in the cloud. Cloud sync
+            is optional: everything else works without an account.
           </div>
         </div>
         <button
           type="button"
           onClick={() => onOpenCloudAuth?.()}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-secondary text-text hover:bg-selected"
-          title={authState.authenticated ? "Manage account" : "Sign in"}
-          aria-label={authState.authenticated ? "Manage account" : "Sign in"}
+          title={authState.authenticated ? "Manage cloud account" : "Cloud sync (optional)"}
+          aria-label={authState.authenticated ? "Manage cloud account" : "Cloud sync (optional)"}
         >
           <span className="material-symbols-outlined text-[20px] leading-none">
             {authState.authenticated
               ? "manage_accounts"
-              : authState.configured
+              : cloudReady
                 ? "login"
                 : "cloud_off"}
           </span>
@@ -238,7 +308,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
       </div>
 
       {isLoading ? (
-        <div className="text-sm opacity-60">Loading cloud save status...</div>
+        <div className="text-sm opacity-60">Loading save locations...</div>
       ) : (
         <div className="space-y-3">
           <div className="border border-border/70 bg-canvas/40 p-3">
@@ -249,10 +319,10 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
               </SaveSyncPill>
               <SaveSyncPill>
                 {authState.authenticated
-                  ? "Signed in"
-                  : authState.configured
-                    ? "Sign in required"
-                    : "Cloud unavailable"}
+                  ? "Cloud: signed in"
+                  : cloudReady
+                    ? "Cloud: sign in required"
+                    : "Cloud: off"}
               </SaveSyncPill>
               <SaveSyncPill
                 tone={
@@ -266,98 +336,148 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
               </SaveSyncPill>
             </div>
 
-            <div className="mt-2 grid grid-cols-1 gap-1 text-[11px] opacity-75">
-              <div>
-                Last backup: {formatSyncDate(syncState?.lastUploadedAt)}
-              </div>
-              <div>
-                Last restore: {formatSyncDate(syncState?.lastDownloadedAt)}
-              </div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.18em] opacity-55">
+              Files
             </div>
-
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <SaveActionButton
+                icon="search"
+                label="Find save files"
+                busyLabel="Scanning…"
+                busy={busyAction === "refresh"}
+                disabled={busyAction !== ""}
                 onClick={() =>
                   handleAction("refresh", () =>
-                    window.electronAPI.refreshSaveProfiles(game.record_id),
+                    callApi("refreshSaveProfiles", game.record_id),
                   )
                 }
-                className="inline-flex h-8 w-8 items-center justify-center border border-border bg-secondary text-text hover:bg-selected disabled:opacity-60"
-                disabled={busyAction !== ""}
-                title={
-                  busyAction === "refresh" ? "Scanning…" : "Find save files"
-                }
-                aria-label={
-                  busyAction === "refresh" ? "Scanning" : "Find save files"
-                }
-              >
-                <span
-                  className={`material-symbols-outlined text-[20px] leading-none ${busyAction === "refresh" ? "animate-spin" : ""}`}
-                >
-                  {busyAction === "refresh" ? "progress_activity" : "search"}
-                </span>
-              </button>
-              <button
-                type="button"
+              />
+              <SaveActionButton
+                icon="file_download"
+                label="Export to file"
+                busyLabel="Exporting…"
+                busy={busyAction === "export"}
+                disabled={busyAction !== "" || profiles.length === 0}
+                primary
+                title="Pack every detected save file into a zip you can keep or move to another PC"
                 onClick={() =>
-                  handleAction("upload", () =>
-                    window.electronAPI.uploadCloudSaves(game.record_id),
+                  handleAction("export", () =>
+                    callApi("exportGameSaves", game.record_id),
                   )
                 }
-                className="inline-flex h-8 w-8 items-center justify-center border border-accent/50 bg-accent text-onAccent hover:brightness-110 disabled:opacity-60"
+              />
+              <SaveActionButton
+                icon="file_upload"
+                label="Import from file"
+                busyLabel="Importing…"
+                busy={busyAction === "import"}
+                disabled={busyAction !== ""}
+                title="Restore saves from a zip made by F95Launcher or any archive of a saves folder. Current saves are backed up first."
+                onClick={() =>
+                  handleAction("import", () =>
+                    callApi("importGameSaves", game.record_id, {
+                      password: importPassword.trim(),
+                    }),
+                  )
+                }
+              />
+            </div>
+            {needsImportPassword && (
+              <form
+                className="mt-2 flex flex-wrap items-center gap-1.5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleAction("import", () =>
+                    callApi("importGameSaves", game.record_id, {
+                      password: importPassword.trim(),
+                    }),
+                  );
+                }}
+              >
+                <input
+                  type="text"
+                  value={importPassword}
+                  onChange={(event) => setImportPassword(event.target.value)}
+                  placeholder="Archive password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-w-[160px] flex-1 border border-border bg-black/30 px-2 py-1 text-xs text-text outline-none focus:border-accent/60"
+                  aria-label="Archive password"
+                />
+                <SaveActionButton
+                  icon="lock_open"
+                  label="Import with password"
+                  busy={busyAction === "import"}
+                  disabled={busyAction !== "" || !importPassword.trim()}
+                  onClick={() =>
+                    handleAction("import", () =>
+                      callApi("importGameSaves", game.record_id, {
+                        password: importPassword.trim(),
+                      }),
+                    )
+                  }
+                />
+              </form>
+            )}
+
+            <div className="mt-3 text-[10px] uppercase tracking-[0.18em] opacity-55">
+              Cloud (optional)
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <SaveActionButton
+                icon="cloud_upload"
+                label="Back up to cloud"
+                busyLabel="Backing up…"
+                busy={busyAction === "upload"}
                 disabled={
                   busyAction !== "" ||
                   !authState.authenticated ||
                   profiles.length === 0
                 }
-                title={busyAction === "upload" ? "Backing up…" : "Back up now"}
-                aria-label={
-                  busyAction === "upload" ? "Backing up" : "Back up now"
+                title={
+                  authState.authenticated
+                    ? "Upload the current saves to your account"
+                    : "Sign in to use cloud backups"
                 }
-              >
-                <span
-                  className={`material-symbols-outlined text-[20px] leading-none ${busyAction === "upload" ? "animate-spin" : ""}`}
-                >
-                  {busyAction === "upload"
-                    ? "progress_activity"
-                    : "cloud_upload"}
-                </span>
-              </button>
-              <button
-                type="button"
                 onClick={() =>
-                  handleAction("restore", () =>
-                    window.electronAPI.restoreCloudSaves(game.record_id),
+                  handleAction("upload", () =>
+                    callApi("uploadCloudSaves", game.record_id),
                   )
                 }
-                className="inline-flex h-8 w-8 items-center justify-center border border-border bg-secondary text-text hover:bg-selected disabled:opacity-60"
+              />
+              <SaveActionButton
+                icon="cloud_download"
+                label="Restore from cloud"
+                busyLabel="Restoring…"
+                busy={busyAction === "restore"}
                 disabled={
                   busyAction !== "" ||
                   !authState.authenticated ||
                   !hasRemoteArchive
                 }
                 title={
-                  busyAction === "restore" ? "Restoring…" : "Restore backup"
+                  hasRemoteArchive
+                    ? "Download the latest cloud backup onto this PC"
+                    : "No cloud backup for this game yet"
                 }
-                aria-label={
-                  busyAction === "restore" ? "Restoring" : "Restore backup"
+                onClick={() =>
+                  handleAction("restore", () =>
+                    callApi("restoreCloudSaves", game.record_id),
+                  )
                 }
-              >
-                <span
-                  className={`material-symbols-outlined text-[20px] leading-none ${busyAction === "restore" ? "animate-spin" : ""}`}
-                >
-                  {busyAction === "restore"
-                    ? "progress_activity"
-                    : "cloud_download"}
-                </span>
-              </button>
+              />
+              <span className="text-[11px] opacity-60">
+                Last backup: {formatSyncDate(syncState?.lastUploadedAt)} · Last
+                restore: {formatSyncDate(syncState?.lastDownloadedAt)}
+              </span>
             </div>
 
             {profiles.length === 0 ? (
               <div className="mt-3 border-t border-border/40 pt-3 text-xs opacity-60">
-                No save locations yet — engine-specific save paths are scanned
-                automatically.
+                No save locations yet — engine-specific save paths (game
+                folder, AppData, Documents, Saved Games) are scanned
+                automatically. You can still import a save archive: it goes to
+                the engine's default folder.
               </div>
             ) : (
               <div className="mt-3 space-y-2 border-t border-border/40 pt-3">
@@ -373,6 +493,29 @@ const LibrarySaveSyncPanel = ({ game, onOpenCloudAuth }) => {
                       <span className="text-[10px] uppercase tracking-[0.1em] text-text/45">
                         auto
                       </span>
+                      <button
+                        type="button"
+                        className="ml-auto inline-flex items-center gap-1 border border-border bg-secondary px-1.5 py-0.5 text-[11px] text-text hover:bg-selected disabled:opacity-60"
+                        disabled={busyAction !== ""}
+                        title="Open this folder"
+                        onClick={() =>
+                          handleAction("open", () =>
+                            callApi(
+                              "openSaveLocation",
+                              game.record_id,
+                              profile.rootPath,
+                            ),
+                          )
+                        }
+                      >
+                        <span
+                          className="material-symbols-outlined text-[14px] leading-none"
+                          aria-hidden
+                        >
+                          folder_open
+                        </span>
+                        Open
+                      </button>
                     </div>
                     <div className="mt-0.5 break-all opacity-70">
                       {profile.rootPath}

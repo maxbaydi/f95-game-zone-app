@@ -57,6 +57,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("refresh-save-profiles", recordId),
   uploadCloudSaves: (recordId) =>
     ipcRenderer.invoke("upload-cloud-saves", recordId),
+  exportGameSaves: (recordId) =>
+    ipcRenderer.invoke("export-game-saves", { recordId }),
+  importGameSaves: (recordId, options) =>
+    ipcRenderer.invoke("import-game-saves", { recordId, ...(options || {}) }),
+  exportAllGameSaves: () => ipcRenderer.invoke("export-all-game-saves"),
+  openSaveLocation: (recordId, rootPath) =>
+    ipcRenderer.invoke("open-save-location", { recordId, rootPath }),
   restoreCloudSaves: (recordId) =>
     ipcRenderer.invoke("restore-cloud-saves", recordId),
   getScanSources: () => ipcRenderer.invoke("get-scan-sources"),
@@ -101,6 +108,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("open-f95-download-in-browser", id),
   installF95DownloadFromFile: (id) =>
     ipcRenderer.invoke("install-f95-download-from-file", id),
+  installF95DownloadFromFolder: (id) =>
+    ipcRenderer.invoke("install-f95-download-from-folder", id),
+  retryF95Install: (id, password) =>
+    ipcRenderer.invoke("retry-f95-install", { id, password: password || "" }),
   clearF95DownloadHistory: () =>
     ipcRenderer.invoke("clear-f95-download-history"),
   showF95DownloadInFolder: (id) =>
@@ -294,6 +305,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on("library-reset", listener);
     return () => ipcRenderer.removeListener("library-reset", listener);
+  },
+  onScanCacheReset: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("scan-cache-reset", listener);
+    return () => ipcRenderer.removeListener("scan-cache-reset", listener);
   },
   onF95AuthChanged: (callback) =>
     ipcRenderer.on("f95-auth-changed", (event, payload) => callback(payload)),

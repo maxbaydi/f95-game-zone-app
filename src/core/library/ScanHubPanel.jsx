@@ -67,6 +67,7 @@ const ScanHubPanel = (liveProps) => {
     onRefresh,
     onClose,
     onRescan,
+    onOpenLibraryReset,
     onCancelScan,
     onOpenFolder,
     onAddSource,
@@ -187,10 +188,11 @@ const ScanHubPanel = (liveProps) => {
             ) : (
               <button
                 type="button"
-                onClick={onRescan}
+                onClick={() => onRescan?.("incremental")}
                 className="atlas-fade-enter bg-accent px-2 py-1 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
+                title="Add games from folders the library does not know yet"
               >
-                Rescan Library
+                Find New Games
               </button>
             )}
             <button
@@ -246,6 +248,73 @@ const ScanHubPanel = (liveProps) => {
               )}
 
               <div className="border border-border/70 bg-secondary/5">
+                <div className="border-b border-border/40 px-2 py-2">
+                  <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">
+                    Rescan and reset
+                  </div>
+                  <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+                    {[
+                      {
+                        mode: "refresh",
+                        icon: "autorenew",
+                        label: "Refresh installed games",
+                        description:
+                          "Check every folder again: versions, launchers, engines, missing files.",
+                      },
+                      {
+                        mode: "reset_cache",
+                        icon: "restart_alt",
+                        label: "Reset cache & rescan",
+                        description:
+                          "Forget scan history, candidates and cached thread versions, then refresh everything.",
+                      },
+                    ].map((action) => (
+                      <button
+                        key={action.mode}
+                        type="button"
+                        disabled={isScanRunning}
+                        onClick={() => onRescan?.(action.mode)}
+                        className="flex items-start gap-2 border border-border/60 bg-secondary/40 px-2 py-1.5 text-left transition hover:bg-selected disabled:opacity-50"
+                      >
+                        <span
+                          className="material-symbols-outlined mt-0.5 text-[16px] leading-none text-accentBar"
+                          aria-hidden
+                        >
+                          {action.icon}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-medium text-text">
+                            {action.label}
+                          </span>
+                          <span className="block text-[11px] leading-snug opacity-60">
+                            {action.description}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      disabled={isScanRunning}
+                      onClick={() => onOpenLibraryReset?.()}
+                      className="flex items-start gap-2 border border-red-500/30 bg-red-500/5 px-2 py-1.5 text-left transition hover:bg-red-500/15 disabled:opacity-50 sm:col-span-2"
+                    >
+                      <span
+                        className="material-symbols-outlined mt-0.5 text-[16px] leading-none text-red-300"
+                        aria-hidden
+                      >
+                        delete_sweep
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium text-text">
+                          Rebuild library from scratch…
+                        </span>
+                        <span className="block text-[11px] leading-snug opacity-60">
+                          Back up the database, wipe every record, banner, favourite and link, then scan all sources again. Game files and saves stay.
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-3 divide-x divide-border/40">
                   <ScanHubStatCell
                     label="Enabled sources"

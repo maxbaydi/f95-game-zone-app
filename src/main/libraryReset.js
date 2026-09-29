@@ -231,10 +231,25 @@ async function resetLibraryIndex(input) {
     );
   }
 
+  // Record ids restart from 1 after the wipe (no AUTOINCREMENT), so every
+  // per-record image folder goes, including leftovers of games deleted
+  // earlier: otherwise a new game could inherit an old banner.
   /** @type {string[]} */
   const removedImageDirectories = [];
-  for (const recordId of recordIds) {
-    const imageDirectory = path.join(input.appPaths.images, String(recordId));
+  const imageFolderNames = new Set(recordIds.map((recordId) => String(recordId)));
+  try {
+    for (const entry of await fs.promises.readdir(input.appPaths.images, {
+      withFileTypes: true,
+    })) {
+      if (entry.isDirectory() && /^\d+$/.test(entry.name)) {
+        imageFolderNames.add(entry.name);
+      }
+    }
+  } catch {
+    // No image cache yet.
+  }
+  for (const folderName of imageFolderNames) {
+    const imageDirectory = path.join(input.appPaths.images, folderName);
     try {
       if (!fs.existsSync(imageDirectory)) {
         continue;

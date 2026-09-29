@@ -188,6 +188,9 @@ function createLiveUpdateChecker(options) {
   /** @type {number | null} */
   let nextRunAt = null;
   let started = false;
+  // Bumped by forget(): a run started before a library reset must not store
+  // results under record ids that no longer exist (or belong to new games).
+  let generation = 0;
 
   /**
    * @param {string} level
@@ -233,6 +236,7 @@ function createLiveUpdateChecker(options) {
       return summary;
     }
 
+    const runGeneration = generation;
     const games = await options.listGames();
     const targets = selectLiveUpdateTargets(games, {
       favoritesOnly: request.favoritesOnly,
@@ -290,6 +294,14 @@ function createLiveUpdateChecker(options) {
           error: describeCheckError(error),
         };
         log("warn", "Thread check failed:", { recordId, error: result.error });
+      }
+
+      if (runGeneration !== generation) {
+        summary.skippedReason = "library_reset";
+        log("info", "Run abandoned: the library was reset meanwhile.", {
+          reason: request.reason,
+        });
+        break;
       }
 
       try {
@@ -408,7 +420,17 @@ function createLiveUpdateChecker(options) {
     };
   }
 
+  /**
+   * The library index was wiped: drop the last summary (its record ids are
+   * meaningless now) and make a run in progress stop storing results.
+   */
+  function forget() {
+    generation += 1;
+    lastRun = null;
+  }
+
   return {
+    forget,
     getState,
     runNow,
     start,

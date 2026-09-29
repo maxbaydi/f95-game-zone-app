@@ -40,7 +40,19 @@ const CLEARED_ERROR_FIELDS = {
   errorCode: "",
   actionUrl: "",
   actionMode: "",
+  hint: "",
+  packagePath: "",
+  warning: "",
 };
+
+/** Error codes that a password can fix (see src/main/archive/archiveErrors.js). */
+const PASSWORD_ERROR_CODES = new Set([
+  "archive_encrypted",
+  "archive_wrong_password",
+]);
+
+/** Statuses from which the user can hand the app a file or a folder. */
+const MANUAL_INSTALL_STATUSES = new Set(["error", "cancelled", "action"]);
 
 function isActiveStatus(status) {
   return ACTIVE_STATUSES.has(status);
@@ -88,26 +100,90 @@ function trimHistory(entries) {
 
 /**
  * Public shape sent to the renderer. `hasRetryPayload` is internal and is
- * exposed as the derived `canRetry` flag.
+ * exposed as the derived `canRetry` flag. `packagePath` is the downloaded
+ * package kept on disk after a failed install: `canInstallFromPackage`
+ * means the install can be retried without downloading again.
  */
 function toPublicEntry(entry) {
   const { hasRetryPayload, ...publicEntry } = entry;
+  const errorCode = publicEntry.errorCode || "";
+  const packagePath = publicEntry.packagePath || "";
   return {
     ...publicEntry,
-    errorCode: publicEntry.errorCode || "",
+    errorCode,
     actionUrl: publicEntry.actionUrl || "",
     actionMode: publicEntry.actionMode || "",
     hostLabel: publicEntry.hostLabel || "",
+    hint: publicEntry.hint || "",
+    packagePath,
+    warning: publicEntry.warning || "",
+    engine: publicEntry.engine || "",
     canCancel: CANCELLABLE_STATUSES.has(entry.status),
     canRetry: RETRYABLE_STATUSES.has(entry.status) && hasRetryPayload === true,
+    canInstallFromPackage: entry.status === "error" && Boolean(packagePath),
+    canInstallManually: MANUAL_INSTALL_STATUSES.has(entry.status),
+    needsPassword: entry.status === "error" && PASSWORD_ERROR_CODES.has(errorCode),
   };
 }
 
-function createDownloadsStore() {
+/**
+ * Entries loaded from disk at startup: whatever was active when the app
+ * closed cannot continue, so it becomes a failed entry. A package kept on
+ * disk stays attached so the install can be retried without re-downloading.
+ * @param {any[]} rawEntries
+ * @param {(packagePath: string) => boolean} packageExists
+ */
+function normalizeHydratedEntries(rawEntries, packageExists) {
+  const now = Date.now();
+  return (Array.isArray(rawEntries) ? rawEntries : [])
+    .filter((entry) => entry && typeof entry === "object" && entry.id)
+    .map((entry) => {
+      const packagePath =
+        entry.packagePath && packageExists(String(entry.packagePath))
+          ? String(entry.packagePath)
+          : "";
+      const wasActive = isActiveStatus(entry.status);
+      return {
+        ...entry,
+        status: wasActive ? "error" : entry.status,
+        speedBytesPerSecond: 0,
+        actionUrl: wasActive ? "" : entry.actionUrl || "",
+        actionMode: "",
+        hasRetryPayload: false,
+        packagePath,
+        error: wasActive
+          ? packagePath
+            ? "The app was closed before the install finished. The downloaded file is still here: retry the install."
+            : "The app was closed before this download finished."
+          : entry.error || "",
+        errorCode: wasActive ? (packagePath ? "install_interrupted" : "download_interrupted") : entry.errorCode || "",
+        text: wasActive
+          ? `Interrupted ${entry.title || "download"}`
+          : entry.text || "",
+        updatedAt: entry.updatedAt || now,
+        createdAt: entry.createdAt || now,
+      };
+    });
+}
+
+/**
+ * @param {{ onChange?: (entries: Array<Record<string, any>>) => void }=} options
+ */
+function createDownloadsStore(options = {}) {
   /** @type {Array<Record<string, any>>} */
   let entries = [];
+  const onChange = typeof options.onChange === "function" ? options.onChange : null;
 
   const findEntry = (id) => entries.find((entry) => entry.id === id) || null;
+  const notify = () => {
+    if (onChange) {
+      try {
+        onChange(entries.map((entry) => ({ ...entry })));
+      } catch {
+        // Persistence must never break the download flow.
+      }
+    }
+  };
 
   const upsert = (id, patch) => {
     const now = Date.now();
@@ -138,6 +214,7 @@ function createDownloadsStore() {
     }
 
     entries = trimHistory(entries);
+    notify();
     const updated = findEntry(id);
     return updated ? toPublicEntry(updated) : null;
   };
@@ -165,6 +242,7 @@ function createDownloadsStore() {
       "hostLabel",
       "version",
       "creator",
+      "engine",
     ]) {
       if (entry[key] !== undefined) {
         descriptor[key] = entry[key] || "";
@@ -188,6 +266,7 @@ function createDownloadsStore() {
         hostLabel: entry.hostLabel || "",
         version: entry.version || "",
         creator: entry.creator || "",
+        engine: entry.engine || "",
         text: entry.text || `Queued ${entry.title || "download"}`,
         speedBytesPerSecond: 0,
         ...(entry.hasRetryPayload !== undefined
@@ -287,8 +366,20 @@ function createDownloadsStore() {
         errorCode: "",
         actionUrl: "",
         actionMode: "",
+        hint: "",
+        packagePath: "",
         ...patch,
       });
+    },
+    /**
+     * Forget a kept package (deleted from disk, or consumed by an install).
+     */
+    clearPackage(id) {
+      const existing = findEntry(id);
+      if (!existing || !existing.packagePath) {
+        return existing ? toPublicEntry(existing) : null;
+      }
+      return upsert(id, { packagePath: "" });
     },
     cancel(id, patch = {}) {
       const existing = findEntry(id);
@@ -307,17 +398,32 @@ function createDownloadsStore() {
     remove(id) {
       const before = entries.length;
       entries = entries.filter((entry) => entry.id !== id);
+      if (entries.length !== before) {
+        notify();
+      }
       return entries.length !== before;
+    },
+    /**
+     * Replace the whole list with entries persisted by a previous run.
+     * @param {any[]} rawEntries
+     * @param {(packagePath: string) => boolean} packageExists
+     */
+    hydrate(rawEntries, packageExists) {
+      entries = trimHistory(normalizeHydratedEntries(rawEntries, packageExists));
+      notify();
+      return entries.length;
     },
     /**
      * Drop completed / failed / cancelled entries and keep active ones.
      * @returns {string[]} ids of removed entries
      */
     clearHistory() {
-      const removedIds = entries
-        .filter((entry) => HISTORY_STATUSES.has(entry.status))
-        .map((entry) => entry.id);
+      const removed = entries.filter((entry) => HISTORY_STATUSES.has(entry.status));
+      const removedIds = removed.map((entry) => entry.id);
       entries = entries.filter((entry) => !HISTORY_STATUSES.has(entry.status));
+      if (removedIds.length) {
+        notify();
+      }
       return removedIds;
     },
     list() {
@@ -325,6 +431,10 @@ function createDownloadsStore() {
     },
     ids() {
       return entries.map((entry) => entry.id);
+    },
+    /** Package files referenced by any entry (kept on disk between runs). */
+    packagePaths() {
+      return entries.map((entry) => entry.packagePath).filter(Boolean);
     },
     activeCount() {
       return entries.filter((entry) => isActiveStatus(entry.status)).length;
@@ -335,7 +445,10 @@ function createDownloadsStore() {
 module.exports = {
   ACTIVE_STATUSES,
   CANCELLABLE_STATUSES,
+  MANUAL_INSTALL_STATUSES,
   MAX_HISTORY_ITEMS,
+  PASSWORD_ERROR_CODES,
   createDownloadsStore,
   isActiveStatus,
+  normalizeHydratedEntries,
 };

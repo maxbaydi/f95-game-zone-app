@@ -104,6 +104,24 @@
     }
 
     if (
+      normalizedMessage.includes("project is paused") ||
+      normalizedMessage.includes("project paused") ||
+      normalizedMessage.includes("is paused") ||
+      normalizedMessage.includes("503") ||
+      normalizedMessage.includes("service unavailable") ||
+      normalizedMessage.includes("502") ||
+      normalizedMessage.includes("bad gateway") ||
+      normalizedMessage.includes("540")
+    ) {
+      return {
+        code: "cloud_paused",
+        rawMessage,
+        userMessage:
+          "The cloud database is paused or unavailable (free Supabase projects pause after a week without traffic). Cloud sync is optional: your local saves, the local vault and file export/import keep working. Resume the project in the Supabase dashboard to use the cloud again.",
+      };
+    }
+
+    if (
       normalizedMessage.includes("network") ||
       normalizedMessage.includes("fetch failed") ||
       normalizedMessage.includes("timed out") ||

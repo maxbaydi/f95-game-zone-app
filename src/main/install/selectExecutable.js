@@ -1,5 +1,9 @@
 const path = require("path");
 
+/**
+ * Helper binaries that ship next to games and are never the launcher.
+ * Matched against the compact base name (prefix / suffix / exact).
+ */
 const GENERIC_EXECUTABLE_NAMES = [
   "renpy",
   "python",
@@ -8,15 +12,49 @@ const GENERIC_EXECUTABLE_NAMES = [
   "unitycrashhandler32",
   "unitycrashhandler",
   "crashpad_handler",
+  "crashpadhandler",
+  "crashreportclient",
+  "unrealcefsubprocess",
+  "epicwebhelper",
+  "ue4prereqsetup",
+  "ueprereqsetup",
   "notification_helper",
+  "notificationhelper",
   "dxwebsetup",
+  "dxsetup",
   "vcredist",
   "vcredistx64",
   "vcredistx86",
   "vc_redist",
+  "oalinst",
   "unins000",
   "uninstall",
+  "uninst",
   "nw",
+  "nwjc",
+  "payload",
+  "config",
+  "chromedriver",
+  "7za",
+  "7z",
+];
+
+/**
+ * Folders that only hold redistributables, runtimes or tooling.
+ */
+const IGNORED_PATH_SEGMENTS = [
+  "/redist/",
+  "/_commonredist/",
+  "/commonredist/",
+  "/vcredist/",
+  "/directx/",
+  "/dotnet/",
+  "/dotnetfx/",
+  "/prerequisites/",
+  "/thirdparty/",
+  "/engine/binaries/",
+  "/__macosx/",
+  "/tools/",
 ];
 
 function compactToken(value) {
@@ -65,8 +103,25 @@ function extractVersionParts(value) {
   return candidates.sort((left, right) => compareVersionParts(right, left))[0];
 }
 
+function normalizeRelativePath(value) {
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .toLowerCase();
+}
+
+/**
+ * @param {string} relativePath
+ * @param {{
+ *   title?: string,
+ *   creator?: string,
+ *   preferredExecutables?: string[],
+ *   ignoredExecutables?: string[],
+ * }=} context
+ */
 function scoreExecutable(relativePath, context = {}) {
   const normalizedPath = String(relativePath || "").replace(/\\/g, "/");
+  const lowerPath = normalizedPath.toLowerCase();
   const extension = path.posix.extname(normalizedPath).toLowerCase();
   const baseName = path.posix.basename(normalizedPath, extension);
   const compactBaseName = compactToken(baseName);
@@ -79,8 +134,11 @@ function scoreExecutable(relativePath, context = {}) {
     score += 20;
   }
 
-  if (extension === ".html") {
+  if (extension === ".html" || extension === ".htm") {
     score += 5;
+    if (compactBaseName === "index") {
+      score += 40;
+    }
   }
 
   if (compactTitle) {
@@ -99,6 +157,20 @@ function scoreExecutable(relativePath, context = {}) {
 
   if (normalizedPath.includes("/renpy/") || normalizedPath.includes("/lib/")) {
     score -= 45;
+  }
+
+  if (IGNORED_PATH_SEGMENTS.some((segment) => `/${lowerPath}`.includes(segment))) {
+    score -= 200;
+  }
+
+  const preferred = (context.preferredExecutables || []).map(normalizeRelativePath);
+  if (preferred.includes(lowerPath) || preferred.includes(path.posix.basename(lowerPath))) {
+    score += 300;
+  }
+
+  const ignored = (context.ignoredExecutables || []).map(normalizeRelativePath);
+  if (ignored.includes(path.posix.basename(lowerPath)) || ignored.includes(lowerPath)) {
+    score -= 400;
   }
 
   if (
@@ -150,6 +222,7 @@ function selectPreferredExecutable(executables, context = {}) {
 }
 
 module.exports = {
+  GENERIC_EXECUTABLE_NAMES,
   extractVersionParts,
   scoreExecutable,
   selectPreferredExecutable,

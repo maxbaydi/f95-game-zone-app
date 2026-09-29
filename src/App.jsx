@@ -2764,11 +2764,21 @@ const App = () => {
       setSelectedGame(null);
       setSelectedGameDetails(null);
       setSelectedGamePreviews([]);
+      // Everything derived from the old records is stale now.
+      setDiscoveryCandidates([]);
+      setScanJobs([]);
+      setLiveUpdateState((previous) => ({ ...previous, lastRun: null }));
+    };
+    const handleScanCacheReset = () => {
+      setDiscoveryCandidates([]);
+      setScanJobs([]);
+      setLiveUpdateState((previous) => ({ ...previous, lastRun: null }));
     };
 
     const unsubscribers = [
       subscribeElectronEvent("onGameDeleted", "game-deleted", handleGameDeleted),
       subscribeElectronEvent("onLibraryReset", "library-reset", handleLibraryReset),
+      subscribeElectronEvent("onScanCacheReset", "scan-cache-reset", handleScanCacheReset),
       subscribeElectronEvent(
         "onWindowStateChanged",
         "window-state-changed",
@@ -3040,13 +3050,23 @@ const App = () => {
     }
   };
 
-  const rescanLibrary = async (options = {}) => {
+  const rescanLibrary = async (rawOptions = {}) => {
     // Read the ref: this is also invoked from the context-menu listener that
     // was registered on mount and would otherwise see a stale state value.
     if (isLibraryScanRunningRef.current) {
       appToast.info("A library scan is already running.");
       return;
     }
+
+    // Buttons may pass their click event straight through; an event is not
+    // serialisable over IPC and would make the whole call fail.
+    const options =
+      rawOptions &&
+      typeof rawOptions === "object" &&
+      !("nativeEvent" in rawOptions) &&
+      typeof rawOptions.preventDefault !== "function"
+        ? rawOptions
+        : {};
 
     const mode =
       options?.mode ||
@@ -3085,6 +3105,9 @@ const App = () => {
           total: result.scanned || 1,
         });
         return result;
+      }
+      if (result.partialFailure && result.error) {
+        appToast.warning(result.error, { title: "Library rescan" });
       }
 
       const summaryParts = [`${result.imported || 0} added`];
@@ -4479,7 +4502,13 @@ const App = () => {
           defaultGameFolder={defaultGameFolder}
           onRefresh={loadScanHubData}
           onClose={() => setShowDiscovery(false)}
-          onRescan={rescanLibrary}
+          onRescan={(mode) =>
+            rescanLibrary(typeof mode === "string" ? { mode } : {})
+          }
+          onOpenLibraryReset={() => {
+            setShowDiscovery(false);
+            openLibraryResetModal();
+          }}
           onCancelScan={cancelLibraryScan}
           onOpenFolder={openGameFolder}
           onAddSource={addScanSource}

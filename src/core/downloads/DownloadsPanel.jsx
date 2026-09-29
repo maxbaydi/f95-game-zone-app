@@ -143,6 +143,7 @@ const callDownloadsApi = async (method, ...args) => {
 
 const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
   const [pendingAction, setPendingAction] = React.useState("");
+  const [archivePassword, setArchivePassword] = React.useState("");
   const meta = getDownloadStatusMeta(item.status);
   const percent = Math.max(0, Math.min(100, Number(item.percent) || 0));
   const totalBytes = Number(item.totalBytes) || 0;
@@ -170,7 +171,12 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
   const showManualHelp =
     item.status === "action" || (item.status === "error" && Boolean(item.actionUrl));
   const canInstallFromFile =
-    item.status === "action" || (item.status === "error" && canRetry);
+    item.canInstallManually ??
+    (item.status === "action" || (item.status === "error" && canRetry));
+  // A package kept after a failed install: it can be installed again without
+  // downloading, possibly with the archive password.
+  const canInstallFromPackage = Boolean(item.canInstallFromPackage);
+  const needsPassword = Boolean(item.needsPassword);
 
   const runItemAction = async (actionKey, action) => {
     if (pendingAction) {
@@ -254,6 +260,39 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         title: "Install from file",
         duration: 4000,
       });
+    });
+
+  const handleRetryInstall = () =>
+    runItemAction("retry-install", async () => {
+      const password = needsPassword ? archivePassword.trim() : "";
+      if (needsPassword && !password) {
+        throw new Error("Enter the archive password first.");
+      }
+      const result = await callDownloadsApi("retryF95Install", item.id, password);
+      if (!result?.success) {
+        throw new Error(result?.error || "The install could not be restarted.");
+      }
+      downloadsToast()?.info(
+        password
+          ? `Unpacking ${result.fileName || "the package"} with the password.`
+          : `Installing ${result.fileName || "the package"} again, nothing is downloaded.`,
+        { title: item.title || "Install", duration: 4000 },
+      );
+    });
+
+  const handleInstallFromFolder = () =>
+    runItemAction("folder-install", async () => {
+      const result = await callDownloadsApi("installF95DownloadFromFolder", item.id);
+      if (result?.cancelled) {
+        return;
+      }
+      if (!result?.success) {
+        throw new Error(result?.error || "The folder could not be used.");
+      }
+      downloadsToast()?.info(
+        `Installing ${item.title || "the game"} from ${result.folderName || "the folder"}.`,
+        { title: "Install from folder", duration: 4000 },
+      );
     });
 
   const handleSolveCaptcha = () =>
@@ -368,6 +407,82 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         </div>
       )}
 
+      {item.hint && (
+        <div className="atlas-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-text/65">
+          <span className="material-symbols-outlined shrink-0 text-[15px] text-amber-200/80" aria-hidden>
+            lightbulb
+          </span>
+          <span className="min-w-0 break-words">{item.hint}</span>
+        </div>
+      )}
+
+      {item.status === "completed" && item.warning === "no_executable" && (
+        <div className="atlas-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-100/80">
+          <span className="material-symbols-outlined shrink-0 text-[15px]" aria-hidden>
+            warning
+          </span>
+          <span className="min-w-0 break-words">
+            No launcher was recognised in the package. Open the game in the library and pick the executable by hand.
+          </span>
+        </div>
+      )}
+
+      {canInstallFromPackage && (
+        <div className="atlas-rise-enter mt-3 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
+          <div className="flex items-start gap-2.5">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-sky-200" aria-hidden>
+              {needsPassword ? "key" : "inventory_2"}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-text">
+                {needsPassword
+                  ? "The archive needs a password"
+                  : "The downloaded file is still here"}
+              </div>
+              <div className="mt-0.5 text-xs leading-relaxed text-text/60">
+                {needsPassword
+                  ? "Passwords are usually posted in the game thread next to the download links. Nothing is downloaded again."
+                  : "Retry the install without downloading again, or unpack it yourself and point the app at the folder."}
+              </div>
+              {needsPassword && (
+                <form
+                  className="mt-2 flex flex-wrap items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    handleRetryInstall();
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={archivePassword}
+                    onChange={(event) => setArchivePassword(event.target.value)}
+                    placeholder="Archive password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-w-[160px] flex-1 rounded-lg border border-border bg-black/30 px-2.5 py-1 text-xs text-text outline-none transition focus:border-sky-400/60"
+                    aria-label="Archive password"
+                  />
+                  <button
+                    type="submit"
+                    disabled={Boolean(pendingAction) || !archivePassword.trim()}
+                    className="inline-flex items-center gap-1 border border-sky-400/50 bg-sky-400/20 px-2.5 py-1 text-xs text-sky-50 transition hover:bg-sky-400/30 disabled:opacity-50"
+                  >
+                    {pendingAction === "retry-install" ? (
+                      <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                    ) : (
+                      <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                        lock_open
+                      </span>
+                    )}
+                    Unpack with password
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManualHelp && (
         <div
           className={`atlas-rise-enter mt-3 rounded-xl border p-3 transition-colors duration-500 ${
@@ -437,7 +552,12 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         </div>
       )}
 
-      {(canCancel || canRetry || item.status === "completed" || item.actionUrl) && (
+      {(canCancel ||
+        canRetry ||
+        canInstallFromFile ||
+        canInstallFromPackage ||
+        item.status === "completed" ||
+        item.actionUrl) && (
         <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
           {item.actionUrl && !waitingForFile && (item.status === "error" || item.status === "action") && (
             <button
@@ -469,12 +589,35 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               Cancel
             </button>
           )}
+          {canInstallFromPackage && !needsPassword && (
+            <button
+              type="button"
+              onClick={handleRetryInstall}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-sky-400/50 bg-sky-400/20 px-2.5 py-1 text-xs text-sky-50 transition hover:bg-sky-400/30 disabled:opacity-50"
+              title="Install the downloaded file again without downloading it"
+            >
+              {pendingAction === "retry-install" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                  restart_alt
+                </span>
+              )}
+              Retry install
+            </button>
+          )}
           {canRetry && (
             <button
               type="button"
               onClick={handleRetry}
               disabled={Boolean(pendingAction)}
-              className="group inline-flex items-center gap-1 border border-accent/45 bg-accent/15 px-2.5 py-1 text-xs text-text transition hover:bg-accent/25 disabled:opacity-50"
+              className={`group inline-flex items-center gap-1 border px-2.5 py-1 text-xs text-text transition disabled:opacity-50 ${
+                canInstallFromPackage
+                  ? "border-border bg-white/5 hover:bg-white/10"
+                  : "border-accent/45 bg-accent/15 hover:bg-accent/25"
+              }`}
+              title={canInstallFromPackage ? "Download the package again from the mirror" : undefined}
             >
               {pendingAction === "retry" ? (
                 <span className="atlas-spinner atlas-keep-motion" aria-hidden />
@@ -483,7 +626,25 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                   refresh
                 </span>
               )}
-              Retry
+              {canInstallFromPackage ? "Re-download" : "Retry"}
+            </button>
+          )}
+          {canInstallFromFile && (
+            <button
+              type="button"
+              onClick={handleInstallFromFolder}
+              disabled={Boolean(pendingAction)}
+              className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+              title="Register a folder you unpacked yourself"
+            >
+              {pendingAction === "folder-install" ? (
+                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              ) : (
+                <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
+                  drive_folder_upload
+                </span>
+              )}
+              Install from folder
             </button>
           )}
           {canInstallFromFile && !showManualHelp && (
