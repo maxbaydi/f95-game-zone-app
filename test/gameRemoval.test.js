@@ -264,18 +264,34 @@ test("removeLibraryGame full cleanup deletes install folders, detected saves, an
     "saves",
     "slot2.save",
   );
-  const previousAppData = process.env.APPDATA;
+  const previousEnv = {
+    APPDATA: process.env.APPDATA,
+    ATLAS_DOCUMENTS_DIR: process.env.ATLAS_DOCUMENTS_DIR,
+    ATLAS_SAVED_GAMES_DIR: process.env.ATLAS_SAVED_GAMES_DIR,
+  };
   const appDataRoot = path.join(tempRoot, "AppData", "Roaming");
   const renpySaveRoot = path.join(appDataRoot, "RenPy", "Fresh Start");
   const renpySaveFile = path.join(renpySaveRoot, "persistent");
+  // The detector also looks in the real Documents / Saved Games folders of
+  // the machine; point them at the temp dir so the test never depends on
+  // (or touches) what the developer keeps there.
+  const documentsRoot = path.join(tempRoot, "Documents");
+  const documentsSaveRoot = path.join(documentsRoot, "My Games", "Fresh Start");
+  const savedGamesRoot = path.join(tempRoot, "Saved Games");
 
   ensureAppDirs(appPaths);
   fs.mkdirSync(path.dirname(localSavePath), { recursive: true });
   fs.mkdirSync(renpySaveRoot, { recursive: true });
+  fs.mkdirSync(documentsSaveRoot, { recursive: true });
+  fs.mkdirSync(path.join(documentsRoot, "Studio Projects"), { recursive: true });
+  fs.mkdirSync(savedGamesRoot, { recursive: true });
   fs.writeFileSync(localSavePath, "slot-two", "utf8");
   fs.writeFileSync(path.join(installDirectory, "game.exe"), "binary", "utf8");
   fs.writeFileSync(renpySaveFile, "persistent-two", "utf8");
+  fs.writeFileSync(path.join(documentsSaveRoot, "slot1.sav"), "documents-save", "utf8");
   process.env.APPDATA = appDataRoot;
+  process.env.ATLAS_DOCUMENTS_DIR = documentsRoot;
+  process.env.ATLAS_SAVED_GAMES_DIR = savedGamesRoot;
 
   const db = await initializeDatabase(appPaths);
 
@@ -323,15 +339,21 @@ test("removeLibraryGame full cleanup deletes install folders, detected saves, an
       },
     );
 
-    assert.equal(result.success, true);
+    assert.equal(result.success, true, JSON.stringify(result));
     assert.equal(fs.existsSync(installDirectory), false);
     assert.equal(fs.existsSync(renpySaveRoot), false);
+    assert.equal(fs.existsSync(documentsSaveRoot), false, "Documents/My Games save folder is wiped");
+    assert.equal(fs.existsSync(path.join(documentsRoot, "My Games")), true, "shared My Games level stays");
+    assert.equal(fs.existsSync(path.join(documentsRoot, "Studio Projects")), true, "unrelated Documents folder stays");
     assert.equal(
       fs.existsSync(path.join(appPaths.backups, "save_vault", identity)),
       false,
     );
   } finally {
-    process.env.APPDATA = previousAppData;
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     await closeAsync(db);
   }
 });

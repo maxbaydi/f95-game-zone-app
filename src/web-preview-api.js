@@ -787,6 +787,7 @@
           hint: "Look for the password in the game thread, right next to the download links. Enter it below and the install continues without downloading again.",
           canCancel: false,
           canRetry: true,
+          canInstallManually: false,
           updatedAt: minutesAgo(4),
           threadUrl: findDemoGame(3).siteUrl,
         },
