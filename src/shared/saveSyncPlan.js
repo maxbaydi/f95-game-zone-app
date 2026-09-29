@@ -51,6 +51,17 @@ function decideSaveSyncPlan(input) {
     };
   }
 
+  // Same files on both sides (after a restore, or the same saves synced from
+  // another PC) even though paths and timestamps differ.
+  const localContentHash = normalizeHash(localManifest?.contentHash);
+  const remoteContentHash = normalizeHash(remoteManifest?.contentHash);
+  if (localContentHash && remoteContentHash && localContentHash === remoteContentHash) {
+    return {
+      action: "noop",
+      reason: "already-synced",
+    };
+  }
+
   const localChangedSinceLast = lastLocalHash
     ? localHash !== lastLocalHash
     : Boolean(localHash);

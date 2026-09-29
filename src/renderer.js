@@ -57,6 +57,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("refresh-save-profiles", recordId),
   uploadCloudSaves: (recordId) =>
     ipcRenderer.invoke("upload-cloud-saves", recordId),
+  getSaveStorageState: () => ipcRenderer.invoke("get-save-storage-state"),
+  detectSaveStorageFolders: () =>
+    ipcRenderer.invoke("detect-save-storage-folders"),
+  testSaveStorageConnection: (payload) =>
+    ipcRenderer.invoke("test-save-storage-connection", payload),
+  connectSaveStorage: (payload) =>
+    ipcRenderer.invoke("connect-save-storage", payload),
+  unlockSaveStorage: (passphrase) =>
+    ipcRenderer.invoke("unlock-save-storage", { passphrase }),
+  disconnectSaveStorage: () => ipcRenderer.invoke("disconnect-save-storage"),
+  syncSaveStorageAll: (mode) =>
+    ipcRenderer.invoke("sync-save-storage-all", { mode }),
+  syncSaveStorageGame: (recordId, action) =>
+    ipcRenderer.invoke("sync-save-storage-game", { recordId, action }),
+  getSaveStorageCatalog: () => ipcRenderer.invoke("get-save-storage-catalog"),
+  exportSaveStorageCard: (passphrase) =>
+    ipcRenderer.invoke("export-save-storage-card", { passphrase }),
+  importSaveStorageCard: (payload) =>
+    ipcRenderer.invoke("import-save-storage-card", payload || {}),
+  forgetSaveStorageGame: (recordId) =>
+    ipcRenderer.invoke("forget-save-storage-game", { recordId }),
+  onSaveStorageChanged: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("save-storage-changed", listener);
+    return () => ipcRenderer.removeListener("save-storage-changed", listener);
+  },
+  onSaveStorageProgress: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("save-storage-progress", listener);
+    return () => ipcRenderer.removeListener("save-storage-progress", listener);
+  },
   exportGameSaves: (recordId) =>
     ipcRenderer.invoke("export-game-saves", { recordId }),
   importGameSaves: (recordId, options) =>

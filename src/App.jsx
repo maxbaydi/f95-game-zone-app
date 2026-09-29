@@ -4480,6 +4480,7 @@ const App = () => {
                   onRemoveGame={openDeleteGameModal}
                   onPreviewSelect={setPreviewModalIndex}
                   onOpenCloudAuth={() => setIsCloudAuthOpen(true)}
+                  onOpenSaveStorage={() => openSettingsPage("saves")}
                   onLocateVersion={handleLocateVersion}
                   onGameChanged={applyUpdatedGameToState}
                   onLinkCatalog={openCatalogLinkModal}
@@ -4523,8 +4524,6 @@ const App = () => {
         <window.OnboardingWizard
           isOpen={onboarding.isOpen}
           initialStep={onboarding.step}
-          cloudAuthState={cloudAuthState}
-          onOpenCloud={() => setIsCloudAuthOpen(true)}
           onFinish={finishOnboarding}
         />
       </AppSafe>
