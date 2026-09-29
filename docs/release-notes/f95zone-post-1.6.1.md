@@ -1,10 +1,10 @@
-# F95Launcher 1.6.0 — forum post (English)
+# F95Launcher 1.6.1 — forum post (English)
 
 Copy the text below into the F95zone thread. Screenshots to attach are in `docs/screenshots/` (see the list at the end). Lines starting with `>` are notes for you, not part of the post.
 
 ---
 
-**F95Launcher 1.6.0 is out — and a recap of everything since 1.3**
+**F95Launcher 1.6.1 is out — and a recap of everything since 1.3**
 
 F95Launcher is a free, open-source desktop launcher for Windows that keeps your F95 library, updates and saves in one place. The last few releases changed a lot, so here is the whole picture in one post.
 
@@ -12,7 +12,7 @@ Download: https://github.com/maxbaydi/f95-game-zone-app/releases/latest
 Source: https://github.com/maxbaydi/f95-game-zone-app
 Installed 1.3+ versions update themselves through the built-in updater.
 
-**What's new in 1.6.0**
+**What's new in 1.6**
 
 *Your own cloud for saves — no account with us*
 - The launcher no longer runs a hosted cloud. Your saves sync into storage **you** own. Setup is one click if you already use OneDrive, Dropbox, Google Drive, Yandex.Disk, iCloud, MEGA, pCloud, Nextcloud, Box or Proton Drive: the launcher detects the desktop client, creates an "F95Launcher Saves" folder in it and keeps it up to date. The cloud client uploads it.

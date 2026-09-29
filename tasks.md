@@ -4838,3 +4838,9 @@ What was done:
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests).
 
 Release path: pushing to `main` triggers `.github/workflows/main.yml`, which builds the packages and publishes `v1.6.0`; installed 1.3+ apps pick it up through electron-updater.
+
+## 2026-09-29 — 1.6.1: Windows-only failure in full game removal
+
+`Atlas Checks` on Windows failed one test after 1.6.0: `removeLibraryGame full cleanup …` returned `UNSAFE_SAVE_PATH`. The new Documents/Saved Games save detection scans the runner's real `Documents` and matched the creator "Studio" by overlap (e.g. "Visual Studio 2022"), and `collectExternalSaveDirectories` did not know the `documents`/`savedGames` base folders. Fix: exact name only at the Documents root; removal supports those base folders but never deletes `Documents`, `Documents\My Games` or `Saved Games` themselves; tests isolate the folders through `ATLAS_DOCUMENTS_DIR` / `ATLAS_SAVED_GAMES_DIR`. Screenshots and captions refreshed. Released as `v1.6.1` (same forum post, renamed to `f95zone-post-1.6.1.md`).
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests on Linux).
