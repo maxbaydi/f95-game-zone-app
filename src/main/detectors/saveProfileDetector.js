@@ -785,10 +785,13 @@ function detectDocumentsProfiles(game) {
   if (candidates.length === 0) {
     return [];
   }
+  // The Documents root itself is full of unrelated folders ("Visual Studio
+  // 2022" would overlap a creator called "Studio"), so only an exact name
+  // counts there. "My Games" and "Saved Games" contain games only.
   const roots = [
-    { baseFolder: "documents", prefix: ["My Games"] },
-    { baseFolder: "documents", prefix: [] },
-    { baseFolder: "savedGames", prefix: [] },
+    { baseFolder: "documents", prefix: ["My Games"], minimumConfidence: 56 },
+    { baseFolder: "documents", prefix: [], minimumConfidence: 82 },
+    { baseFolder: "savedGames", prefix: [], minimumConfidence: 56 },
   ];
   /** @type {DetectedSaveProfile[]} */
   const profiles = [];
@@ -807,7 +810,7 @@ function detectDocumentsProfiles(game) {
         continue;
       }
       const score = scoreCandidateTokenMatch(entry.name, candidates, 82, 56);
-      if (score.confidence < 56) {
+      if (score.confidence < root.minimumConfidence) {
         continue;
       }
       profiles.push({

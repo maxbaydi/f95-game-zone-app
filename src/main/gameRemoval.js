@@ -183,7 +183,16 @@ function collectExternalSaveDirectories(saveSnapshot, installDirectories) {
     appdata: getKnownFolderRoot("appdata"),
     localAppData: getKnownFolderRoot("localAppData"),
     localLow: getKnownFolderRoot("localLow"),
+    documents: getKnownFolderRoot("documents"),
+    savedGames: getKnownFolderRoot("savedGames"),
   };
+  // Documents and Saved Games hold plenty that is not a game: only a folder
+  // below them (never the root or a shared "My Games" level) may be wiped.
+  const protectedRoots = [
+    knownRoots.documents,
+    knownRoots.savedGames,
+    knownRoots.documents ? path.join(knownRoots.documents, "My Games") : "",
+  ].filter(Boolean);
   const seenPaths = new Set();
   const deletePaths = [];
   const unsupportedPaths = [];
@@ -224,7 +233,13 @@ function collectExternalSaveDirectories(saveSnapshot, installDirectories) {
     if (strategyType === "windows-known-folder") {
       const baseFolder = String(profile?.strategy?.payload?.baseFolder || "");
       const baseRoot = knownRoots[baseFolder];
-      if (baseRoot && isPathWithin(baseRoot, resolvedRootPath)) {
+      if (
+        baseRoot &&
+        isPathWithin(baseRoot, resolvedRootPath) &&
+        !protectedRoots.some((protectedRoot) =>
+          isSamePath(protectedRoot, resolvedRootPath),
+        )
+      ) {
         seenPaths.add(comparisonToken);
         deletePaths.push(resolvedRootPath);
         continue;

@@ -211,6 +211,8 @@ test("detectSaveProfiles finds Documents/My Games, Saved Games and GameMaker fol
   fs.writeFileSync(path.join(installRoot, "data.win"), "");
   fs.mkdirSync(path.join(documents, "My Games", "Crimson High"), { recursive: true });
   fs.mkdirSync(path.join(documents, "Game"), { recursive: true });
+  fs.mkdirSync(path.join(documents, "Crimson High"), { recursive: true });
+  fs.mkdirSync(path.join(documents, "Studio X Projects"), { recursive: true });
   fs.mkdirSync(path.join(savedGames, "CrimsonHigh"), { recursive: true });
   fs.mkdirSync(path.join(localAppData, "Crimson_High"), { recursive: true });
   fs.writeFileSync(path.join(localAppData, "Crimson_High", "save.ini"), "");
@@ -233,8 +235,16 @@ test("detectSaveProfiles finds Documents/My Games, Saved Games and GameMaker fol
     assert.ok(roots.includes(path.join(savedGames, "CrimsonHigh")), "Saved Games");
     assert.ok(roots.includes(path.join(localAppData, "Crimson_High")), "GameMaker LocalAppData");
     assert.equal(roots.includes(path.join(documents, "Game")), false, "generic names never match");
+    assert.ok(roots.includes(path.join(documents, "Crimson High")), "Documents root, exact name");
+    assert.equal(
+      roots.includes(path.join(documents, "Studio X Projects")),
+      false,
+      "Documents root never matches by overlap",
+    );
     assert.equal(roots.includes(path.join(localAppData, "Microsoft")), false);
-    const documentsProfile = profiles.find((profile) => profile.provider === "documents");
+    const documentsProfile = profiles.find(
+      (profile) => profile.rootPath === path.join(documents, "My Games", "Crimson High"),
+    );
     assert.deepEqual(documentsProfile.strategy, {
       type: "windows-known-folder",
       payload: { baseFolder: "documents", path: "My Games/Crimson High" },

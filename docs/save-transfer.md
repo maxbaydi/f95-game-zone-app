@@ -26,7 +26,7 @@
 - HTML/NW.js/Electron/TyranoBuilder: `Local Storage`/`IndexedDB` приложения в `%LOCALAPPDATA%`/`%APPDATA%`;
 - Flash: `%APPDATA%\Macromedia\Flash Player\#SharedObjects\<id>\localhost\<путь к игре>` (путь зеркалит папку игры, поэтому находится точно);
 - GameMaker: `%LOCALAPPDATA%\<игра>` с файлами сохранений;
-- любой движок: `Documents\My Games\<игра>`, `Documents\<игра>`, `Saved Games\<игра>` — только при сильном совпадении имени (короткие и общие слова вроде `Game` не считаются).
+- любой движок: `Documents\My Games\<игра>`, `Documents\<игра>`, `Saved Games\<игра>` — только при сильном совпадении имени (короткие и общие слова вроде `Game` не считаются; в корне `Documents` засчитывается только точное имя папки, иначе автор «Studio» совпал бы с `Visual Studio 2022`). Полное удаление игры умеет стирать такие папки, но никогда не трогает сами `Documents`, `Documents\My Games` и `Saved Games`.
 
 ## Как это работает
 1. **Экспорт** (`exportGameSavesToFile`): для каждого профиля берётся тот же `archiveRoot`, что использует локальное хранилище и облако (`profiles/local/<путь>`, `profiles/roaming/RenPy/<папка>`, `profiles/local-low/...`, `profiles/documents/...`), файлы кладутся в zip (adm-zip), `manifest.json` = общий `buildSaveManifest` (identity, profiles, entries с sha256/mtime) + `format: "f95launcher-saves"`, `formatVersion`, `app`, `game { title, creator, engine, threadUrl, atlasId }`. Пустой набор → ошибка `no_save_files`, файл не создаётся.
