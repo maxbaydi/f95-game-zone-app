@@ -1,5 +1,6 @@
 const { normalizeThreadDownloadLinks } = require("./threadLinks");
 const { extractArchivePassword } = require("./threadPassword");
+const { extractThreadDetails } = require("./threadDetails");
 
 const THREAD_INSPECTION_TIMEOUT_MS = 30000;
 
@@ -576,6 +577,9 @@ function inspectF95Thread({ BrowserWindow, threadUrl }) {
               links: normalizedDownloads.links,
               variants: normalizedDownloads.variants,
               archivePassword: extractArchivePassword(postText),
+              // Overview, release date, censorship, platforms, languages
+              // from the starter post: stored into the catalog by main.js.
+              threadDetails: extractThreadDetails(postText),
             }
           : rawPayload;
         cleanup();

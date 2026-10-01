@@ -133,6 +133,7 @@ const ENTRY_COLUMN_NAMES = [
   "f95_id", "title", "creator", "version", "engine", "status", "category",
   "prefix_ids", "prefixes", "tag_ids", "tags", "cover_url", "screens",
   "rating", "likes", "views", "updated_ts", "site_url", "overview", "first_seen_at", "last_seen_at",
+  "release_date", "censored", "os", "language", "developer", "details_at",
 ];
 const ENTRY_COLUMNS = ENTRY_COLUMN_NAMES.join(", ");
 const QUALIFIED_ENTRY_COLUMNS = ENTRY_COLUMN_NAMES.map((name) => `f95_catalog.${name}`).join(", ");
@@ -160,6 +161,12 @@ const QUALIFIED_ENTRY_COLUMNS = ENTRY_COLUMN_NAMES.map((name) => `f95_catalog.${
  *   overview: string,
  *   firstSeenAt: string,
  *   lastSeenAt: string,
+ *   releaseDate: string,
+ *   censored: string,
+ *   os: string,
+ *   language: string,
+ *   developer: string,
+ *   detailsAt: string,
  * }} StoredCatalogEntry
  */
 
@@ -190,6 +197,12 @@ function rowToEntry(row) {
     overview: String(row.overview || ""),
     firstSeenAt: String(row.first_seen_at || ""),
     lastSeenAt: String(row.last_seen_at || ""),
+    releaseDate: String(row.release_date || ""),
+    censored: String(row.censored || ""),
+    os: String(row.os || ""),
+    language: String(row.language || ""),
+    developer: String(row.developer || ""),
+    detailsAt: String(row.details_at || ""),
   };
 }
 
@@ -323,6 +336,51 @@ async function setCatalogOverview(db, f95Id, overview) {
     return false;
   }
   const result = await run(db, "UPDATE f95_catalog SET overview = ? WHERE f95_id = ?", [String(overview || ""), id]);
+  return result.changes > 0;
+}
+
+/**
+ * Stores what the thread inspector read from the starter post. Empty
+ * values never erase stored ones (a post edited into a stub keeps the old
+ * overview); `details_at` is stamped whenever the thread was read.
+ *
+ * @param {any} db
+ * @param {number | string} f95Id
+ * @param {{ overview?: string, releaseDate?: string, censored?: string, os?: string, language?: string, developer?: string }} details
+ * @param {{ now?: () => Date }=} options
+ * @returns {Promise<boolean>} true when the entry exists and was stamped
+ */
+async function setCatalogThreadDetails(db, f95Id, details, options = {}) {
+  const id = toPositiveInteger(f95Id);
+  if (!id || !details || typeof details !== "object") {
+    return false;
+  }
+  const stamp = (options.now || (() => new Date()))().toISOString();
+  const text = (/** @type {unknown} */ value) => String(value ?? "").trim();
+  const result = await run(
+    db,
+    `
+      UPDATE f95_catalog SET
+        overview = CASE WHEN ? != '' THEN ? ELSE overview END,
+        release_date = CASE WHEN ? != '' THEN ? ELSE release_date END,
+        censored = CASE WHEN ? != '' THEN ? ELSE censored END,
+        os = CASE WHEN ? != '' THEN ? ELSE os END,
+        language = CASE WHEN ? != '' THEN ? ELSE language END,
+        developer = CASE WHEN ? != '' THEN ? ELSE developer END,
+        details_at = ?
+      WHERE f95_id = ?
+    `,
+    [
+      text(details.overview), text(details.overview),
+      text(details.releaseDate), text(details.releaseDate),
+      text(details.censored), text(details.censored),
+      text(details.os), text(details.os),
+      text(details.language), text(details.language),
+      text(details.developer), text(details.developer),
+      stamp,
+      id,
+    ],
+  );
   return result.changes > 0;
 }
 
@@ -616,5 +674,6 @@ module.exports = {
   saveCatalogSyncState,
   searchCatalogEntries,
   setCatalogOverview,
+  setCatalogThreadDetails,
   upsertCatalogEntries,
 };
