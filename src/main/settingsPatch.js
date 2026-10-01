@@ -52,6 +52,7 @@ const SETTINGS_SCHEMA = {
       normalizeExtensionList(value, DEFAULT_ARCHIVE_EXTENSIONS),
     autoScanOnStartup: toBoolean,
     autoBackup: toBoolean,
+    catalogAutoSync: toBoolean,
   },
   Notifications: {
     appUpdates: toBoolean,

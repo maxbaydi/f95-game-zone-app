@@ -98,10 +98,10 @@ function inspectLibraryNoiseRecord(game) {
   const reasons = [];
   const titleKey = normalizeKey(game?.title);
   const creatorKey = normalizeKey(game?.creator);
-  const hasAtlasMapping = Boolean(game?.atlas_id || game?.f95_id);
+  const hasCatalogMapping = Boolean(game?.f95_id);
   const versions = Array.isArray(game?.versions) ? game.versions : [];
 
-  if (hasAtlasMapping) {
+  if (hasCatalogMapping) {
     return {
       suspicious: false,
       reasons: [],

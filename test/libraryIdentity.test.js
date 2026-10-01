@@ -6,16 +6,15 @@ const {
   buildLibraryIdentityCandidates,
 } = require("../src/main/libraryIdentity");
 
-test("buildLibraryIdentity prefers atlas id over weaker identifiers", () => {
+test("buildLibraryIdentity prefers the thread id over weaker identifiers", () => {
   assert.equal(
     buildLibraryIdentity({
-      atlasId: 123,
       f95Id: 456,
       siteUrl: "https://f95zone.to/threads/example.456/",
       title: "Example",
       creator: "Dev",
     }),
-    "atlas:123",
+    "f95:456",
   );
 });
 

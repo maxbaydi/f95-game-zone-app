@@ -100,7 +100,6 @@ function isSealed(buffer) {
 function identityOfGame(game) {
   return buildSaveVaultIdentity({
     threadUrl: game?.siteUrl || "",
-    atlasId: game?.atlas_id || "",
     title: game?.displayTitle || game?.title || "",
     creator: game?.displayCreator || game?.creator || "",
   });
@@ -408,7 +407,6 @@ function createSaveStorageSync(deps) {
         title: snapshot.game.displayTitle || snapshot.game.title || "",
         creator: snapshot.game.displayCreator || snapshot.game.creator || "",
         threadUrl: snapshot.game.siteUrl || "",
-        atlasId: snapshot.game.atlas_id || null,
         engine: snapshot.game.engine || "",
         updatedAt: now().toISOString(),
         manifestHash: local.manifest.manifestHash,
@@ -469,7 +467,6 @@ function createSaveStorageSync(deps) {
         await backupGameSaves({
           appPaths: deps.appPaths,
           threadUrl: snapshot.game.siteUrl || "",
-          atlasId: snapshot.game.atlas_id || "",
           title: snapshot.game.displayTitle || snapshot.game.title || "",
           creator: snapshot.game.displayCreator || snapshot.game.creator || "",
           installDirectory,

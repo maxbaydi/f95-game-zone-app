@@ -151,7 +151,6 @@
     }
 
     return (
-      !normalizeIdentityValue(game.atlas_id) &&
       !normalizeIdentityValue(game.f95_id) &&
       !normalizeIdentityValue(game.siteUrl)
     );

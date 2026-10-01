@@ -427,7 +427,7 @@ const DetailsMetadataEditor = ({ game, onSaved, onClose }) => {
       className="app-fade-enter space-y-2 border border-border/70 bg-canvas/40 p-3"
       aria-label="Edit game details"
     >
-      {game?.atlas_id && (
+      {game?.f95_id && (
         <div className="text-[11px] text-text/55">
           While this game is linked to the catalog, the catalog name is shown in
           the library.
@@ -543,7 +543,7 @@ const LibraryDetailsPanel = ({
   const resizeDragRef = useRef(null);
   const needsCatalogLink = window.libraryInstallState?.needsCatalogLink
     ? window.libraryInstallState.needsCatalogLink(game)
-    : Boolean(game && !game.atlas_id && !game.f95_id && !game.siteUrl);
+    : Boolean(game && !game.f95_id && !game.siteUrl);
   const liveCheckedLabel = formatDetailRelativeTime(game?.liveCheckedAt);
   const isLiveLatest =
     Boolean(game?.liveVersion) && game?.latestVersion === game?.liveVersion;
@@ -832,9 +832,9 @@ const LibraryDetailsPanel = ({
               >
                 <section className="overflow-hidden rounded-2xl border border-border bg-secondary/20">
                   <div className="group/banner relative h-[220px] overflow-hidden bg-secondary/40">
-                    {(game.atlas_id || game.banner_url) && onImageAction && (
+                    {(game.f95_id || game.banner_url) && onImageAction && (
                       <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity duration-300 focus-within:opacity-100 group-hover/banner:opacity-100">
-                        {game.atlas_id && (
+                        {game.f95_id && (
                           <button
                             type="button"
                             onClick={() => onImageAction("refreshBanner", game)}
@@ -905,7 +905,7 @@ const LibraryDetailsPanel = ({
                         </span>
                       )}
                       <div className="ml-auto flex items-center gap-1.5">
-                        {!game.atlas_id && onLinkCatalog && (
+                        {!game.f95_id && onLinkCatalog && (
                           <button
                             type="button"
                             onClick={() => onLinkCatalog(game)}
@@ -1252,13 +1252,12 @@ const LibraryDetailsPanel = ({
                   <div className="mb-3 text-[11px] uppercase tracking-[0.18em] opacity-55">
                     Site Details
                   </div>
-                  <DetailRow label="Language" value={game.language} />
-                  <DetailRow label="Translations" value={game.translations} />
-                  <DetailRow label="Voice" value={game.voice} />
-                  <DetailRow label="Platform" value={game.os} />
+                  <DetailRow label="Site engine" value={game.catalog_engine} />
+                  <DetailRow label="Prefixes" value={game.catalog_prefixes} />
+                  <DetailRow label="Rating" value={game.rating ? String(game.rating) : ""} />
                   <DetailRow
-                    label="Release"
-                    value={formatDetailDate(game.release_date)}
+                    label="Updated on site"
+                    value={formatDetailDate(game.catalog_updated_ts)}
                   />
                   {tags.length > 0 && (
                     <details className="tags-spoiler pt-3">
@@ -1312,7 +1311,7 @@ const LibraryDetailsPanel = ({
                           ? `${previews.length} cached`
                           : "No cached shots"}
                       </div>
-                      {onImageAction && game.atlas_id && (
+                      {onImageAction && game.f95_id && (
                         <button
                           type="button"
                           onClick={() => onImageAction("refreshScreenshots", game)}

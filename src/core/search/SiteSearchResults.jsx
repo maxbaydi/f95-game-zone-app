@@ -102,7 +102,7 @@ const SiteSearchResults = ({
       <div className="space-y-4">
         {results.map((result) => (
           <article
-            key={result.atlasId}
+            key={result.f95Id}
             className="overflow-hidden rounded-2xl border border-border bg-primary/70 shadow-lg"
           >
             <div className="flex min-h-[220px]">
@@ -161,9 +161,6 @@ const SiteSearchResults = ({
                   {result.status && (
                     <SiteResultPill>{result.status}</SiteResultPill>
                   )}
-                  {result.censored && (
-                    <SiteResultPill>{result.censored}</SiteResultPill>
-                  )}
                   {result.version && (
                     <SiteResultPill tone="accent">
                       {`v${result.version}`}
@@ -193,18 +190,20 @@ const SiteSearchResults = ({
                   </div>
                   <div className="rounded-xl border border-border/60 bg-canvas/30 px-3 py-2">
                     <div className="text-[11px] uppercase tracking-[0.14em] opacity-50">
-                      Replies
+                      Rating
                     </div>
                     <div className="mt-1 font-medium">
-                      {formatSiteNumber(result.replies)}
+                      {result.rating ? `${result.rating} / 5` : "—"}
                     </div>
                   </div>
                   <div className="rounded-xl border border-border/60 bg-canvas/30 px-3 py-2">
                     <div className="text-[11px] uppercase tracking-[0.14em] opacity-50">
-                      Language
+                      Updated
                     </div>
                     <div className="mt-1 font-medium truncate">
-                      {result.language || "Unknown"}
+                      {result.updatedTs
+                        ? new Date(result.updatedTs * 1000).toLocaleDateString()
+                        : "Unknown"}
                     </div>
                   </div>
                 </div>
@@ -218,7 +217,7 @@ const SiteSearchResults = ({
                   <div className="mt-4 flex flex-wrap gap-2">
                     {result.tagList.slice(0, 8).map((tag) => (
                       <span
-                        key={`${result.atlasId}-${tag}`}
+                        key={`${result.f95Id}-${tag}`}
                         className="rounded-full border border-border bg-canvas/30 px-2 py-1 text-xs text-text/85"
                       >
                         {tag}

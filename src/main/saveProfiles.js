@@ -40,7 +40,6 @@ async function refreshSaveProfiles(appPaths, db, recordId) {
   const storedProfiles = await replaceSaveProfiles(db, recordId, detectedProfiles);
   const cloudIdentity = buildSaveVaultIdentity({
     threadUrl: game?.siteUrl || "",
-    atlasId: game?.atlas_id || "",
     title: game?.displayTitle || game?.title || "",
     creator: game?.displayCreator || game?.creator || "",
   });
@@ -72,7 +71,6 @@ async function getSaveProfileSnapshot(appPaths, db, recordId) {
   const profiles = await getSaveProfiles(db, recordId);
   const cloudIdentity = buildSaveVaultIdentity({
     threadUrl: game?.siteUrl || "",
-    atlasId: game?.atlas_id || "",
     title: game?.displayTitle || game?.title || "",
     creator: game?.displayCreator || game?.creator || "",
   });

@@ -10,6 +10,7 @@ F95Launcher (repository `f95-game-zone-app`) is a desktop manager for F95 games 
 ## What it does
 
 - scans local folders and builds a real installed-games library
+- keeps its own game catalog, read straight from the F95 game list (no third-party metadata server): names, versions, engines, tags, covers
 - opens live F95 threads inside the app through a logged-in session
 - installs or updates games from thread mirrors into the correct library folder
 - keeps a downloads queue with background progress and history

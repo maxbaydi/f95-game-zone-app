@@ -2,20 +2,20 @@ function buildLibraryPreviewRefreshTargets(games) {
   return (Array.isArray(games) ? games : [])
     .map((game) => {
       const recordId = Number(game?.record_id);
-      const atlasId = Number(game?.atlas_id);
+      const f95Id = Number(game?.f95_id);
 
       if (!Number.isInteger(recordId) || recordId <= 0) {
         return null;
       }
 
-      if (!Number.isInteger(atlasId) || atlasId <= 0) {
+      if (!Number.isInteger(f95Id) || f95Id <= 0) {
         return null;
       }
 
       const title = String(game?.displayTitle || game?.title || "Unknown Game").trim();
       return {
         recordId,
-        atlasId,
+        f95Id,
         title: title || "Unknown Game",
       };
     })

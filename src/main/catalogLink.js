@@ -2,8 +2,8 @@
 
 /**
  * Linking a library record to a catalog entry chosen by the user ("Link to
- * catalog…"): the catalog mapping, the F95 thread of that entry and the
- * catalog's title/creator/engine. Pure logic with injected database access.
+ * catalog…"): the thread mapping of that entry and the catalog's
+ * title/creator/engine. Pure logic with injected database access.
  */
 
 // One implementation for main and renderer: a record without a catalog entry,
@@ -37,12 +37,10 @@ function normalizeText(value) {
 /**
  * @param {{
  *   recordId: number,
- *   atlasId: number,
+ *   f95Id: number,
  *   game?: any,
  *   deps: {
- *     addAtlasMapping: (recordId: number, atlasId: number) => Promise<unknown>,
- *     getAtlasData: (atlasId: number) => Promise<any>,
- *     getF95ZoneDataByAtlasId: (atlasId: number) => Promise<{ f95_id?: unknown, site_url?: string } | null>,
+ *     getCatalogEntry: (f95Id: number) => Promise<{ f95Id: number, title: string, creator: string, engine: string, version: string, siteUrl: string } | null>,
  *     upsertF95ZoneMapping: (recordId: number, f95Id: string, siteUrl: string) => Promise<unknown>,
  *     updateGame: (game: { record_id: number, title: string, creator: string, engine: string }) => Promise<unknown>
  *   },
@@ -51,9 +49,9 @@ function normalizeText(value) {
  */
 async function linkGameToCatalog(input) {
   const logger = input.logger || console;
-  const { recordId, atlasId, deps } = input;
+  const { recordId, f95Id, deps } = input;
 
-  if (!isPositiveInteger(recordId) || !isPositiveInteger(atlasId)) {
+  if (!isPositiveInteger(recordId) || !isPositiveInteger(f95Id)) {
     return {
       success: false,
       code: "INVALID_INPUT",
@@ -61,23 +59,19 @@ async function linkGameToCatalog(input) {
     };
   }
 
-  let f95Id = "";
+  let entry = null;
   let siteUrl = "";
   try {
-    await deps.addAtlasMapping(recordId, atlasId);
-
-    const threadData = await deps.getF95ZoneDataByAtlasId(atlasId);
-    f95Id = normalizeText(threadData?.f95_id);
-    siteUrl = normalizeText(threadData?.site_url);
-    if (f95Id) {
-      await deps.upsertF95ZoneMapping(recordId, f95Id, siteUrl);
-    } else {
-      siteUrl = "";
+    entry = await deps.getCatalogEntry(f95Id);
+    if (!entry) {
+      throw new Error(`catalog entry ${f95Id} does not exist`);
     }
+    siteUrl = normalizeText(entry.siteUrl) || `https://f95zone.to/threads/${f95Id}/`;
+    await deps.upsertF95ZoneMapping(recordId, String(f95Id), siteUrl);
   } catch (error) {
     logger.warn(`${LOG_SCOPE} Linking to the catalog failed:`, {
       recordId,
-      atlasId,
+      f95Id,
       error: error instanceof Error ? error.message : String(error),
     });
     return {
@@ -92,13 +86,12 @@ async function linkGameToCatalog(input) {
   // catalog title) and only reports that the stored names were not changed.
   let metadataUpdated = false;
   try {
-    const catalog = (await deps.getAtlasData(atlasId)) || {};
     const game = input.game || {};
     const next = {
       record_id: recordId,
-      title: normalizeText(catalog.title) || normalizeText(game.title),
-      creator: normalizeText(catalog.creator) || normalizeText(game.creator),
-      engine: normalizeText(catalog.engine) || normalizeText(game.engine),
+      title: normalizeText(entry.title) || normalizeText(game.title),
+      creator: normalizeText(entry.creator) || normalizeText(game.creator),
+      engine: normalizeText(entry.engine) || normalizeText(game.engine),
     };
     const changed =
       next.title !== normalizeText(game.title) ||
@@ -112,15 +105,14 @@ async function linkGameToCatalog(input) {
   } catch (error) {
     logger.warn(`${LOG_SCOPE} Catalog metadata was not applied:`, {
       recordId,
-      atlasId,
+      f95Id,
       error: error instanceof Error ? error.message : String(error),
     });
   }
 
   return {
     success: true,
-    atlasId,
-    f95Id,
+    f95Id: String(f95Id),
     siteUrl,
     metadataUpdated,
   };

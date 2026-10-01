@@ -157,7 +157,7 @@ test("tray controller hides the main window, shows one tray notice, and exposes 
 
   const trayMenu = FakeTray.instances[0].menu;
   trayMenu.find((item) => item.label === "Check for App Updates").click();
-  trayMenu.find((item) => item.label === "Refresh Library Updates").click();
+  trayMenu.find((item) => item.label === "Refresh Game Catalog").click();
   assert.equal(appUpdateChecks, 1);
   assert.equal(libraryUpdateChecks, 1);
 

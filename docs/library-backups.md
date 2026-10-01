@@ -30,7 +30,7 @@
    4. одна транзакция: `DELETE` всех таблиц `LIBRARY_RESET_TABLES` (сначала дочерние), затем `INSERT … SELECT` только общих колонок в обратном порядке; таблицы, которых нет в копии, дают 0;
    5. `COMMIT`, всегда `DETACH` (и после `ROLLBACK`);
    6. кэш картинок: папки `cache/images/<id>` записей, которые после восстановления стали другой игрой (другие title+creator), удаляются; строки `banners`/`previews` на несуществующие файлы убираются — карточка берёт баннер с сайта, пока он скачивается заново.
-4. IPC после успеха шлёт `library-reset` (рендерер очищает список), затем `games-library-synced` (перезагрузка) и в фоне последовательно скачивает баннеры записей с `atlas_id` (`downloadImages(…, true, false, "0", false)`), каждая — `game-updated`.
+4. IPC после успеха шлёт `library-reset` (рендерер очищает список), затем `games-library-synced` (перезагрузка) и в фоне последовательно скачивает баннеры записей с `f95_id` (`downloadImages(…, true, false, "0", false)`), каждая — `game-updated`.
 5. `LIBRARY_RESET_TABLES` включает `library_live_versions` (перед `games`).
 
 ## Контракт

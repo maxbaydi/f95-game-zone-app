@@ -97,12 +97,8 @@ function scoreTitleQuality(value) {
 function scoreGameForDuplicateResolution(game) {
   let score = 0;
 
-  if (game?.atlas_id) {
-    score += 100;
-  }
-
   if (game?.f95_id) {
-    score += 40;
+    score += 100;
   }
 
   if (hasMeaningfulCreator(game?.creator)) {
@@ -239,17 +235,6 @@ async function migrateDuplicateRecordMetadata(db, fromRecordId, toRecordId) {
     );
   }
 
-  const existingAtlasMapping = await get(
-    `SELECT record_id FROM atlas_mappings WHERE record_id = ?`,
-    [toRecordId],
-  );
-  if (!existingAtlasMapping) {
-    await run(
-      `UPDATE atlas_mappings SET record_id = ? WHERE record_id = ?`,
-      [toRecordId, fromRecordId],
-    );
-  }
-
   const existingSteamMapping = await get(
     `SELECT record_id FROM steam_mappings WHERE record_id = ?`,
     [toRecordId],
@@ -298,14 +283,12 @@ async function reconcileLibraryDuplicateGamePaths(input) {
           recordId: group.winner.record_id,
           title: group.winner.title,
           creator: group.winner.creator,
-          atlasId: group.winner.atlas_id || null,
           f95Id: group.winner.f95_id || null,
         },
         losers: group.losers.map((game) => ({
           recordId: game.record_id,
           title: game.title,
           creator: game.creator,
-          atlasId: game.atlas_id || null,
           f95Id: game.f95_id || null,
         })),
       })),
@@ -363,14 +346,12 @@ async function reconcileLibraryDuplicateGamePaths(input) {
         recordId: group.winner.record_id,
         title: group.winner.title,
         creator: group.winner.creator,
-        atlasId: group.winner.atlas_id || null,
         f95Id: group.winner.f95_id || null,
       },
       losers: group.losers.map((game) => ({
         recordId: game.record_id,
         title: game.title,
         creator: game.creator,
-        atlasId: game.atlas_id || null,
         f95Id: game.f95_id || null,
       })),
     })),

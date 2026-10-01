@@ -4,7 +4,7 @@ const { openDatabase } = require("./db/openDatabase");
 const { getScanSources } = require("./db/scanSourcesStore");
 const { createScanJob, finishScanJob, listScanJobs } = require("./db/scanJobsStore");
 const { upsertScanCandidates } = require("./db/scanCandidatesStore");
-const { createAtlasScanMatcher } = require("./scanAtlasMatcher");
+const { createCatalogScanMatcher } = require("./scanCatalogMatcher");
 const { isScanCancelled } = require("./scanSessions");
 
 /**
@@ -148,7 +148,7 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
   const db = await openDatabase(appPaths);
   const allSources = await getScanSources(db);
   const enabledSources = allSources.filter((source) => source.isEnabled);
-  let atlasMatcher = null;
+  let catalogMatcher = null;
 
   if (enabledSources.length === 0) {
     return {
@@ -167,7 +167,7 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
   });
 
   try {
-    atlasMatcher = await createAtlasScanMatcher(db);
+    catalogMatcher = await createCatalogScanMatcher(db);
   } catch (error) {
     console.error("[scan.runner] failed to build catalog matcher index", {
       error: error instanceof Error ? error.message : String(error),
@@ -176,7 +176,7 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
 
   const result = await runScanAcrossSources(window, enabledSources, {
     ...baseParams,
-    atlasMatcher,
+    catalogMatcher,
   });
   const storedCandidates =
     result.games.length > 0
@@ -192,7 +192,6 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
             version: game.version || "",
             executableName:
               game.selectedValue || game.singleExecutable || game.executable || "",
-            atlasId: game.atlasId || "",
             f95Id: game.f95Id || "",
             isArchive: Boolean(game.isArchive),
             detectionScore: game.detectionScore || 0,

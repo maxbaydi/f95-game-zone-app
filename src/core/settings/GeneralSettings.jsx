@@ -100,6 +100,18 @@ const AutomationSettingsCard = ({ settings }) => {
         />
       </window.SettingRow>
       <window.SettingRow
+        title="Keep the game catalog up to date"
+        description="Reads the F95 game list every 6 hours and after the PC wakes up: names, versions, engines, tags and covers for folder matching, Link to catalog and site search. The first run walks the whole list once; later runs only fetch what changed. Needs an F95 login."
+      >
+        <window.ToggleSwitch
+          label="Keep the game catalog up to date"
+          checked={library.catalogAutoSync !== false}
+          onChange={(checked) =>
+            settings.update("Library", { catalogAutoSync: checked })
+          }
+        />
+      </window.SettingRow>
+      <window.SettingRow
         title="Check every installed game for updates"
         description="The background check reads the F95 thread of favorites every 6 hours. With this on it also walks through the rest of the library, 40 games per run, and after the PC wakes up."
       >

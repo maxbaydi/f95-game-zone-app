@@ -68,19 +68,21 @@ test("updateVersionLocation and updateVersionExecutable change one version row i
   await closeAsync(db);
 });
 
-test("getF95ZoneDataByAtlasId returns the thread identity for a catalog entry", async () => {
+test("getCatalogEntryForRecord returns the catalog entry a record is linked to", async () => {
   const appPaths = buildAppPaths(path.join(makeTempDir(), "profile"));
   ensureAppDirs(appPaths);
   const db = await database.initializeDatabase(appPaths);
 
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
-  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/app-game.555/')`);
+  await runAsync(db, `INSERT INTO f95_catalog (f95_id, title, creator, engine, version, site_url) VALUES (555, 'Sample Game', 'Sample Dev', 'renpy', '0.9', 'https://f95zone.to/threads/app-game.555/')`);
+  const recordId = await database.addGame({ title: "Sample Game", creator: "Sample Dev", engine: "renpy" });
+  await database.upsertF95ZoneMapping(recordId, 555, "https://f95zone.to/threads/app-game.555/");
 
-  assert.deepEqual(await database.getF95ZoneDataByAtlasId(100), {
-    f95_id: 555,
-    site_url: "https://f95zone.to/threads/app-game.555/",
-  });
-  assert.equal(await database.getF95ZoneDataByAtlasId(999), null);
+  const entry = await database.getCatalogEntryForRecord(recordId);
+  assert.equal(entry.f95Id, 555);
+  assert.equal(entry.siteUrl, "https://f95zone.to/threads/app-game.555/");
+  assert.equal(await database.getF95IdForRecord(recordId), 555);
+  assert.equal(await database.getCatalogEntryForRecord(999), null);
+  assert.equal((await database.getCatalogEntry(555)).title, "Sample Game");
 
   await closeAsync(db);
 });
@@ -91,10 +93,10 @@ test("live thread versions raise latestVersion above the catalog and are cleaned
   const db = await database.initializeDatabase(appPaths);
   const { upsertLiveVersion, getLiveVersion } = require("../src/main/db/liveVersionsStore");
 
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
+  await runAsync(db, `INSERT INTO f95_catalog (f95_id, title, creator, engine, version, site_url) VALUES (555, 'Sample Game', 'Sample Dev', 'renpy', '0.9', 'https://f95zone.to/threads/app-game.555/')`);
   const recordId = await database.addGame({ title: "Sample Game", creator: "Sample Dev", engine: "renpy" });
   await database.addVersion({ version: "0.9", folder: "C:\\Games\\Sample", executables: [{ value: "game.exe" }] }, recordId);
-  await database.addAtlasMapping(recordId, 100);
+  await database.upsertF95ZoneMapping(recordId, 555, "https://f95zone.to/threads/app-game.555/");
 
   const before = await database.getGame(recordId, appPaths);
   assert.equal(before.latestVersion, "0.9");
@@ -112,7 +114,7 @@ test("live thread versions raise latestVersion above the catalog and are cleaned
 
   const after = await database.getGame(recordId, appPaths);
   assert.equal(after.latestVersion, "1.1");
-  assert.equal(after.atlasLatestVersion, "0.9");
+  assert.equal(after.catalogLatestVersion, "0.9");
   assert.equal(after.liveVersion, "1.1");
   assert.equal(after.liveCheckedAt, "2026-09-27T10:00:00.000Z");
   assert.equal(after.isUpdateAvailable, true);

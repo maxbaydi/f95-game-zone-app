@@ -23,7 +23,7 @@
 
 | Было в окне | Стало |
 |-------------|-------|
-| Поиск в каталоге + `add-atlas-mapping` | `CatalogLinkModal` + IPC `link-game-to-catalog` (плюс тема F95, метаданные, картинки) |
+| Поиск в каталоге + `link-game-to-catalog` | `CatalogLinkModal` + IPC `link-game-to-catalog` (плюс тема F95, метаданные, картинки) |
 | Правка title/creator/engine (`update-game`) | `DetailsMetadataEditor` в панели; `update-game` теперь проверяет вход и возвращает `{ success, error }` |
 | Правка пути и exec вручную (`update-version`) | Locate… и Choose .exe с проверкой путей в main (library-version-repair.md) |
 | Удаление версии (`count-versions`, `delete-version`) | Кнопка у версии; последняя версия → окно удаления игры |

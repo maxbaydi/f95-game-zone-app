@@ -177,7 +177,7 @@ const needsCardCatalogLink = (game) => {
   if (window.libraryInstallState?.needsCatalogLink) {
     return window.libraryInstallState.needsCatalogLink(game);
   }
-  return Boolean(game && !game.atlas_id && !game.f95_id && !game.siteUrl);
+  return Boolean(game && !game.f95_id && !game.siteUrl);
 };
 
 const getNewestVersion = (versions) => {

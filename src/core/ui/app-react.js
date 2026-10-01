@@ -20,7 +20,7 @@
 
   // Keeps a component mounted while its exit animation plays.
   // Returns { isMounted, state } where state is "open" or "closed"; put
-  // `data-state={state}` on elements styled with the .atlas-* presence classes.
+  // `data-state={state}` on elements styled with the .app-* presence classes.
   function usePresence(isOpen) {
     var initial = isOpen ? "open" : "unmounted";
     var pair = useState(initial);

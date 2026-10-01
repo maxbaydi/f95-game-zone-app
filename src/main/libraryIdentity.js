@@ -3,7 +3,7 @@
 /**
  * Stable identity of a library game across installs and PCs, used to match
  * records that arrive without a record id (thread installs, scan results,
- * save backups). Strongest identifier first: catalog id, F95 thread id, thread
+ * save backups). Strongest identifier first: F95 thread id, thread
  * URL, then a compact title + creator key.
  */
 
@@ -23,7 +23,6 @@ function normalizeCatalogUrl(value) {
 
 /**
  * @param {{
- *   atlasId?: unknown,
  *   f95Id?: unknown,
  *   siteUrl?: unknown,
  *   title?: unknown,
@@ -46,13 +45,6 @@ function buildLibraryIdentityCandidates(input) {
     seenValues.add(normalizedValue);
     candidates.push(normalizedValue);
   };
-
-  // The "atlas:" prefix names the metadata catalog's own id (atlas_id) and
-  // is persisted in sync state and remote storage; it must stay as is.
-  const atlasId = String(input?.atlasId || "").trim();
-  if (atlasId) {
-    pushCandidate(`atlas:${atlasId}`);
-  }
 
   const f95Id = String(input?.f95Id || "").trim();
   if (f95Id) {

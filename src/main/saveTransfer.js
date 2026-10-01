@@ -304,7 +304,6 @@ async function exportGameSavesToFile(input) {
       creator: game?.displayCreator || game?.creator || "",
       engine: game?.engine || "",
       threadUrl: game?.siteUrl || "",
-      atlasId: game?.atlas_id || null,
       recordId: game?.record_id || null,
     },
   };

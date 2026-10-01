@@ -86,7 +86,6 @@ function registerSaveTransferIpc(deps) {
     return {
       appPaths: deps.appPaths,
       threadUrl: game?.siteUrl || "",
-      atlasId: game?.atlas_id || "",
       title: game?.displayTitle || game?.title || "",
       creator: game?.displayCreator || game?.creator || "",
       installDirectory: getPrimaryInstallDirectory(game),
@@ -97,7 +96,6 @@ function registerSaveTransferIpc(deps) {
   const identityOf = (snapshot) =>
     buildSaveVaultIdentity({
       threadUrl: snapshot.game?.siteUrl || "",
-      atlasId: snapshot.game?.atlas_id || "",
       title: snapshot.game?.displayTitle || snapshot.game?.title || "",
       creator: snapshot.game?.displayCreator || snapshot.game?.creator || "",
     });

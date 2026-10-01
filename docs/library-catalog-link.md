@@ -1,7 +1,7 @@
 # Игры без совпадения с каталогом: автодобавление и привязка
 
 **Статус:** active
-**Модули:** src/main/scanCandidateImportPolicy.js, src/main/catalogLink.js, src/shared/libraryInstallState.js (needsCatalogLink, buildCatalogSearchTitle), src/database.js (getF95ZoneDataByAtlasId), src/main/libraryMaintenanceIpc.js, src/main.js (scan-library, update-game), src/core/library/CatalogLinkModal.jsx, src/core/library/LibraryDetailsPanel.jsx, src/core/GameBanner.js
+**Модули:** src/main/scanCandidateImportPolicy.js, src/main/catalogLink.js, src/shared/libraryInstallState.js (needsCatalogLink, buildCatalogSearchTitle), src/database.js (getCatalogEntry, searchCatalog), src/main/db/f95CatalogStore.js, src/main/libraryMaintenanceIpc.js, src/main.js (scan-library, update-game), src/core/library/CatalogLinkModal.jsx, src/core/library/LibraryDetailsPanel.jsx, src/core/GameBanner.js
 **Тесты:** test/scanCandidateImportPolicy.test.js, test/catalogLink.test.js; `node --test test/scanCandidateImportPolicy.test.js test/catalogLink.test.js`
 
 ## Назначение
@@ -18,17 +18,17 @@
 ## Как это работает
 1. `shouldAutoImportScanGame(game, { minUnmatchedDetectionScore = 40 })`: `matched` → да; иначе да, если это не архив и `detectionScore >= 40` (включая `ambiguous`). Оценка 40 — исполняемый файл (30) + единственный кандидат (10) или известный движок (25) и выше; одно имя папки или архив её не набирают, поэтому имя папки не становится единственным доказательством.
 2. `splitAutoImportableScanGames` сохраняет прежнее правило для известных путей (`refreshExisting`), совпавшие импортирует как раньше, а новые несовпавшие помечает `importUnmatched: true`. `scan-library` считает `importedUnmatched` и добавляет его в текст итога.
-3. `needsCatalogLink(game)` — нет `atlas_id`, `f95_id` и `siteUrl`; одна реализация в `shared/libraryInstallState.js`, `main/catalogLink.js` её реэкспортирует.
-4. `CatalogLinkModal` вызывает существующий `searchAtlas(title, creator)` (автор передаётся, если он не «Unknown») с задержкой 350 мс, затем `linkGameToCatalog({ recordId, atlasId })`.
-5. `linkGameToCatalog`: проверка id → `addAtlasMapping` → `getF95ZoneDataByAtlasId` → при наличии `f95_id` `upsertF95ZoneMapping(recordId, String(f95_id), site_url)` → метаданные каталога (title/creator/engine, непустые значения каталога важнее) через `updateGame`. Ошибка на шагах связи → `CATALOG_LINK_FAILED`; ошибка только при записи названий связь не отменяет (`metadataUpdated: false`, предупреждение в логе), потому что повтор дал бы тот же результат.
+3. `needsCatalogLink(game)` — нет `f95_id` и `siteUrl`; одна реализация в `shared/libraryInstallState.js`, `main/catalogLink.js` её реэкспортирует.
+4. `CatalogLinkModal` вызывает `searchCatalog(title, creator)` по локальной таблице `f95_catalog` (автор передаётся, если он не «Unknown») с задержкой 350 мс, затем `linkGameToCatalog({ recordId, f95Id })`.
+5. `linkGameToCatalog`: проверка id → `getCatalogEntry(f95Id)` (нет записи → `CATALOG_LINK_FAILED`) → `upsertF95ZoneMapping(recordId, String(f95Id), siteUrl)` → метаданные каталога (title/creator/engine, непустые значения каталога важнее) через `updateGame`. Ошибка на шагах связи → `CATALOG_LINK_FAILED`; ошибка только при записи названий связь не отменяет (`metadataUpdated: false`, предупреждение в логе), потому что повтор дал бы тот же результат.
 6. IPC после успеха удаляет запись живой версии темы (тема могла смениться), шлёт `game-updated` и в фоне скачивает баннер и скриншоты (`downloadImages(…, true, true, DEFAULT_PREVIEW_LIMIT, false)`), затем снова `game-updated`.
 7. `update-game` проверяет вход (id, непустое название, длины) и возвращает `{ success, error }` вместо исключения; пустые автор/движок сохраняются как «Unknown».
 
 ## Контракт
 - `scan-library` → дополнительно `importedUnmatched: number`.
-- `link-game-to-catalog` `{ recordId, atlasId }` → `{ success, atlasId, f95Id ("" без темы), siteUrl, metadataUpdated, game }` / `{ success:false, code: INVALID_INPUT | CATALOG_LINK_FAILED, error }`. Лог `[library.catalog]`.
+- `link-game-to-catalog` `{ recordId, f95Id }` → `{ success, f95Id, siteUrl, metadataUpdated, game }` / `{ success:false, code: INVALID_INPUT | CATALOG_LINK_FAILED, error }`. Лог `[library.catalog]`.
 - `update-game` `{ record_id, title, creator, engine }` → `{ success, error? }`.
-- `getF95ZoneDataByAtlasId(atlasId) → { f95_id, site_url } | null`.
+- `getCatalogEntry(f95Id) → запись f95_catalog | null`; `getCatalogEntryForRecord(recordId)`.
 - Константа `MIN_UNMATCHED_DETECTION_SCORE = 40`.
 
 ## Граничные случаи и ошибки

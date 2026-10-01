@@ -190,10 +190,10 @@ function safeReadDirEntries(directoryPath, params, window, diagnostics) {
 }
 
 /**
- * @param {{ atlasId: number | string, f95Id?: string | number, title: string, creator: string, score: number }} match
+ * @param {{ f95Id: string | number, title: string, creator: string, score: number }} match
  */
-function buildAtlasMatchOption(match) {
-  return `${match.atlasId} | ${match.f95Id || ""} | ${match.title} | ${match.creator} | score ${match.score}`;
+function buildCatalogMatchOption(match) {
+  return `${match.f95Id} | ${match.title} | ${match.creator} | score ${match.score}`;
 }
 
 /**
@@ -216,8 +216,8 @@ function buildAtlasMatchOption(match) {
  *   margin?: number
  * }}
  */
-function resolveAtlasMatch(params, input, candidatePath, diagnostics) {
-  if (!params?.atlasMatcher || typeof params.atlasMatcher.matchCandidate !== "function") {
+function resolveCatalogMatch(params, input, candidatePath, diagnostics) {
+  if (!params?.catalogMatcher || typeof params.catalogMatcher.matchCandidate !== "function") {
     return {
       status: "unmatched",
       autoMatch: false,
@@ -230,7 +230,7 @@ function resolveAtlasMatch(params, input, candidatePath, diagnostics) {
   }
 
   try {
-    return params.atlasMatcher.matchCandidate(input);
+    return params.catalogMatcher.matchCandidate(input);
   } catch (error) {
     diagnostics.push(
       createScanDiagnostic(
@@ -746,7 +746,7 @@ async function findGame(
     console.log(
       `Processing game: ${title}, Creator: ${creator}, Version: ${version}, Engine: ${gameEngine}`,
     );
-    const atlasMatch = resolveAtlasMatch(
+    const catalogMatch = resolveCatalogMatch(
       params,
       {
         titleVariants: localIdentity.titleVariants,
@@ -758,39 +758,37 @@ async function findGame(
       diagnostics,
     );
 
-    let atlasId = "";
     let f95Id = "";
     let results = [];
     let resultSelectedValue = "";
     let resultVisibility = "hidden";
 
-    matchStatus = atlasMatch.status || "unmatched";
-    matchScore = atlasMatch.matchScore || 0;
-    matchReasons = atlasMatch.matchReasons || [];
-    autoMatched = Boolean(atlasMatch.autoMatch && atlasMatch.bestMatch);
+    matchStatus = catalogMatch.status || "unmatched";
+    matchScore = catalogMatch.matchScore || 0;
+    matchReasons = catalogMatch.matchReasons || [];
+    autoMatched = Boolean(catalogMatch.autoMatch && catalogMatch.bestMatch);
 
-    if (autoMatched && atlasMatch.bestMatch) {
-      atlasId = String(atlasMatch.bestMatch.atlasId || "");
-      f95Id = String(atlasMatch.bestMatch.f95Id || "");
-      title = atlasMatch.bestMatch.title || title;
-      creator = atlasMatch.bestMatch.creator || creator;
+    if (autoMatched && catalogMatch.bestMatch) {
+      f95Id = String(catalogMatch.bestMatch.f95Id || "");
+      title = catalogMatch.bestMatch.title || title;
+      creator = catalogMatch.bestMatch.creator || creator;
       version =
         version && version !== "Unknown"
           ? version
-          : atlasMatch.bestMatch.version || version;
-      gameEngine = atlasMatch.bestMatch.engine || gameEngine;
+          : catalogMatch.bestMatch.version || version;
+      gameEngine = catalogMatch.bestMatch.engine || gameEngine;
       results = [
         {
           key: "match",
-          value: `Confident match (${atlasMatch.bestMatch.score})`,
+          value: `Confident match (${catalogMatch.bestMatch.score})`,
         },
       ];
       resultSelectedValue = "match";
       resultVisibility = "visible";
-    } else if (Array.isArray(atlasMatch.matches) && atlasMatch.matches.length > 0) {
-      results = atlasMatch.matches.map((match) => ({
-        key: String(match.atlasId),
-        value: buildAtlasMatchOption(match),
+    } else if (Array.isArray(catalogMatch.matches) && catalogMatch.matches.length > 0) {
+      results = catalogMatch.matches.map((match) => ({
+        key: String(match.f95Id),
+        value: buildCatalogMatchOption(match),
       }));
       resultVisibility = "visible";
     }
@@ -822,7 +820,6 @@ async function findGame(
       })
     ) {
       const gd = {
-        atlasId,
         f95Id,
         title,
         creator,
