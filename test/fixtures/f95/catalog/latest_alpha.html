@@ -1,0 +1,522 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="x-ua-compatible" content="ie=edge">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<meta name="referrer" content="no-referrer">
+		<meta name="theme-color" content="#181a1d">
+		<title>Latest Games &amp; Updates | v4.0.3-Alpha</title>
+
+		<link rel="stylesheet" href="tmp/css.css">
+		<link rel="stylesheet" href="tmp/css2.css">
+		<link href='//fonts.googleapis.com/css?family=Open Sans:300,400,500,600,700|Lato:400' rel='stylesheet' type='text/css'>
+
+		<link rel="stylesheet" href="assets/vendor/jquery-loadmask-plus/jquery.loadmask-plus.min.css">
+		<link rel="stylesheet" href="assets/vendor/selectize.js/css/selectize.default.css">
+		<link rel="stylesheet" href="assets/vendor/nouislider/nouislider.min.css">
+		<link rel="stylesheet" href="assets/css/style.css?v=0005" type="text/css" media="all">
+		<style type="text/css">
+			html {
+				font-size: 10px;
+			}
+			.p-body {
+				z-index: 7;
+			}
+			.uix_headerContainer {
+				position: sticky;
+				top: 0;
+				z-index: 999;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="uix_pageWrapper--fixed">
+			<div class="p-pageWrapper" id="top">
+				<div class="uix_headerContainer">
+					<header class="p-header" id="header">
+						<div class="p-header-inner">
+							<div class="p-header-content">
+								<div class="p-header-logo p-header-logo--image">
+									<a class="uix_logo" href="/">
+										<img src="/assets/logo.png" alt="F95zone" srcset="/assets/logo.png 2x">
+									</a>
+								</div>
+							</div>
+						</div>
+					</header>
+					<div class="p-navSticky p-navSticky--primary uix_stickyBar" style="">
+						<nav class="p-nav">
+							<div class="p-nav-inner">
+								<a class="p-nav-menuTrigger  badgeContainer" data-badge="3" data-xf-click="off-canvas" data-menu=".js-headerOffCanvasMenu" role="button" tabindex="0">
+									<i aria-hidden="true"></i>
+									<span class="p-nav-menuText">Menu</span>
+								</a>
+								<div class="p-header-logo p-header-logo--image">
+									<a class="uix_logo" href="/">
+										<img src="/assets/logo.png" alt="F95zone" srcset="/assets/logo.png 2x">
+									</a>
+								</div>
+								<div class="p-nav-scroller hScroller" data-xf-init="h-scroller" data-auto-scroll=".p-navEl.is-selected">
+									<div class="hScroller-scroll is-calculated" style="margin-bottom: -35px;">
+										<ul class="p-nav-list js-offCanvasNavSource">
+											<li>
+												<div class="p-navEl u-ripple is-selected" data-has-children="true">
+													<a href="/sam/latest_alpha/" class="p-navEl-link p-navEl-link--splitMenu " data-nav-id="xfrm"><span>Downloads</span></a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple " data-has-children="true">
+													<a href="/" class="p-navEl-link p-navEl-link--splitMenu " data-nav-id="xfrm"><span>Forums</span></a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple " data-has-children="true">
+													<a href="/search" class="p-navEl-link p-navEl-link--splitMenu " data-nav-id="xfrm"><span>Search</span></a>
+												</div>
+											</li>
+<!--
+											<li>
+												<div class="p-navEl u-ripple " data-has-children="true">
+													<a href="#" class="p-navEl-link p-navEl-link--splitMenu " data-nav-id="whatsNew"><span>What's new</span></a>
+														<a data-xf-key="2" data-xf-click="menu" data-menu-pos-ref="< .p-navEl" class="p-navEl-splitTrigger" role="button" tabindex="0" aria-label="Toggle expanded" aria-expanded="false" aria-haspopup="true">
+													</a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple ">
+													<a href="#" class="p-navEl-link" data-xf-key="6" data-nav-id="th_donate"><span>Donate</span></a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple ">
+													<a href="#" class="p-navEl-link" data-xf-key="5" data-nav-id="LewdPatcher"><span>LewdPatcher</span></a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple ">
+													<a href="#" class="p-navEl-link" data-xf-key="7" data-nav-id="Nutaku"><span>Nutaku</span></a>
+												</div>
+											</li>
+											<li>
+												<div class="p-navEl u-ripple ">
+													<a href="#" class="p-navEl-link" data-xf-key="8" data-nav-id="ThePornDude"><span>ThePornDude</span></a>
+												</div>
+											</li>
+-->
+										</ul>
+									</div><i class="hScroller-action hScroller-action--end" aria-hidden="true"></i><i class="hScroller-action hScroller-action--start" aria-hidden="true"></i>
+								</div>
+<!--
+								<div class="p-nav-opposite">
+									<div class="p-navgroup p-account p-navgroup--member">
+										<a href="#" class="p-navgroup-link u-ripple p-navgroup-link--iconic p-navgroup-link--conversations js-badge--conversations badgeContainer" data-badge="0" data-xf-click="menu" data-xf-key="," data-menu-pos-ref="< .p-navgroup" aria-label="Inbox" aria-expanded="false" aria-haspopup="true">
+											<i aria-hidden="true"></i>
+											<span class="p-navgroup-linkText"></span>
+										</a>
+										<a href="#" class="p-navgroup-link u-ripple p-navgroup-link--iconic p-navgroup-link--alerts js-badge--alerts badgeContainer" data-badge="0" data-xf-click="menu" data-xf-key="." data-menu-pos-ref="< .p-navgroup" aria-label="Alerts" aria-expanded="false" aria-haspopup="true">
+											<i aria-hidden="true"></i>
+											<span class="p-navgroup-linkText"></span>
+										</a>
+										<a href="#" class="p-navgroup-link p-navgroup-link--iconic p-navgroup-link--linked" data-xf-click="menu" data-xf-key="." data-menu-pos-ref="< .p-navgroup" aria-label="" aria-expanded="false" aria-haspopup="true">
+											<i aria-hidden="true"></i>
+											<span class="p-navgroup-linkText"></span>
+										</a>
+									</div>
+									<div class="p-navgroup p-discovery">
+										<div class="uix_searchBar">
+											<a class="uix_searchIconTrigger p-navgroup-link p-navgroup-link--iconic p-navgroup-link--search u-ripple" aria-label="Search" aria-expanded="false" aria-haspopup="true" title="Search">
+												<i aria-hidden="true"></i>
+											</a>
+											<a href="#" class="p-navgroup-link p-navgroup-link--iconic p-navgroup-link--search u-ripple js-uix_minimalSearch__target" data-xf-click="menu" aria-label="Search" aria-expanded="false" aria-haspopup="true" title="Search">
+												<i aria-hidden="true"></i>
+											</a>
+										</div>
+									</div>
+								</div>
+-->
+							</div>
+						</nav>
+					</div>
+				</div>
+<ul class="notices notices--block js-notices" data-xf-init="notices" data-type="block" data-scroll-interval="6" style="margin:20px auto 0;max-width:1200px;">
+	<li class="notice js-notice notice--primary" data-notice-id="70" data-delay-duration="0" data-display-duration="0" data-auto-dismiss="" data-visibility="" style="margin:0;">
+		<div class="uix_noticeInner">
+			<div class="uix_noticeIcon">
+				<i class="fa--xf fas fa-info-circle mdi mdi-information" aria-hidden="true"></i>
+			</div>
+			<div class="notice-content" style="font-size:0.95em;">
+				We have had to disable the old latest updates page due to performance issues. For the time being at least, only the new alpha version will be available, as this uses a completely new backend which has far better performance (as well as new features). Thank you for your patience
+			</div>
+		</div>
+	</li>
+</ul>
+				<div class="p-body">
+					<div class="p-body-inner">
+						<div uix_component="MainContainer" class="uix_contentWrapper">
+							<div class="p-body-main  p-body-main--withSideNav">
+
+<!--
+	START
+-->
+<div id="latest-page_sub-nav">
+	<div id="sub-nav_inner" class="disabled">
+		<div class="sub-nav_paging">
+			<a class="nav_prev" href="#" rel="ajax"><i class="fas fa-angle-left"></i><span>Prev</span></a>
+			<div class="sub-nav_info-paging_nums"></div>
+			<a class="nav_next" href="#" rel="ajax"><span>Next</span><i class="fas fa-angle-right"></i></a>
+		</div>
+		<div id="sub-nav_controls">
+			<div class="controls-block">
+				<a id="controls_auto-refresh" data-tooltip="Auto Refresh">
+					<i class="fas fa-sync-alt"></i>
+				</a>
+				<a id="controls_notify" data-tooltip="Browser Notify">
+					<i class="fas fa-bell">
+					</i>
+					<div class="line-wrap">
+						<span></span><span></span><span></span>
+					</div>
+				</a>
+			</div>
+			<div id="sub-nav_controls_options-btns" class="controls-block">
+				<a id="controls_toggle-options-panel" data-tooltip="Options">
+					<i class="fas fa-cog"></i>
+				</a>
+			</div>
+			<div id="sub-nav_controls_filter-toggle" class="controls-block">
+				<a id="controls_filter-toggle" data-tooltip="Filters">
+					<i class="fas fa-filter"></i>
+					<div class="line-wrap">
+						<div class="top">
+							<span class="line1"></span>
+							<span class="line2"></span>
+							<span class="line3"></span>
+						</div>
+						<div class="bottom">
+							<span class="line1"></span>
+							<span class="line2"></span>
+							<span class="line3"></span>
+						</div>
+					</div>
+				</a>
+			</div>
+		</div>
+	</div>
+</div>
+<main id="latest-page_main-wrap">
+	<div id="latest-page_items-wrap">
+		<div id="warn">
+			<h1>Please update your browser to continue!</h1>
+			<p>We've detected you're using a browser that is at least 4-5 years out of date, and doesn't support newer web standards which this page relies upon in order to function correctly. There are better, faster and more secure alternatives available.</p>
+			<p>
+				<a href="https://www.google.com/chrome/" target="_blank" rel="noopener">Chrome</a>
+				<a href="https://www.mozilla.org/en-US/firefox/new/" target="_blank" rel="noopener">Firefox</a>
+				<a href="https://vivaldi.com/download/" target="_blank" rel="noopener">Vivaldi</a>
+				<a href="https://www.microsoft.com/windows/microsoft-edge" target="_blank" rel="noopener">Edge</a>
+			</p>
+		</div>
+		<div id="latest-page_options-panel">
+			<div id="options-panel_title">
+				<h3>Options</h3>
+				<div class="button-group-small options-panel_close">
+					<a class="button-icon"><i class="fas fa-times"></i></a>
+				</div>
+			</div>
+			<div id="options-panel_item-wrap">
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Tile layout</h4>
+					<div id="options-panel_display-mode-btns" class="options-panel_item-btns">
+						<a href="" class="grid grid-normal fas fa-th selected"></a>
+						<a href="" class="grid grid-large fas fa-th-large"></a>
+						<a href="" class="list fas fa-th-list"></a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Ignored threads</h4>
+					<div id="options-panel_ignored-btns" class="options-panel_item-btns">
+						<a href="" class="ignored-hide">Hide</a>
+						<a href="" class="ignored-transparent selected">Transparent</a>
+						<a href="" class="ignored-show">Show</a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Open links in new tab</h4>
+					<div id="options-panel_newtab-btns" class="options-panel_item-btns">
+						<a href="" class="newtab-true selected">Yes</a>
+						<a href="" class="newtab-false">No</a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Filters Sidebar</h4>
+					<div id="options-panel_sidebarsticky-btns" class="options-panel_item-btns">
+						<a href="" class="filtersticky-false selected">Normal</a>
+						<a href="" class="filtersticky-true">Sticky</a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Version style</h4>
+					<div id="options-panel_versionstyle-btns" class="options-panel_item-btns">
+						<a href="" class="version-small selected">Small (Prefix)</a>
+						<a href="" class="version-large">Large (Title)</a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Search Highlight</h4>
+					<div id="options-panel_searchhighlight-btns" class="options-panel_item-btns">
+						<a href="" class="searchhighlight-true selected">On</a>
+						<a href="" class="searchhighlight-false">Off</a>
+					</div>
+				</div>
+				<div class="options-panel_item">
+					<h4 class="options-panel_item-title">Notifications</h4>
+					<div id="options-panel_notifications-btns" class="options-panel_item-btns">
+						<a href="" class="notifications-nsfw selected">NSFW</a>
+						<a href="" class="notifications-sfw">SFW</a>
+					</div>
+				</div>
+				<div class="options-panel_item range-slider_wrap">
+					<h4 class="options-panel_item-title">Hover delay</h4>
+					<div id="options-panel_hover-delay_value" class="range-slider_value"></div>
+					<div id="options-panel_hover-delay" class="range-slider_bar"></div>
+				</div>
+				<div class="options-panel_item range-slider_wrap">
+					<h4 class="options-panel_item-title">Items Per Page</h4>
+					<div id="options-panel_rows_value" class="range-slider_value"></div>
+					<div id="options-panel_rows" class="range-slider_bar"></div>
+				</div>
+			</div>
+			<div id="options-panel_save-load">
+				<div id="options-panel_item-btns-info"></div>
+				<div class="options-panel_item-btns-wrap">
+					<a href="" class="options-save"><i class="fas fa-save"></i>Save</a>
+				</div>
+			</div>
+		</div>
+		<div id="latest-page_items-wrap_inner" class="grid grid-normal filter-visible version-small ignored-transparent"></div>
+		<div class="sub-nav_paging">
+			<a class="nav_prev" href="#" rel="ajax"><i class="fas fa-angle-left"></i><span>Prev</span></a>
+			<div class="sub-nav_info-paging_nums"></div>
+			<a class="nav_next" href="#" rel="ajax"><span>Next</span><i class="fas fa-angle-right"></i></a>
+		</div>
+	</div>
+	<aside id="latest-page_filter-wrap" class="filter-hidden" style="display:none;">
+		<div id="latest-page_filter-wrap_inner">
+			<div class="content-block_filter">
+				<h3 class="content-block_filter-title">
+					<div id="filter-title">
+						<i class="fas fa-filter"></i>Filters
+					</div>
+					<div id="filter-controls" class="button-group-small">
+						<a href="" id="filter-reset" class="button-icon"><i class="fas fa-undo-alt"></i></a>
+						<a href="" id="filter-close" class="button-icon"><i class="fas fa-times"></i></a>
+					</div>
+				</h3>
+				<div id="filter-block_cat" class="filter-block">
+					<h4 class="filter-block_title">Category</h4>
+					<div class="filter-block_content filter-block_h">
+						<div id="btn-cat_games" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-cat="games" class="filter-block_button fas fa-gamepad"></a>
+							<div class="filter-block_button-label">Games</div>
+						</div>
+						<div id="btn-cat_comics" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-cat="comics" class="filter-block_button fas fa-image"></a>
+							<div class="filter-block_button-label">Comics</div>
+						</div>
+						<div id="btn-cat_animations" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-cat="animations" class="filter-block_button fas fa-film"></a>
+							<div class="filter-block_button-label">Animations</div>
+						</div>
+						<div id="btn-cat_assets" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-cat="assets" class="filter-block_button fas fa-box-full"></a>
+							<div class="filter-block_button-label">Assets</div>
+						</div>
+						<div id="btn-cat_assets" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-cat="mods" class="filter-block_button fas fa-file-signature"></a>
+							<div class="filter-block_button-label">Mods</div>
+						</div>
+					</div>
+				</div>
+				<div id="filter-block_sort" class="filter-block">
+					<h4 class="filter-block_title">Sorting</h4>
+					<div class="filter-block_content filter-block_h">
+						<div id="btn-sort_date" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-sort="date" class="filter-block_button fas fa-clock"></a>
+							<div class="filter-block_button-label">Date</div>
+						</div>
+						<div id="btn-sort_likes" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-sort="likes" class="filter-block_button fas fa-thumbs-up"></a>
+							<div class="filter-block_button-label">Likes</div>
+						</div>
+						<div id="btn-sort_views" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-sort="views" class="filter-block_button fas fa-eye"></a>
+							<div class="filter-block_button-label">Views</div>
+						</div>
+						<div id="btn-sort_name" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-sort="title" class="filter-block_button fas fa-sort-alpha-down"></a>
+							<div class="filter-block_button-label">Name</div>
+						</div>
+						<div id="btn-sort_rating" class="filter-block_button-wrap">
+							<a href="#" rel="ajax" data-sort="rating" class="filter-block_button fas fa-star"></a>
+							<div class="filter-block_button-label">Weighted Rating</div>
+						</div>
+					</div>
+				</div>
+				<div id="filter-block_date-filter" class="range-slider_wrap filter-block">
+					<h4 class="filter-block_title">Date Limit</h4>
+					<div id="filter-date_range-value" class="range-slider_value"></div>
+					<div id="filter-date_range" class="range-slider_bar"></div>
+				</div>
+				<div id="filter-block_search" class="filter-block">
+					<h4 class="filter-block_title">Search</h4>
+					<a href="#" id="filter-search_type" class="filter-toggle_title"><span class="filter-search_type-creator off">Creator</span><span class="divider">/</span><span class="filter-search_type-title on">Title</span></a>
+					<div class="filter-block_content">
+						<input id="input-title_search" class="search-input" placeholder="Search titles..." autocomplete="off">
+						<input id="input-creator_search" class="search-input" placeholder="Search creators..." autocomplete="off" style="display:none;">
+					</div>
+				</div>
+				<div id="filter-block_tags" class="filter-block">
+					<h4 class="filter-block_title">Tags (Max 10)</h4>
+					<a href="#" id="filter-tag_type" class="filter-toggle_title"><span class="filter-tag_type-or off">OR</span><span class="divider">/</span><span class="filter-tag_type-and on">AND</span></a>
+					<div class="filter-block_content">
+						<select class="filter-tags-select" placeholder="Select tags to filter..."></select>
+						<div class="filter-tags-selected-wrap selectize-selected"></div>
+					</div>
+				</div>
+				<div id="filter-block_tags_exclude" class="filter-block">
+					<h4 class="filter-block_title">Exclude Tags (Max 10)</h4>
+					<div class="filter-block_content">
+						<select class="filter-tags-exclude-select" placeholder="Select tags to exclude..."></select>
+						<div class="filter-tags-exclude-selected-wrap selectize-selected"></div>
+					</div>
+				</div>
+				<div id="filter-block_prefixes"></div>
+			</div>
+			<div id="filter-footer">
+				<div id="info-count-wrap">
+					<i class="fas fa-info-circle"></i><span id="info-count">0 Results</span>
+				</div>
+				<a id="latest-rss_link" href="" target="_blank" rel="noopener"><i class="fas fa-rss-square"></i></a>
+			</div>
+		</div>
+	</aside>
+</main>
+<!--
+	END
+-->
+							</div>
+						</div>
+					</div>
+				</div>
+				<footer class="p-footer" id="footer" style="margin-bottom: 0px;">
+					<div class="uix_extendedFooter">
+						<div class="pageContent">
+							<div class="uix_extendedFooterRow">
+								<div class="block" data-widget-definition="th_aboutUs">
+									<div class="block-container">
+									<h3 class="block-minorHeader">About us</h3>
+										<div class="block-body">
+										F95zone is an adult community where you can find tons of great adult games and comics, make new friends, participate in active discussions and more!
+										</div>
+									</div>
+								</div>
+								<div class="block" data-widget-definition="th_navigation">
+									<div class="block-container">
+										<h3 class="block-minorHeader">Quick Navigation</h3>
+										<div class="block-body">
+											<a href="#">Members</a>
+										</div>
+										<div class="block-body">
+											<a href="#">Forum Rules</a>
+										</div>
+										<div class="block-body footer-social-links">
+											<a href="#" rel="noopener noreferrer"><i class="fab fa-discord"></i></a>
+											<a href="#" rel="noopener noreferrer"><i class="fab fa-twitter"></i></a>
+										</div>
+									</div>
+								</div>
+								<div class="block" data-widget-definition="th_userNavigation">
+									<div class="block-container">
+										<h3 class="block-minorHeader">User Menu</h3>
+										<div class="block-body">
+											<a href="#">Profile</a>
+										</div>
+										<div class="block-body">
+											<a href="#">Account details</a>
+										</div>
+										<div class="block-body">
+											<a href="#">News feed</a>
+										</div>
+										<div class="block-body">
+											<a href="#">Log out</a>
+										</div>
+									</div>
+								</div>
+								<div class="block" data-widget-id="7" data-widget-key="forum_overview_forum_statistics" data-widget-definition="forum_statistics">
+									<div class="block-container">
+										<h3 class="block-minorHeader">Forum statistics</h3>
+										<div class="block-body block-row">
+											<dl class="pairs pairs--justified">
+												<dt>Threads</dt>
+												<dd>69,420</dd>
+											</dl>
+											<dl class="pairs pairs--justified">
+												<dt>Messages</dt>
+												<dd>6,969,420</dd>
+											</dl>
+											<dl class="pairs pairs--justified">
+												<dt>Members</dt>
+												<dd>3,333,333</dd>
+											</dl>
+											<dl class="pairs pairs--justified">
+												<dt>Latest member</dt>
+												<dd><a href="#" class="username " dir="auto"data-xf-init="member-tooltip">Sam</a></dd>
+											</dl>
+										</div>
+									</div>
+								</div>
+								<div class="footer-extra">
+									<a class="footer-extra-logo" href="/"></a>
+									<div class="footer-extra-text">
+										<p>This site provides links to other sites/services, and does not store any files</p>
+										<p style="filter:blur(5px);">Lorem ipsum dolor <a href="#" rel="noopener noreferrer">sit amet</a></p>
+									</div>
+									<i class="fad fa-cog fa-spin footer-extra-icon" data-xf-init="tooltip" data-original-title=""></i>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div class="p-footer-inner">
+						<div class="pageContent">
+							<div class="p-footer-row">
+								<div class="p-footer-row-main">
+									<ul class="p-footer-linkList p-footer-choosers">
+										<li><a href="#" data-xf-click="overlay" data-xf-init="tooltip" rel="nofollow" data-original-title="Language chooser"><i class="fa fa-globe" aria-hidden="true"></i> English (US)</a></li>
+									</ul>
+								</div>
+							</div>
+							<div class="p-footer-row-opposite">
+								<ul class="p-footer-linkList">
+									<li><a href="#" data-xf-click="overlay">Contact &amp; Abuse</a></li>
+									<li><a href="#">Terms and rules</a></li>
+									<li><a href="#">Privacy policy</a></li>
+									<li><a href="#">Help</a></li>
+									<li><a href="#" title="Top"><i class="fa fa-arrow-up" aria-hidden="true"></i></a></li>
+									<li><a href="#" class="p-footer-rssLink" title="RSS"><span aria-hidden="true"><i class="fa fa-rss"></i><span class="u-srOnly">RSS</span></span></a></li>
+								</ul>
+							</div>
+						</div>
+					</div>
+				</footer>
+			</div>
+		</div>
+		<script>
+			var latestUpdates = {"prefixes":{"games":[{"id":3,"name":"Other","prefixes":[{"id":19,"name":"Collection","class":"label--gray"},{"id":23,"name":"SiteRip","class":"label--lightGreen"},{"id":13,"name":"VN","class":"label--red"}]},{"id":1,"name":"Engine","prefixes":[{"id":14,"name":"Others","class":"label--lightGreen"},{"id":1,"name":"QSP","class":"label--red"},{"id":2,"name":"RPGM","class":"label--blue"},{"id":3,"name":"Unity","class":"pre-unity"},{"id":4,"name":"HTML","class":"label--olive"},{"id":5,"name":"RAGS","class":"label--orange"},{"id":6,"name":"Java","class":"pre-java"},{"id":7,"name":"Ren\u0026#039;Py","class":"pre-renpy"},{"id":8,"name":"Flash","class":"label--gray"},{"id":12,"name":"ADRIFT","class":"label--blue"},{"id":17,"name":"Tads","class":"label--blue"},{"id":30,"name":"Wolf RPG","class":"label--green"},{"id":31,"name":"Unreal Engine","class":"label--royalBlue"},{"id":47,"name":"WebGL","class":"pre-webgl"},{"id":116,"name":"Godot","class":"label--skyBlue"}]},{"id":4,"name":"Status","prefixes":[{"id":18,"name":"Completed","class":"label--blue"},{"id":20,"name":"Onhold","class":"label--skyBlue"},{"id":22,"name":"Abandoned","class":"label--orange"}]}],"comics":[{"id":3,"name":"Other","prefixes":[{"id":43,"name":"Manga","class":"label--skyBlue"},{"id":23,"name":"SiteRip","class":"label--lightGreen"},{"id":19,"name":"Collection","class":"label--gray"},{"id":16,"name":"Comics","class":"label--orange"},{"id":49,"name":"CG","class":"label--yellow"},{"id":44,"name":"Pinup","class":"label--blue"}]},{"id":4,"name":"Status","prefixes":[{"id":18,"name":"Completed","class":"label--blue"},{"id":20,"name":"Onhold","class":"label--skyBlue"},{"id":22,"name":"Abandoned","class":"label--orange"}]}],"animations":[{"id":3,"name":"Other","prefixes":[{"id":19,"name":"Collection","class":"label--gray"}]},{"id":6,"name":"Animation","prefixes":[{"id":39,"name":"Video","class":"label--orange"},{"id":38,"name":"GIF","class":"label--skyBlue"},{"id":37,"name":"Flash","class":"label--royalBlue"},{"id":59,"name":"App","class":"label--green"}]}],"assets":[{"id":5,"name":"Assets","prefixes":[{"id":115,"name":"RPGM","class":"label--blue"},{"id":33,"name":"Daz","class":"label--orange"},{"id":35,"name":"VAM","class":"label--royalBlue"},{"id":36,"name":"Illusion","class":"label--lightGreen"},{"id":40,"name":"AutoDesk","class":"label--green"},{"id":41,"name":"Poser","class":"label--accent"},{"id":42,"name":"Blender","class":"label--skyBlue"},{"id":110,"name":"Unreal","class":"label--royalBlue"},{"id":45,"name":"Tutorial","class":"label--lightGreen"},{"id":71,"name":"Other","class":"label--lightGreen"},{"id":114,"name":"Unity","class":"pre-unity"}]},{"id":3,"name":"Other","prefixes":[{"id":19,"name":"Collection","class":"label--gray"}]}]},"tags":{"30":"incest","44":"slave","45":"rpg","75":"milf","103":"corruption","105":"bestiality","107":"3dcg","111":"mind control","130":"big tits","141":"sci-fi","162":"adventure","173":"male protagonist","174":"male domination","176":"masturbation","179":"fantasy","181":"lesbian","182":"monster","191":"futa\/trans","199":"trainer","215":"tentacles","216":"bukkake","225":"pregnancy","237":"oral sex","254":"harem","258":"netorare","259":"handjob","264":"bdsm","278":"creampie","290":"lactation","322":"multiple endings","324":"no sexual content","327":"twins","330":"romance","339":"blackmail","348":"dating sim","351":"teasing","354":"superpowers","360":"gay","361":"humor","362":"trap","374":"prostitution","382":"furry","384":"exhibitionism","392":"female protagonist","394":"monster girl","408":"paranormal","411":"titfuck","417":"rape","448":"simulator","449":"management","452":"turn based combat","480":"stripping","485":"voyeurism","498":"group sex","505":"parody","522":"text based","535":"groping","547":"school setting","550":"combat","553":"footjob","606":"cosplay","628":"strategy","639":"loli","670":"sexual harassment","689":"scat","708":"horror","728":"graphic violence","736":"japanese game","749":"shota","757":"vore","769":"spanking","776":"side-scroller","783":"animated","817":"big ass","833":"virgin","871":"humiliation","875":"transformation","894":"interracial","895":"virtual reality","916":"ahegao","924":"cheating","1079":"shooter","1111":"kinetic novel","1254":"urination","1305":"sleep sex","1407":"dilf","1434":"3d game","1471":"puzzle","1476":"possession","1483":"internal view","1506":"voiced","1507":"2dcg","1508":"platformer","1525":"point \u0026 click","1556":"multiple penetration","1707":"real porn","1766":"pov","1828":"necrophilia","2209":"vaginal sex","2214":"2d game","2215":"sissification","2216":"sex toys","2217":"drugs","2218":"religion","2219":"asset-clothing","2220":"asset-character","2221":"asset-environment","2222":"asset-hair","2223":"asset-light","2224":"asset-pose","2225":"asset-prop","2226":"asset-shader","2227":"asset-texture","2228":"asset-utility","2229":"mobile game","2234":"swinging","2235":"asset-bundle","2236":"asset-script","2237":"asset-expression","2238":"asset-plugin","2239":"asset-animal","2240":"asset-addon","2241":"anal sex","2242":"multiple protagonist","2246":"character creation","2247":"censored","2249":"dystopian setting","2250":"asset-vehicle","2251":"asset-morph","2252":"female domination","2254":"asset-animation","2255":"futa\/trans protagonist","2256":"asset-hdri","2257":"sandbox","2258":"asset-audio","2260":"asset-honey-select","2261":"asset-ai-shoujo","2262":"asset-honey-select2","2263":"asset-koikatu","2264":"asset-playhome","2265":"ai cg","2267":"asset-daz-gen2","2268":"asset-daz-gen3","2269":"asset-daz-gen8","2270":"asset-daz-gen81","2271":"asset-daz-gen9","2272":"asset-male","2273":"asset-female","2274":"asset-nonbinary","2275":"asset-scene","2276":"asset-daz-gen1","2277":"asset-daz-v4","2278":"asset-daz-m4"},"options":{"newTab":"true","ignoredThreads":"transparent","view":"grid","notifications":"nsfw","hover":"50","rows":"30","version":"small","filterSticky":"false","searchHighlight":"true"}};
+		</script>
+		<script src="assets/vendor/jquery-3.2.1.min.js"></script>
+		<script src="assets/vendor/selectize.js/js/standalone/selectize.min.js"></script>
+		<script src="assets/vendor/jquery-loadmask-plus/jquery.loadmask-plus.min.js"></script>
+		<script src="assets/vendor/nouislider/nouislider.min.js"></script>
+		<script src="assets/js/latest.min.js?v=0005"></script>
+	<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a43b55772992ef02',t:'MTc5MDg1NjMwOA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
