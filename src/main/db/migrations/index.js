@@ -13,6 +13,7 @@ const unescapeSqlQuotesMigration = require("./010_unescape_sql_quotes");
 const libraryLiveVersionsMigration = require("./011_library_live_versions");
 const f95CatalogMigration = require("./012_f95_catalog");
 const f95CatalogThreadDetailsMigration = require("./013_f95_catalog_thread_details");
+const f95CatalogFullSizeImagesMigration = require("./014_f95_catalog_full_size_images");
 
 module.exports = [
   initialSchemaMigration,
@@ -28,4 +29,5 @@ module.exports = [
   libraryLiveVersionsMigration,
   f95CatalogMigration,
   f95CatalogThreadDetailsMigration,
+  f95CatalogFullSizeImagesMigration,
 ];

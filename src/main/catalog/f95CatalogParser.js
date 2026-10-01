@@ -160,6 +160,18 @@ function toHttpUrl(value) {
 }
 
 /**
+ * The list links covers and screenshots on the preview host (scaled
+ * copies); the thread links the same path on the attachments host at full
+ * size. The path is identical, so the full-size file is one host swap away.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function toFullSizeImageUrl(value) {
+  const url = toHttpUrl(value);
+  return url.replace(/^https?:\/\/preview\.f95zone\.to\//i, "https://attachments.f95zone.to/");
+}
+
+/**
  * @param {unknown} value
  * @returns {number[]}
  */
@@ -338,7 +350,7 @@ function normalizeCatalogEntry(row, definitions, options = {}) {
   }
   const tagIds = toIdList(row.tags);
   const tags = tagIds.map((id) => resolved.tags[String(id)]).filter(Boolean);
-  const screens = Array.isArray(row.screens) ? row.screens.map(toHttpUrl).filter(Boolean) : [];
+  const screens = Array.isArray(row.screens) ? row.screens.map(toFullSizeImageUrl).filter(Boolean) : [];
 
   return {
     f95Id,
@@ -352,7 +364,7 @@ function normalizeCatalogEntry(row, definitions, options = {}) {
     prefixes: prefixNames,
     tagIds,
     tags,
-    coverUrl: toHttpUrl(row.cover),
+    coverUrl: toFullSizeImageUrl(row.cover),
     screens,
     rating: toRating(row.rating),
     likes: toCount(row.likes),
@@ -454,4 +466,5 @@ module.exports = {
   parseDefinitions,
   parseListResponse,
   resolveDefinitions,
+  toFullSizeImageUrl,
 };

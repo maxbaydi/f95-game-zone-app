@@ -57,8 +57,9 @@ test("parseListResponse turns the real page 1 into catalog entries", () => {
   assert.deepEqual(first.prefixIds, [13, 7]);
   assert.ok(first.tags.includes("milf"));
   assert.equal(first.tags.length, first.tagIds.length);
-  assert.equal(first.coverUrl, "https://preview.f95zone.to/2026/08/6402159_Cover.jpg");
+  assert.equal(first.coverUrl, "https://attachments.f95zone.to/2026/08/6402159_Cover.jpg", "the full-size host, as the thread links it");
   assert.equal(first.screens.length, 6);
+  assert.equal(first.screens[0], "https://attachments.f95zone.to/2026/08/6402160_ss-1.jpg");
   assert.equal(first.rating, 3);
   assert.equal(first.likes, 126);
   assert.equal(first.views, 109742);
@@ -122,7 +123,7 @@ test("normalizeCatalogEntry validates rows and falls back to built-in prefix nam
       likes: "1,234",
       views: 10,
       cover: "not a url",
-      screens: ["https://preview.f95zone.to/a.jpg", "javascript:alert(1)", 5],
+      screens: ["https://preview.f95zone.to/a.jpg", "https://i.imgur.com/b.png", "javascript:alert(1)", 5],
       ts: "1700000000",
     },
     null,
@@ -140,7 +141,7 @@ test("normalizeCatalogEntry validates rows and falls back to built-in prefix nam
   assert.equal(entry.likes, 1234);
   assert.equal(entry.views, 10);
   assert.equal(entry.coverUrl, "");
-  assert.deepEqual(entry.screens, ["https://preview.f95zone.to/a.jpg"]);
+  assert.deepEqual(entry.screens, ["https://attachments.f95zone.to/a.jpg", "https://i.imgur.com/b.png"]);
   assert.equal(entry.updatedTs, 1700000000);
   assert.equal(entry.siteUrl, buildThreadUrl(42));
 });
