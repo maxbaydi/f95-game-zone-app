@@ -11,6 +11,7 @@ const gameFavoritesMigration = require("./008_game_favorites");
 const cloudLibraryDeleteQueueMigration = require("./009_cloud_library_delete_queue");
 const unescapeSqlQuotesMigration = require("./010_unescape_sql_quotes");
 const libraryLiveVersionsMigration = require("./011_library_live_versions");
+const f95CatalogMigration = require("./012_f95_catalog");
 
 module.exports = [
   initialSchemaMigration,
@@ -24,4 +25,5 @@ module.exports = [
   cloudLibraryDeleteQueueMigration,
   unescapeSqlQuotesMigration,
   libraryLiveVersionsMigration,
+  f95CatalogMigration,
 ];
