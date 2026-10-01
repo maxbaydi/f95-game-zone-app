@@ -234,3 +234,23 @@ test("setCatalogThreadDetails stores the starter post fields and never erases wi
   assert.equal(await store.setCatalogThreadDetails(db, 311614, null), false);
   db.close();
 });
+
+test("migration 014 moves stored preview-host images to the full-size host", async () => {
+  const db = new sqlite3.Database(":memory:");
+  const migrations = require("../src/main/db/migrations");
+  await run(db, "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)");
+  for (const migration of migrations.filter((entry) => entry.version <= 13)) {
+    for (const statement of migration.statements) {
+      await run(db, statement);
+    }
+    await run(db, "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)", [migration.version, migration.name, "x"]);
+  }
+  await run(db, "INSERT INTO f95_catalog (f95_id, title, cover_url, screens) VALUES (1, 'A', 'https://preview.f95zone.to/2026/08/1_Cover.jpg', '[\"https://preview.f95zone.to/2026/08/2_ss.jpg\",\"https://i.imgur.com/x.png\"]')");
+  await run(db, "INSERT INTO f95_catalog (f95_id, title, cover_url, screens) VALUES (2, 'B', 'https://attachments.f95zone.to/c.jpg', '[]')");
+  await runMigrations(db);
+  const a = await store.getCatalogEntry(db, 1);
+  assert.equal(a.coverUrl, "https://attachments.f95zone.to/2026/08/1_Cover.jpg");
+  assert.deepEqual(a.screens, ["https://attachments.f95zone.to/2026/08/2_ss.jpg", "https://i.imgur.com/x.png"]);
+  assert.equal((await store.getCatalogEntry(db, 2)).coverUrl, "https://attachments.f95zone.to/c.jpg");
+  db.close();
+});
