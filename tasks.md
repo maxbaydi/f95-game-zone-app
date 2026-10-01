@@ -4845,6 +4845,16 @@ Release path: pushing to `main` triggers `.github/workflows/main.yml`, which bui
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests on Linux).
 
+## 2026-10-01 — 1.8.0: собственный каталог игр вместо пакета Atlas
+
+Каталог метаданных больше не скачивается с `atlas-gamesdb.com`: приложение само читает список «Latest Updates» F95 (`docs/catalog-sync.md`, пробник `docs/catalog-probe.md`, фикстуры `test/fixtures/f95/catalog`).
+
+- `src/main/catalog/f95CatalogParser.js` — разбор ответа `latest_data.php` и справочника префиксов/тегов из HTML страницы; `src/main/db/f95CatalogStore.js` + миграция 012 — таблица `f95_catalog` по `f95_id`, перенос `atlas_mappings` → `f95_zone_mappings`, удаление таблиц Atlas; `src/main/catalog/f95CatalogSync.js` — полный обход с курсором и возобновлением, инкрементальное дочитывание до первой известной записи, повторы с задержкой, обнаружение потери сессии, прогресс в `db-update-progress`.
+- Понятие `atlas_id` удалено из кода: сопоставитель (`scanCatalogMatcher.js`), «Link to catalog», импортёр, картинки, дубликаты, сброс/бэкап работают по id темы. Новые IPC `search-catalog`, `get-catalog-entry`, `get-catalog-sync-state`; настройка `Library.catalogAutoSync`; периодическая задача каждые 6 ч и после сна; пункт трея «Refresh Game Catalog».
+- Ревью 1.7.0: слушатели `f95-auth-changed` больше не снимаются целиком при закрытии F95‑браузера, фоновая проверка обновлений приложения не перезапускает идущую загрузку, флаг автоустановки применяется сразу, недельный бэкап стал ежедневной задачей, тесты с Windows‑путями проходят на Linux. Бренд Atlas убран из кода, UI‑слоя, установщика и документации; workflow `Release` запускается только по тегу `v*`, `Checks` идёт и на `main`.
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 555 tests, 555 pass. Published as `v1.8.0`.
+
 ## 2026-09-29 — 1.7.0: background automation, compact F95 browser, user-owned Supabase
 
 Аудит того, что ещё делается руками (`docs/ux-automation-backlog.md`), и реализация основной части:
