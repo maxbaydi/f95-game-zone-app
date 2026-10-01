@@ -7,7 +7,7 @@ const path = require("path");
 const { getFolderSizeAsync } = require("../src/main/folderSize");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-folder-size-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-folder-size-"));
 }
 
 test("getFolderSizeAsync sums every file in nested folders", async () => {

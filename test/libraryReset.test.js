@@ -14,7 +14,7 @@ const {
 } = require("../src/main/libraryReset");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-library-reset-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-library-reset-"));
 }
 
 function runAsync(db, sql, params = []) {
@@ -48,27 +48,27 @@ async function countRows(db, table) {
 
 async function seedLibrary(db, appPaths) {
   const now = new Date().toISOString();
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Atlas Game', 'Atlas Dev', 'renpy', '0.9')`);
-  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/atlas-game.555/')`);
+  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
+  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/app-game.555/')`);
   await runAsync(db, `INSERT INTO updates (update_time, processed_time, md5) VALUES (1, 1, 'abc')`);
   await runAsync(db, `INSERT INTO scan_sources (path, is_enabled, created_at, updated_at) VALUES ('C:\\Games', 1, ?, ?)`, [now, now]);
   await runAsync(db, `INSERT INTO emulators (extension, program_path, parameters) VALUES ('swf', 'C:\\flash.exe', '')`);
   await runAsync(db, `INSERT INTO tags (tag_id, tag) VALUES (1, 'fantasy')`);
 
-  const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime) VALUES ('Atlas Game', 'Atlas Dev', 'renpy', 0, 0)`);
+  const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime) VALUES ('Sample Game', 'Sample Dev', 'renpy', 0, 0)`);
   const recordId = game.lastID;
-  await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Atlas', 'C:\\Games\\Atlas\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
+  await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Sample', 'C:\\Games\\Sample\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
   await runAsync(db, `INSERT INTO atlas_mappings (record_id, atlas_id) VALUES (?, 100)`, [recordId]);
-  await runAsync(db, `INSERT INTO f95_zone_mappings (record_id, f95_id, site_url) VALUES (?, 555, 'https://f95zone.to/threads/atlas-game.555/')`, [recordId]);
+  await runAsync(db, `INSERT INTO f95_zone_mappings (record_id, f95_id, site_url) VALUES (?, 555, 'https://f95zone.to/threads/app-game.555/')`, [recordId]);
   await runAsync(db, `INSERT INTO tag_mappings (record_id, tag_id) VALUES (?, 1)`, [recordId]);
   await runAsync(db, `INSERT INTO banners (record_id, path, type) VALUES (?, 'cache/images/${recordId}/banner_mc.webp', 'small')`, [recordId]);
   await runAsync(db, `INSERT INTO previews (record_id, path) VALUES (?, 'cache/images/${recordId}/preview_0.webp')`, [recordId]);
-  await runAsync(db, `INSERT INTO save_profiles (record_id, provider, root_path, strategy_type, strategy_payload, confidence, reasons_json, detected_at, last_seen_at) VALUES (?, 'local', 'C:\\Games\\Atlas\\game\\saves', 'renpy', '{}', 90, '[]', ?, ?)`, [recordId, now, now]);
+  await runAsync(db, `INSERT INTO save_profiles (record_id, provider, root_path, strategy_type, strategy_payload, confidence, reasons_json, detected_at, last_seen_at) VALUES (?, 'local', 'C:\\Games\\Sample\\game\\saves', 'renpy', '{}', 90, '[]', ?, ?)`, [recordId, now, now]);
   await runAsync(db, `INSERT INTO save_sync_state (record_id, cloud_identity, sync_status, updated_at) VALUES (?, 'f95-555', 'idle', ?)`, [recordId, now]);
   await runAsync(db, `INSERT INTO scan_jobs (mode, status, started_at, source_count, games_found, errors_count) VALUES ('scan_sources', 'success', ?, 1, 1, 0)`, [now]);
-  await runAsync(db, `INSERT INTO scan_candidates (folder_path, title, creator, first_seen_at, last_seen_at) VALUES ('C:\\Games\\Atlas', 'Atlas Game', 'Atlas Dev', ?, ?)`, [now, now]);
+  await runAsync(db, `INSERT INTO scan_candidates (folder_path, title, creator, first_seen_at, last_seen_at) VALUES ('C:\\Games\\Sample', 'Sample Game', 'Sample Dev', ?, ?)`, [now, now]);
   await runAsync(db, `INSERT INTO cloud_library_delete_queue (request_key, cloud_project_key, preferred_identity_key, requested_at) VALUES ('req-1', 'proj', 'f95:1', ?)`, [now]);
-  await runAsync(db, `INSERT INTO library_live_versions (record_id, thread_url, version, title, checked_at) VALUES (?, 'https://f95zone.to/threads/atlas-game.555/', '1.1', 'Atlas Game', ?)`, [recordId, now]);
+  await runAsync(db, `INSERT INTO library_live_versions (record_id, thread_url, version, title, checked_at) VALUES (?, 'https://f95zone.to/threads/app-game.555/', '1.1', 'Sample Game', ?)`, [recordId, now]);
 
   const imageDir = path.join(appPaths.images, String(recordId));
   fs.mkdirSync(imageDir, { recursive: true });

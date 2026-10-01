@@ -169,7 +169,7 @@ async function startEnabledSourcesScan(window, appPaths, baseParams) {
   try {
     atlasMatcher = await createAtlasScanMatcher(db);
   } catch (error) {
-    console.error("[scan.runner] failed to build Atlas matcher index", {
+    console.error("[scan.runner] failed to build catalog matcher index", {
       error: error instanceof Error ? error.message : String(error),
     });
   }

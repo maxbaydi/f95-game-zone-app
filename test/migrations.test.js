@@ -9,7 +9,7 @@ const { buildAppPaths, ensureAppDirs } = require("../src/main/appPaths");
 const { openDatabase } = require("../src/main/db/openDatabase");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-migrations-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-migrations-"));
 }
 
 function allAsync(db, sql, params = []) {

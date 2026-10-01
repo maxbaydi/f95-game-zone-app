@@ -1,13 +1,13 @@
 const { useState, useEffect } = window.React;
 
-const ATLAS_PREVIEW_W = 21;
-const ATLAS_PREVIEW_H = 9;
-const ATLAS_BANNER_WIDTH = 252;
-const ATLAS_BANNER_IMAGE_H = Math.round(
-  (ATLAS_BANNER_WIDTH * ATLAS_PREVIEW_H) / ATLAS_PREVIEW_W,
+const PREVIEW_W = 21;
+const PREVIEW_H = 9;
+const BANNER_WIDTH = 252;
+const BANNER_IMAGE_H = Math.round(
+  (BANNER_WIDTH * PREVIEW_H) / PREVIEW_W,
 );
-const ATLAS_BANNER_FOOTER_H = 100;
-const ATLAS_BANNER_HEIGHT = ATLAS_BANNER_IMAGE_H + ATLAS_BANNER_FOOTER_H;
+const BANNER_FOOTER_H = 100;
+const BANNER_HEIGHT = BANNER_IMAGE_H + BANNER_FOOTER_H;
 
 // Card hover/entrance styles live in assets/css/main.css (.banner-root).
 
@@ -16,9 +16,9 @@ const GAME_LAUNCH_DEDUPE_MS = 4000;
 
 // Shared launcher used by cards, the details panel and context menus: it
 // ignores accidental double clicks and reports failures as toasts.
-const launchAtlasGame = async ({ execPath, recordId, title }) => {
+const launchLibraryGame = async ({ execPath, recordId, title }) => {
   const normalizedPath = String(execPath || "").trim();
-  const toast = window.AtlasUI?.toast;
+  const toast = window.AppUI?.toast;
   const label = title || "the game";
 
   if (!normalizedPath) {
@@ -66,13 +66,13 @@ const launchAtlasGame = async ({ execPath, recordId, title }) => {
     toast?.update(toastId, {
       type: "error",
       title: `Can't start ${label}`,
-      message: window.AtlasUI?.errorMessage(error) || String(error),
+      message: window.AppUI?.errorMessage(error) || String(error),
     });
     return { success: false, error };
   }
 };
 
-window.launchAtlasGame = launchAtlasGame;
+window.launchLibraryGame = launchLibraryGame;
 
 let bannerTemplateCache = { status: "idle", component: null, promise: null };
 
@@ -214,7 +214,7 @@ const pickVersionForLaunch = (versions) => {
   return best;
 };
 
-function AtlasF95BannerCard({
+function F95BannerCard({
   game,
   onSelect,
   onUpdateGame,
@@ -278,7 +278,7 @@ function AtlasF95BannerCard({
   const handlePrimaryAction = (e) => {
     e.stopPropagation();
     if (canPlay && launchable?.exec_path) {
-      void launchAtlasGame({
+      void launchLibraryGame({
         execPath: launchable.exec_path,
         recordId: game.record_id,
         title: displayTitle,
@@ -326,9 +326,9 @@ function AtlasF95BannerCard({
       "sports_esports",
     ),
   );
-  if (game.banner_url && window.AtlasImage) {
+  if (game.banner_url && window.AppImage) {
     thumbChildren.push(
-      React.createElement(window.AtlasImage, {
+      React.createElement(window.AppImage, {
         key: "img",
         src: game.banner_url,
         alt: displayTitle,
@@ -365,7 +365,7 @@ function AtlasF95BannerCard({
               "div",
               {
                 key: "state",
-                className: `atlas-badge-enter pointer-events-auto px-2 py-0.5 border text-[10px] backdrop-blur-sm ${stateBadge.className}`,
+                className: `app-badge-enter pointer-events-auto px-2 py-0.5 border text-[10px] backdrop-blur-sm ${stateBadge.className}`,
                 title: stateBadge.title,
               },
               stateBadge.text,
@@ -376,7 +376,7 @@ function AtlasF95BannerCard({
               {
                 key: "unmatched",
                 className:
-                  "atlas-badge-enter pointer-events-auto px-2 py-0.5 border border-white/35 bg-black/45 text-[10px] text-white/80 backdrop-blur-sm",
+                  "app-badge-enter pointer-events-auto px-2 py-0.5 border border-white/35 bg-black/45 text-[10px] text-white/80 backdrop-blur-sm",
                 title:
                   "Added from its folder and not linked to the game catalog yet. Open the details to link it.",
               },
@@ -394,7 +394,7 @@ function AtlasF95BannerCard({
           key: "upd",
           type: "button",
           className:
-            "atlas-badge-enter absolute top-2 right-2 z-30 px-2 py-0.5 border border-yellow-400/90 text-yellow-300 text-[10px] pointer-events-auto bg-black/45 backdrop-blur-sm transition-colors hover:bg-yellow-400/20 hover:text-yellow-100",
+            "app-badge-enter absolute top-2 right-2 z-30 px-2 py-0.5 border border-yellow-400/90 text-yellow-300 text-[10px] pointer-events-auto bg-black/45 backdrop-blur-sm transition-colors hover:bg-yellow-400/20 hover:text-yellow-100",
           onClick: (e) => {
             e.stopPropagation();
             onUpdateGame?.(game);
@@ -541,8 +541,8 @@ function AtlasF95BannerCard({
       className:
         "relative flex flex-col cursor-pointer overflow-hidden banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-accent",
       style: {
-        width: ATLAS_BANNER_WIDTH,
-        height: ATLAS_BANNER_HEIGHT,
+        width: BANNER_WIDTH,
+        height: BANNER_HEIGHT,
       },
       role: "button",
       tabIndex: 0,
@@ -559,7 +559,7 @@ function AtlasF95BannerCard({
         {
           key: "thumb",
           className: "relative w-full shrink-0 bg-primary overflow-hidden",
-          style: { height: ATLAS_BANNER_IMAGE_H },
+          style: { height: BANNER_IMAGE_H },
         },
         thumbChildren,
       ),
@@ -576,7 +576,7 @@ function AtlasF95BannerCard({
   );
 }
 
-window.AtlasF95BannerCard = AtlasF95BannerCard;
+window.F95BannerCard = F95BannerCard;
 
 const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
   const handleContextMenu = (e) => {
@@ -748,7 +748,7 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
     return null;
   }
 
-  return React.createElement(CustomTemplate || AtlasF95BannerCard, {
+  return React.createElement(CustomTemplate || F95BannerCard, {
     game,
     onSelect,
     onUpdateGame,

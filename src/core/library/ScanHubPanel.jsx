@@ -49,8 +49,8 @@ const getScanHubErrorMessage = (result, fallbackMessage) => {
 };
 
 const useScanHubLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
 const ScanHubPanel = (liveProps) => {
@@ -139,7 +139,7 @@ const ScanHubPanel = (liveProps) => {
   return (
     <div className="fixed inset-0 z-[1200]">
       <div
-        className="atlas-overlay absolute inset-0 bg-onAccent/75 backdrop-blur-[2px]"
+        className="app-overlay absolute inset-0 bg-onAccent/75 backdrop-blur-[2px]"
         data-state={layer.state}
         onMouseDown={() => onClose?.()}
         aria-hidden="true"
@@ -151,7 +151,7 @@ const ScanHubPanel = (liveProps) => {
         aria-modal="true"
         aria-label="Scan Hub"
         data-state={layer.state}
-        className="atlas-drawer-right absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary shadow-glass outline-none"
+        className="app-drawer-right absolute bottom-[40px] right-0 top-[70px] flex w-[min(620px,100%)] min-h-0 flex-col border-l border-border bg-primary shadow-glass outline-none"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-secondary px-3 py-2">
           <div className="min-w-0">
@@ -172,7 +172,7 @@ const ScanHubPanel = (liveProps) => {
               className="inline-flex items-center gap-1 bg-secondary px-2 py-1 text-xs transition hover:bg-selected disabled:opacity-60"
             >
               {busyAction === "add-source" && (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               )}
               {busyAction === "add-source" ? "Adding…" : "Add Source"}
             </button>
@@ -180,16 +180,16 @@ const ScanHubPanel = (liveProps) => {
               <button
                 type="button"
                 onClick={onCancelScan}
-                className="atlas-fade-enter inline-flex items-center gap-1 bg-red-700 px-2 py-1 text-xs text-white transition hover:bg-red-800"
+                className="app-fade-enter inline-flex items-center gap-1 bg-red-700 px-2 py-1 text-xs text-white transition hover:bg-red-800"
               >
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
                 Cancel Scan
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => onRescan?.("incremental")}
-                className="atlas-fade-enter bg-accent px-2 py-1 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
+                className="app-fade-enter bg-accent px-2 py-1 text-xs text-onAccent transition hover:shadow-glow-accent hover:brightness-110"
                 title="Add games from folders the library does not know yet"
               >
                 Find New Games
@@ -204,7 +204,7 @@ const ScanHubPanel = (liveProps) => {
               <span
                 className={`material-symbols-outlined text-[14px] leading-none ${
                   isLoading
-                    ? "animate-spin atlas-keep-motion"
+                    ? "animate-spin app-keep-motion"
                     : "transition-transform duration-700 group-hover:rotate-180"
                 }`}
                 aria-hidden
@@ -226,18 +226,18 @@ const ScanHubPanel = (liveProps) => {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 pb-8">
           {isLoading ? (
-            <div className="atlas-fade-enter space-y-2">
-              <div className="atlas-skeleton h-14" />
-              <div className="atlas-skeleton h-28" />
-              <div className="atlas-skeleton h-36" />
+            <div className="app-fade-enter space-y-2">
+              <div className="app-skeleton h-14" />
+              <div className="app-skeleton h-28" />
+              <div className="app-skeleton h-36" />
             </div>
           ) : (
-            <div className="atlas-view-enter space-y-3">
+            <div className="app-view-enter space-y-3">
               {feedback.text && (
                 <div
                   key={feedback.text}
                   role={feedback.tone === "error" ? "alert" : "status"}
-                  className={`${feedback.tone === "error" ? "atlas-shake" : "atlas-rise-enter"} border p-2 text-sm ${
+                  className={`${feedback.tone === "error" ? "app-shake" : "app-rise-enter"} border p-2 text-sm ${
                     feedback.tone === "error"
                       ? "border-red-500/35 bg-red-500/10 text-red-100"
                       : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
@@ -360,8 +360,8 @@ const ScanHubPanel = (liveProps) => {
                       {sources.map((source, sourceIndex) => (
                         <div
                           key={source.id}
-                          className="atlas-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
-                          style={{ "--atlas-index": Math.min(sourceIndex, 12) }}
+                          className="app-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          style={{ "--app-index": Math.min(sourceIndex, 12) }}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -468,8 +468,8 @@ const ScanHubPanel = (liveProps) => {
                       {jobs.map((job, jobIndex) => (
                         <div
                           key={job.id}
-                          className="atlas-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
-                          style={{ "--atlas-index": Math.min(jobIndex, 12) }}
+                          className="app-list-enter flex flex-wrap items-start justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                          style={{ "--app-index": Math.min(jobIndex, 12) }}
                         >
                           <div>
                             <div className="font-medium capitalize text-text">
@@ -526,8 +526,8 @@ const ScanHubPanel = (liveProps) => {
                       {candidates.map((candidate, candidateIndex) => (
                         <div
                           key={candidate.id}
-                          className="atlas-list-enter py-2 first:pt-0 last:pb-0"
-                          style={{ "--atlas-index": Math.min(candidateIndex, 12) }}
+                          className="app-list-enter py-2 first:pt-0 last:pb-0"
+                          style={{ "--app-index": Math.min(candidateIndex, 12) }}
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">

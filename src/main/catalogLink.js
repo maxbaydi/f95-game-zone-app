@@ -2,7 +2,7 @@
 
 /**
  * Linking a library record to a catalog entry chosen by the user ("Link to
- * catalog…"): the Atlas mapping, the F95 thread of that entry and the
+ * catalog…"): the catalog mapping, the F95 thread of that entry and the
  * catalog's title/creator/engine. Pure logic with injected database access.
  */
 

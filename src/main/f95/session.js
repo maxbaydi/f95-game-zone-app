@@ -62,7 +62,7 @@ function createF95LoginWindow({ BrowserWindow, appConfig }) {
     appConfig,
     url: F95_LOGIN_URL,
     title: "F95 Login",
-    reuseKey: "__atlasF95LoginWindow",
+    reuseKey: "__f95LoginWindow",
   });
 
   return loginWindow;
@@ -73,7 +73,7 @@ function createF95BrowserWindow({
   appConfig,
   url,
   title = "F95 Browser",
-  reuseKey = "__atlasF95BrowserWindow",
+  reuseKey = "__f95BrowserWindow",
   onNavigation = null,
   openDevTools = true,
 }) {
@@ -81,7 +81,7 @@ function createF95BrowserWindow({
     if (
       !windowInstance ||
       windowInstance.isDestroyed() ||
-      typeof windowInstance.__atlasF95NavigationHandler !== "function"
+      typeof windowInstance.__f95NavigationHandler !== "function"
     ) {
       return;
     }
@@ -98,7 +98,7 @@ function createF95BrowserWindow({
       );
     }
 
-    windowInstance.__atlasF95NavigationHandler({
+    windowInstance.__f95NavigationHandler({
       url: currentUrl,
       title: currentTitle,
     });
@@ -110,7 +110,7 @@ function createF95BrowserWindow({
 
   if (existingWindow && !existingWindow.isDestroyed()) {
     existingWindow[reuseKey] = true;
-    existingWindow.__atlasF95NavigationHandler =
+    existingWindow.__f95NavigationHandler =
       typeof onNavigation === "function" ? onNavigation : null;
     existingWindow.setTitle(title);
     existingWindow.loadURL(url).catch((error) => {
@@ -141,7 +141,7 @@ function createF95BrowserWindow({
   });
 
   browserWindow[reuseKey] = true;
-  browserWindow.__atlasF95NavigationHandler =
+  browserWindow.__f95NavigationHandler =
     typeof onNavigation === "function" ? onNavigation : null;
 
   if (openDevTools && (process.defaultApp || appConfig?.Interface?.showDebugConsole)) {
@@ -152,8 +152,8 @@ function createF95BrowserWindow({
     browserWindow.show();
   });
 
-  if (!browserWindow.__atlasF95BrowserWindowConfigured) {
-    browserWindow.__atlasF95BrowserWindowConfigured = true;
+  if (!browserWindow.__f95BrowserWindowConfigured) {
+    browserWindow.__f95BrowserWindowConfigured = true;
     browserWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
       if (/^https?:\/\//i.test(String(targetUrl || ""))) {
         browserWindow.loadURL(targetUrl).catch((error) => {
@@ -173,7 +173,7 @@ function createF95BrowserWindow({
     browserWindow.webContents.on("page-title-updated", forwardNavigationState);
     browserWindow.webContents.on("did-finish-load", forwardNavigationState);
     browserWindow.on("closed", () => {
-      browserWindow.__atlasF95NavigationHandler = null;
+      browserWindow.__f95NavigationHandler = null;
     });
   }
 

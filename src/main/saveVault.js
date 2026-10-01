@@ -28,6 +28,8 @@ function buildSaveVaultIdentity(input) {
     return `f95-${f95Id}`;
   }
 
+  // "atlas-<id>" names the metadata catalog's own id (atlas_id). The value
+  // is a vault folder name and a remote storage key, so it must stay as is.
   if (input?.atlasId) {
     return `atlas-${normalizeIdentityToken(input.atlasId)}`;
   }

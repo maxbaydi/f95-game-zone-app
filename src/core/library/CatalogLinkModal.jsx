@@ -1,6 +1,6 @@
 const useCatalogLinkModalLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
 const CATALOG_LINK_SEARCH_DELAY_MS = 350;
@@ -132,7 +132,7 @@ const CatalogLinkModal = (liveProps) => {
         return;
       }
 
-      window.AtlasUI?.toast?.success(
+      window.AppUI?.toast?.success(
         result.f95Id
           ? "Banner, screenshots and update checks will follow shortly."
           : "This catalog entry has no F95 thread, so updates can't be checked.",
@@ -150,7 +150,7 @@ const CatalogLinkModal = (liveProps) => {
 
   return (
     <div
-      className="atlas-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
+      className="app-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
       data-state={layer.state}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !linkingId) {
@@ -164,7 +164,7 @@ const CatalogLinkModal = (liveProps) => {
         role="dialog"
         aria-modal="true"
         aria-label="Link to catalog"
-        className="atlas-dialog flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        className="app-dialog flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
         data-state={layer.state}
       >
         <div className="relative border-b border-border px-6 py-5">
@@ -225,7 +225,7 @@ const CatalogLinkModal = (liveProps) => {
           {error && (
             <div
               key={error}
-              className="atlas-shake mb-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+              className="app-shake mb-3 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
               role="alert"
             >
               {error}
@@ -234,7 +234,7 @@ const CatalogLinkModal = (liveProps) => {
 
           {status === "searching" ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-text/65">
-              <span className="atlas-spinner atlas-keep-motion text-accent" aria-hidden />
+              <span className="app-spinner app-keep-motion text-accent" aria-hidden />
               Searching the catalog…
             </div>
           ) : status === "idle" ? (
@@ -252,8 +252,8 @@ const CatalogLinkModal = (liveProps) => {
                 return (
                   <li
                     key={row.atlas_id}
-                    className="atlas-list-enter flex items-center gap-3 border border-border/70 bg-canvas/40 px-3 py-2.5 transition-colors hover:border-accent/40"
-                    style={{ "--atlas-index": Math.min(index, 12) }}
+                    className="app-list-enter flex items-center gap-3 border border-border/70 bg-canvas/40 px-3 py-2.5 transition-colors hover:border-accent/40"
+                    style={{ "--app-index": Math.min(index, 12) }}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold text-text">
@@ -273,7 +273,7 @@ const CatalogLinkModal = (liveProps) => {
                       className="inline-flex shrink-0 items-center gap-1.5 border border-accent/60 bg-accent/85 px-3 py-1.5 text-xs font-semibold text-onAccent transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isLinking ? (
-                        <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+                        <span className="app-spinner app-keep-motion text-[11px]" aria-hidden />
                       ) : (
                         <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
                           link

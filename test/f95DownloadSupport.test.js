@@ -87,7 +87,7 @@ test("parseF95ThreadTitle extracts Unity engine prefixes used by F95 thread head
 
 test("inspectDownloadedPackage rejects masked F95 HTML pages", async () => {
   const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "atlas-f95-download-support-"),
+    path.join(os.tmpdir(), "app-f95-download-support-"),
   );
   const filePath = path.join(tempDir, "masked-page.bin");
 
@@ -126,7 +126,7 @@ test("inspectDownloadedPackage rejects masked F95 HTML pages", async () => {
 
 test("inspectDownloadedPackage accepts zip archives even when the filename has no extension", async () => {
   const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "atlas-f95-download-support-"),
+    path.join(os.tmpdir(), "app-f95-download-support-"),
   );
   const filePath = path.join(tempDir, "payload");
 

@@ -9,7 +9,7 @@ const { selectPreferredExecutable } = require("../src/main/install/selectExecuta
 const { findExecutables } = require("../src/main/install/findExecutables");
 
 function makeGame(layout) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-engine-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "app-engine-"));
   for (const [relative, content] of Object.entries(layout)) {
     const target = path.join(root, relative);
     if (relative.endsWith("/")) {

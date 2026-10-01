@@ -8,7 +8,7 @@ const { buildAppPaths, ensureAppDirs } = require("../src/main/appPaths");
 const database = require("../src/database");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-db-version-select-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-db-version-select-"));
 }
 
 function closeAsync(db) {

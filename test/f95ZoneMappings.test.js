@@ -14,7 +14,7 @@ const {
 } = require("../src/database");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-f95map-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-f95map-"));
 }
 
 function runAsync(db, sql, params = []) {

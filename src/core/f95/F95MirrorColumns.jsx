@@ -320,7 +320,7 @@ const F95MirrorColumns = ({
         return (
           <section key={releaseGroup.key} className="min-w-0">
             {releaseGroup.releaseLabel && (
-              <div className="atlas-list-enter mb-3 text-sm font-semibold text-text/90">
+              <div className="app-list-enter mb-3 text-sm font-semibold text-text/90">
                 {releaseGroup.releaseLabel}
               </div>
             )}
@@ -340,7 +340,7 @@ const F95MirrorColumns = ({
                   return (
                     <section
                       key={`${variant.id}-${variant.label}`}
-                      className="atlas-rise-enter min-w-0 px-3 sm:px-4"
+                      className="app-rise-enter min-w-0 px-3 sm:px-4"
                       style={{
                         animationDelay: `${Math.min(variantIndex, 8) * 60}ms`,
                       }}

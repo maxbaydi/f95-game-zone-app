@@ -711,7 +711,7 @@ const OnboardingWizard = ({
       aria-modal="true"
       aria-label="F95Launcher setup"
     >
-      <div className="flex max-h-full w-full max-w-[900px] flex-col border border-border bg-primary shadow-2xl motion-safe:animate-atlas-fade-up">
+      <div className="flex max-h-full w-full max-w-[900px] flex-col border border-border bg-primary shadow-2xl motion-safe:animate-app-fade-up">
         <div className="flex flex-wrap items-center gap-3 border-b border-border px-6 py-4">
           {step === "welcome" ? (
             <div className="text-[11px] uppercase tracking-[0.22em] text-accent/80">
@@ -737,7 +737,7 @@ const OnboardingWizard = ({
 
         <div
           key={step}
-          className="min-h-[360px] flex-1 overflow-y-auto px-8 py-7 motion-safe:animate-atlas-fade-up"
+          className="min-h-[360px] flex-1 overflow-y-auto px-8 py-7 motion-safe:animate-app-fade-up"
         >
           {step === "welcome" && <OnboardingWelcomeStep />}
           {step === "folder" && (
@@ -876,7 +876,7 @@ const LibraryGettingStarted = ({
 
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-8 text-center text-text">
-      <div className="w-full max-w-3xl motion-safe:animate-atlas-fade-up">
+      <div className="w-full max-w-3xl motion-safe:animate-app-fade-up">
         <span className="material-symbols-outlined text-[44px] leading-none text-accent/80">
           sports_esports
         </span>

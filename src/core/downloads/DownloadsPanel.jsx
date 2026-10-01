@@ -127,11 +127,11 @@ const ACTIVE_DOWNLOAD_STATUSES = new Set([
 ]);
 
 const useDownloadsLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
-const downloadsToast = () => window.AtlasToast || null;
+const downloadsToast = () => window.AppToast || null;
 
 const callDownloadsApi = async (method, ...args) => {
   const api = window.electronAPI;
@@ -187,7 +187,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       await action();
     } catch (error) {
       downloadsToast()?.error(
-        window.AtlasUI?.errorMessage(error, "The action failed.") ||
+        window.AppUI?.errorMessage(error, "The action failed.") ||
           String(error),
         { title: item.title || "Download" },
       );
@@ -314,8 +314,8 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 
   return (
     <div
-      className="atlas-list-enter rounded-2xl border border-border bg-black/20 px-4 py-4 transition-[border-color,background-color] duration-500 hover:border-accent/30 hover:bg-black/30"
-      style={{ "--atlas-index": Math.min(index, 10) }}
+      className="app-list-enter rounded-2xl border border-border bg-black/20 px-4 py-4 transition-[border-color,background-color] duration-500 hover:border-accent/30 hover:bg-black/30"
+      style={{ "--app-index": Math.min(index, 10) }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2.5">
@@ -328,7 +328,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                   : item.status === "cancelled"
                     ? "text-text/45"
                     : "text-accent"
-            } ${isActive ? "animate-pulse atlas-keep-motion" : "atlas-pop"}`}
+            } ${isActive ? "animate-pulse app-keep-motion" : "app-pop"}`}
             aria-hidden
           >
             {meta.icon}
@@ -344,7 +344,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
         </div>
         <div
           key={item.status}
-          className={`atlas-badge-enter shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${meta.tone}`}
+          className={`app-badge-enter shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${meta.tone}`}
         >
           {meta.label}
         </div>
@@ -355,14 +355,14 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       <div
         className={`mt-3 h-2 overflow-hidden rounded-full bg-black/35 ring-1 ring-inset ring-white/10 ${
           isIndeterminate && isActive
-            ? "atlas-progress-indeterminate atlas-keep-motion"
+            ? "app-progress-indeterminate app-keep-motion"
             : ""
         }`}
       >
         <div
-          className={`atlas-progress-fill h-full rounded-full ${meta.bar} ${
+          className={`app-progress-fill h-full rounded-full ${meta.bar} ${
             item.status === "downloading" && !isIndeterminate
-              ? "atlas-progress-fill--active atlas-keep-motion"
+              ? "app-progress-fill--active app-keep-motion"
               : ""
           }`}
           style={{
@@ -397,7 +397,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 
       {item.error && (
         <div
-          className="atlas-rise-enter mt-3 flex items-start gap-1.5 text-xs text-red-200/90"
+          className="app-rise-enter mt-3 flex items-start gap-1.5 text-xs text-red-200/90"
           role="alert"
         >
           <span className="material-symbols-outlined shrink-0 text-[15px]" aria-hidden>
@@ -408,7 +408,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       )}
 
       {item.hint && (
-        <div className="atlas-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-text/65">
+        <div className="app-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-text/65">
           <span className="material-symbols-outlined shrink-0 text-[15px] text-amber-200/80" aria-hidden>
             lightbulb
           </span>
@@ -417,7 +417,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       )}
 
       {item.status === "completed" && item.warning === "no_executable" && (
-        <div className="atlas-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-100/80">
+        <div className="app-rise-enter mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-amber-100/80">
           <span className="material-symbols-outlined shrink-0 text-[15px]" aria-hidden>
             warning
           </span>
@@ -428,7 +428,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       )}
 
       {canInstallFromPackage && (
-        <div className="atlas-rise-enter mt-3 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
+        <div className="app-rise-enter mt-3 rounded-xl border border-sky-400/30 bg-sky-500/10 p-3">
           <div className="flex items-start gap-2.5">
             <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px] text-sky-200" aria-hidden>
               {needsPassword ? "key" : "inventory_2"}
@@ -468,7 +468,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                     className="inline-flex items-center gap-1 border border-sky-400/50 bg-sky-400/20 px-2.5 py-1 text-xs text-sky-50 transition hover:bg-sky-400/30 disabled:opacity-50"
                   >
                     {pendingAction === "retry-install" ? (
-                      <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                      <span className="app-spinner app-keep-motion" aria-hidden />
                     ) : (
                       <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                         lock_open
@@ -485,7 +485,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 
       {showManualHelp && (
         <div
-          className={`atlas-rise-enter mt-3 rounded-xl border p-3 transition-colors duration-500 ${
+          className={`app-rise-enter mt-3 rounded-xl border p-3 transition-colors duration-500 ${
             waitingForFile
               ? "border-amber-400/40 bg-amber-500/10"
               : "border-border bg-white/[0.03]"
@@ -494,7 +494,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
           <div className="flex items-start gap-2.5">
             <span
               className={`material-symbols-outlined mt-0.5 shrink-0 text-[18px] ${
-                waitingForFile ? "text-amber-200 atlas-pop" : "text-text/45"
+                waitingForFile ? "text-amber-200 app-pop" : "text-text/45"
               }`}
               aria-hidden
             >
@@ -523,7 +523,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                   }`}
                 >
                   {pendingAction === "file" ? (
-                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                    <span className="app-spinner app-keep-motion" aria-hidden />
                   ) : (
                     <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                       upload_file
@@ -538,7 +538,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                   className="inline-flex items-center gap-1 border border-border bg-white/5 px-2.5 py-1 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
                 >
                   {pendingAction === "browser" ? (
-                    <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                    <span className="app-spinner app-keep-motion" aria-hidden />
                   ) : (
                     <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                       open_in_new
@@ -580,7 +580,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               className="inline-flex items-center gap-1 border border-red-500/35 bg-red-500/10 px-2.5 py-1 text-xs text-red-100 transition hover:bg-red-500/20 disabled:opacity-50"
             >
               {pendingAction === "cancel" ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                   close
@@ -598,7 +598,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               title="Install the downloaded file again without downloading it"
             >
               {pendingAction === "retry-install" ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                   restart_alt
@@ -620,7 +620,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               title={canInstallFromPackage ? "Download the package again from the mirror" : undefined}
             >
               {pendingAction === "retry" ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none transition-transform duration-700 group-hover:-rotate-180" aria-hidden>
                   refresh
@@ -638,7 +638,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               title="Register a folder you unpacked yourself"
             >
               {pendingAction === "folder-install" ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                   drive_folder_upload
@@ -656,7 +656,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               title="Install from a file you downloaded yourself"
             >
               {pendingAction === "file" ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                   upload_file
@@ -705,8 +705,8 @@ const DownloadsPanel = (liveProps) => {
 
   React.useEffect(() => {
     const root = document.documentElement;
-    root.classList.toggle("atlas-downloads-open", Boolean(liveProps.isOpen));
-    return () => root.classList.remove("atlas-downloads-open");
+    root.classList.toggle("app-downloads-open", Boolean(liveProps.isOpen));
+    return () => root.classList.remove("app-downloads-open");
   }, [liveProps.isOpen]);
 
   if (!layer.isMounted) {
@@ -731,7 +731,7 @@ const DownloadsPanel = (liveProps) => {
       }
     } catch (error) {
       downloadsToast()?.error(
-        window.AtlasUI?.errorMessage(error, "History could not be cleared.") ||
+        window.AppUI?.errorMessage(error, "History could not be cleared.") ||
           String(error),
         { title: "Downloads" },
       );
@@ -743,13 +743,13 @@ const DownloadsPanel = (liveProps) => {
   return (
     <>
       <div
-        className="atlas-overlay fixed inset-0 z-[1650] bg-black/20"
+        className="app-overlay fixed inset-0 z-[1650] bg-black/20"
         data-state={layer.state}
         onClick={onClose}
         role="presentation"
       />
       <div
-        className="atlas-popover fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl"
+        className="app-popover fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl"
         data-state={layer.state}
         role="dialog"
         aria-label="Downloads"
@@ -761,7 +761,7 @@ const DownloadsPanel = (liveProps) => {
             </div>
             <div
               key={activeCount}
-              className="atlas-fade-enter mt-1 text-sm font-medium text-text"
+              className="app-fade-enter mt-1 text-sm font-medium text-text"
             >
               {activeCount > 0
                 ? `${activeCount} active`
@@ -774,11 +774,11 @@ const DownloadsPanel = (liveProps) => {
                 type="button"
                 onClick={clearHistory}
                 disabled={isClearing}
-                className="atlas-fade-enter inline-flex items-center gap-1 rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
+                className="app-fade-enter inline-flex items-center gap-1 rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text transition hover:bg-white/10 disabled:opacity-50"
                 title="Remove finished, failed and cancelled entries"
               >
                 {isClearing ? (
-                  <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                  <span className="app-spinner app-keep-motion" aria-hidden />
                 ) : (
                   <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                     delete_sweep
@@ -799,7 +799,7 @@ const DownloadsPanel = (liveProps) => {
         </div>
 
         {items.length === 0 ? (
-          <div className="atlas-fade-enter flex flex-col items-center gap-2 px-4 py-10 text-center text-sm text-text/65">
+          <div className="app-fade-enter flex flex-col items-center gap-2 px-4 py-10 text-center text-sm text-text/65">
             <span className="material-symbols-outlined text-[36px] text-text/30" aria-hidden>
               download_done
             </span>

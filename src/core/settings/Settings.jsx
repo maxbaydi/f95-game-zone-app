@@ -58,7 +58,7 @@ const StandaloneSettingsWindow = () => {
   );
 };
 
-const SettingsRootBoundary = window.AtlasErrorBoundary;
+const SettingsRootBoundary = window.AppErrorBoundary;
 window.ReactDOM.createRoot(document.getElementById("root")).render(
   SettingsRootBoundary ? (
     <SettingsRootBoundary name="settings-window" variant="screen">

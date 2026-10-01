@@ -54,7 +54,7 @@ const SiteSearchResults = ({
         {Array.from({ length: 3 }).map((_, index) => (
           <div
             key={index}
-            className="atlas-skeleton motion-reduce:animate-none h-[220px] animate-atlas-shimmer rounded-2xl border border-border shadow-glass-sm"
+            className="app-skeleton motion-reduce:animate-none h-[220px] animate-app-shimmer rounded-2xl border border-border shadow-glass-sm"
           />
         ))}
       </div>
@@ -64,7 +64,7 @@ const SiteSearchResults = ({
   if (error) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center">
-        <div className="atlas-glass-panel max-w-lg rounded-2xl px-8 py-10 shadow-glass">
+        <div className="app-glass-panel max-w-lg rounded-2xl px-8 py-10 shadow-glass">
           <div className="text-lg font-semibold text-text">
             Site search failed
           </div>
@@ -77,7 +77,7 @@ const SiteSearchResults = ({
   if (!results.length) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center">
-        <div className="atlas-glass-panel max-w-lg rounded-2xl px-8 py-10 shadow-glass motion-safe:animate-atlas-fade-up">
+        <div className="app-glass-panel max-w-lg rounded-2xl px-8 py-10 shadow-glass motion-safe:animate-app-fade-up">
           <div className="text-lg font-semibold text-text">
             No site entries matched
           </div>

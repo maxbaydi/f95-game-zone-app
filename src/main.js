@@ -969,7 +969,7 @@ async function prepareDownloadedGameMetadata(metadata) {
       f95Id: normalizedF95Id,
     };
   } catch (error) {
-    console.warn("[f95.download] Failed to resolve atlas mapping for thread:", {
+    console.warn("[f95.download] Failed to resolve catalog mapping for thread:", {
       threadUrl: metadata?.threadUrl || "",
       error: error instanceof Error ? error.message : String(error),
     });
@@ -988,7 +988,7 @@ async function resolveAtlasGameMetadata(atlasId) {
   try {
     return (await getAtlasData(atlasId)) || {};
   } catch (error) {
-    console.warn("[library.stub] Failed to load atlas metadata:", {
+    console.warn("[library.stub] Failed to load catalog metadata:", {
       atlasId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -1066,7 +1066,7 @@ async function upsertLibraryGameFromMetadata(metadata, options = {}) {
     try {
       await addAtlasMapping(recordId, metadata.atlasId);
     } catch (error) {
-      console.warn("[library.stub] Failed to attach atlas mapping:", {
+      console.warn("[library.stub] Failed to attach catalog mapping:", {
         recordId,
         atlasId: metadata.atlasId,
         error: error instanceof Error ? error.message : String(error),
@@ -1342,7 +1342,7 @@ async function broadcastF95AuthState() {
   const authState = await getF95AuthState(getReadyF95Session());
   noteF95AuthStateForLiveChecks(authState);
   const loginWindow = BrowserWindow.getAllWindows().find(
-    (windowInstance) => windowInstance.__atlasF95LoginWindow === true,
+    (windowInstance) => windowInstance.__f95LoginWindow === true,
   );
 
   if (authState.isAuthenticated && loginWindow && !loginWindow.isDestroyed()) {
@@ -1647,7 +1647,7 @@ function openF95MirrorActionWindow(url, hostLabel) {
     appConfig,
     url,
     title: `${hostLabel}: finish the step in this window`,
-    reuseKey: "__atlasF95ActionWindow",
+    reuseKey: "__f95ActionWindow",
     // The user has to see the mirror page, not a DevTools pane.
     openDevTools: false,
     onNavigation: (info) => {
@@ -3050,7 +3050,7 @@ async function persistF95InstalledGame(payload) {
           gameRecord.atlasId,
         );
       } catch (error) {
-        console.warn("[f95.install] Failed to update atlas mapping:", {
+        console.warn("[f95.install] Failed to update catalog mapping:", {
           recordId: payload.existingGame.record_id,
           atlasId: gameRecord.atlasId,
           error: error instanceof Error ? error.message : String(error),
@@ -3611,7 +3611,6 @@ function attachF95DownloadListener() {
 const defaultConfig = {
   Interface: {
     language: "English",
-    atlasStartup: "Do Nothing",
     gameStartup: "Do Nothing",
     showDebugConsole: false,
     minimizeToTray: false,
@@ -4649,7 +4648,7 @@ ipcMain.handle("start-scan", async (event, params) => {
       }
     } catch (matcherError) {
       console.error(
-        "Failed to build Atlas matcher for importer scan:",
+        "Failed to build catalog matcher for importer scan:",
         matcherError,
       );
     }
@@ -4896,7 +4895,7 @@ ipcMain.handle("open-f95-browser-url", async (_, payload) => {
       appConfig,
       url: targetUrl,
       title: String(payload?.title || "F95 Browser"),
-      reuseKey: "__atlasF95BrowserWindow",
+      reuseKey: "__f95BrowserWindow",
       onNavigation: broadcastF95BrowserNavigation,
     });
 
@@ -5424,7 +5423,7 @@ const importGamesInternal = async (params) => {
           const atlasData = await getAtlasData(resolvedGame.atlasId);
           resolvedGame = mergeImportedGameMetadata(resolvedGame, atlasData);
         } catch (metadataError) {
-          console.warn("Failed to enrich imported game metadata from Atlas:", {
+          console.warn("Failed to enrich imported game metadata from the catalog:", {
             atlasId: resolvedGame.atlasId,
             error:
               metadataError instanceof Error
@@ -5639,7 +5638,7 @@ const importGamesInternal = async (params) => {
       if (existingGame?.record_id) {
         console.log("Updating existing game for imported path");
         // A rescan must not downgrade a record that already has good
-        // metadata (Atlas match, user edits) just because the folder name
+        // metadata (catalog match, user edits) just because the folder name
         // parses badly; the folder's files and version are still refreshed.
         const refreshed = mergeRefreshedGameMetadata(existingGame, {
           ...resolvedGame,
@@ -5700,7 +5699,7 @@ const importGamesInternal = async (params) => {
           await addAtlasMapping(recordId, resolvedGame.atlasId);
           console.log("mapping added");
         } catch (err) {
-          console.warn("Failed to add atlas mapping:", err);
+          console.warn("Failed to add catalog mapping:", err);
         }
       }
 
@@ -5909,7 +5908,7 @@ function sendLibraryScanProgress(text, progress = 0, total = 1) {
 
 /**
  * Folders the library already owns: a rescan refreshes them in place instead
- * of parking them in the review queue when the Atlas match is not confident.
+ * of parking them in the review queue when the catalog match is not confident.
  */
 function buildKnownLibraryPathLookup(games) {
   const index = buildLibraryPathIndex(games);

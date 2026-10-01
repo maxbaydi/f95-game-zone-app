@@ -15,8 +15,8 @@ test("version helpers normalize and compare release tags", () => {
   assert.equal(compareVersions("1.2.0", "1.2"), 0);
   assert.equal(compareVersions("1.9.0", "1.10.0"), -1);
   assert.equal(
-    buildLatestReleaseUrl("towerwatchman", "Atlas"),
-    "https://api.github.com/repos/towerwatchman/Atlas/releases/latest",
+    buildLatestReleaseUrl("maxbaydi", "f95-game-zone-app"),
+    "https://api.github.com/repos/maxbaydi/f95-game-zone-app/releases/latest",
   );
 });
 
@@ -37,7 +37,7 @@ test("app updater controller reports dev-mode release availability through GitHu
     },
     httpGet: async () => ({
       tag_name: "v1.2.0",
-      html_url: "https://github.com/towerwatchman/Atlas/releases/tag/v1.2.0",
+      html_url: "https://github.com/maxbaydi/f95-game-zone-app/releases/tag/v1.2.0",
       body: "Release notes",
     }),
     autoUpdaterInstance: {
@@ -54,7 +54,7 @@ test("app updater controller reports dev-mode release availability through GitHu
   assert.equal(state.supportsDownload, false);
   assert.equal(
     state.releaseUrl,
-    "https://github.com/towerwatchman/Atlas/releases/tag/v1.2.0",
+    "https://github.com/maxbaydi/f95-game-zone-app/releases/tag/v1.2.0",
   );
 });
 

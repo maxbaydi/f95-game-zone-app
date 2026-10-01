@@ -61,7 +61,7 @@ test("shouldUseDirectSessionDownload targets Google Drive and Gofile CDN", () =>
 
 test("streamResponseBodyToFile writes the full payload and reports progress", async () => {
   const tempDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "atlas-direct-download-"),
+    path.join(os.tmpdir(), "app-direct-download-"),
   );
   const targetPath = path.join(tempDir, "payload.bin");
   const progressValues = [];

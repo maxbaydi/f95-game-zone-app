@@ -7,7 +7,7 @@ const path = require("path");
 const { extractScanCandidateIdentity } = require("../src/main/scanIdentity");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-scan-identity-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-scan-identity-"));
 }
 
 test("extractScanCandidateIdentity prefers Ren'Py options metadata over folder noise", () => {

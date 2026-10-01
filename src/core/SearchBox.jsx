@@ -76,7 +76,7 @@ const SearchBox = ({
             onClick={clearValue}
             title="Clear search (Esc)"
             aria-label="Clear search"
-            className="atlas-badge-enter [-webkit-app-region:no-drag] mr-1 flex h-7 w-7 items-center justify-center rounded-full text-text/60 transition hover:bg-white/10 hover:text-text"
+            className="app-badge-enter [-webkit-app-region:no-drag] mr-1 flex h-7 w-7 items-center justify-center rounded-full text-text/60 transition hover:bg-white/10 hover:text-text"
           >
             <span className="material-symbols-outlined text-[18px] leading-none">
               close

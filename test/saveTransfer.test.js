@@ -19,7 +19,7 @@ const { extractArchiveSafely } = require("../src/main/archive/extractArchive");
 const codeOf = (error) => /** @type {any} */ (error)?.code;
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-transfer-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-transfer-"));
 }
 
 function writeFiles(root, files) {

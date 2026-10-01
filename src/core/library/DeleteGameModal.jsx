@@ -42,7 +42,7 @@ const DeleteModeCard = ({
         </div>
         <div
           key={selected ? "selected" : "choose"}
-          className={`atlas-fade-enter mt-0.5 shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${
+          className={`app-fade-enter mt-0.5 shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${
             selected
               ? "border-accent/40 bg-accent/15 text-text"
               : "border-border bg-black/20 text-text/65"
@@ -56,8 +56,8 @@ const DeleteModeCard = ({
 };
 
 const useDeleteGameModalLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
 const DeleteGameModal = (liveProps) => {
@@ -102,7 +102,7 @@ const DeleteGameModal = (liveProps) => {
 
   return (
     <div
-      className="atlas-overlay fixed inset-0 z-[1750] flex items-center justify-center bg-black/70 px-6 py-10 backdrop-blur-md"
+      className="app-overlay fixed inset-0 z-[1750] flex items-center justify-center bg-black/70 px-6 py-10 backdrop-blur-md"
       data-state={layer.state}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !isDeleting) {
@@ -116,7 +116,7 @@ const DeleteGameModal = (liveProps) => {
         role="alertdialog"
         aria-modal="true"
         aria-label={`Remove ${displayTitle}`}
-        className="atlas-dialog max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        className="app-dialog max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
         data-state={layer.state}
       >
         <div className="border-b border-border px-6 py-5">
@@ -229,7 +229,7 @@ const DeleteGameModal = (liveProps) => {
             {error && (
               <div
                 key={error}
-                className="atlas-shake rounded-2xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+                className="app-shake rounded-2xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-100"
                 role="alert"
               >
                 {error}
@@ -262,7 +262,7 @@ const DeleteGameModal = (liveProps) => {
               className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${primaryActionClass}`}
             >
               {(isDeleting || isLoading) && (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               )}
               {isDeleting
                 ? "Working..."

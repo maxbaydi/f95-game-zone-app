@@ -55,7 +55,7 @@ test("splitAutoImportableScanGames separates review queue from auto-imports", ()
   );
 });
 
-test("known library folders are refreshed even when the Atlas match is not confident", () => {
+test("known library folders are refreshed even when the catalog match is not confident", () => {
   const result = splitAutoImportableScanGames(
     [
       { title: "Known", matchStatus: "unmatched", folder: "C:\\Games\\Known" },

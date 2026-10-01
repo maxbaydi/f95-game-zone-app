@@ -36,7 +36,7 @@ test("getDb returns the live handle after initializeDatabase", async () => {
   assert.equal(database.getDb(), db);
 });
 
-test("insertJsonData ignores columns the local table does not have (new Atlas fields)", async () => {
+test("insertJsonData ignores columns the local table does not have (new catalog fields)", async () => {
   const db = await openTestDatabase();
   const uncaught = [];
   const onUncaught = (error) => uncaught.push(error);

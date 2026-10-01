@@ -1,6 +1,6 @@
 const useF95UpdateModalLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
 const F95UpdateModal = (liveProps) => {
@@ -67,7 +67,7 @@ const F95UpdateModal = (liveProps) => {
 
   return (
     <div
-      className="atlas-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
+      className="app-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
       data-state={layer.state}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !isInstalling) {
@@ -81,7 +81,7 @@ const F95UpdateModal = (liveProps) => {
         role="dialog"
         aria-modal="true"
         aria-label={hasInstalledVersions ? "Update game" : "Install game"}
-        className="atlas-dialog flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        className="app-dialog flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
         data-state={layer.state}
       >
         <div className="relative border-b border-border px-6 py-5">
@@ -122,7 +122,7 @@ const F95UpdateModal = (liveProps) => {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
           {needsLogin ? (
-            <div className="atlas-fade-enter flex flex-col items-center gap-4 rounded-2xl border border-accent/30 bg-accent/10 px-5 py-8 text-center">
+            <div className="app-fade-enter flex flex-col items-center gap-4 rounded-2xl border border-accent/30 bg-accent/10 px-5 py-8 text-center">
               <span className="material-symbols-outlined text-[36px] leading-none text-accent" aria-hidden>
                 login
               </span>
@@ -142,17 +142,17 @@ const F95UpdateModal = (liveProps) => {
               </button>
             </div>
           ) : isLoading ? (
-            <div className="atlas-fade-enter space-y-4 rounded-2xl border border-border bg-white/5 px-5 py-6 text-sm text-text/70">
+            <div className="app-fade-enter space-y-4 rounded-2xl border border-border bg-white/5 px-5 py-6 text-sm text-text/70">
               <div className="flex items-center justify-center gap-2">
                 <span
-                  className="atlas-spinner atlas-keep-motion text-accent"
+                  className="app-spinner app-keep-motion text-accent"
                   aria-hidden
                 />
                 Checking the live F95 thread and picking the best mirror...
               </div>
               <div className="space-y-3">
-                <div className="atlas-skeleton h-28 w-full" />
-                <div className="atlas-skeleton h-11 w-full" />
+                <div className="app-skeleton h-28 w-full" />
+                <div className="app-skeleton h-11 w-full" />
               </div>
             </div>
           ) : (
@@ -160,7 +160,7 @@ const F95UpdateModal = (liveProps) => {
               {error && (
                 <div
                   key={error}
-                  className="atlas-shake rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100"
+                  className="app-shake rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100"
                   role="alert"
                 >
                   <div className="flex items-start gap-2">
@@ -203,7 +203,7 @@ const F95UpdateModal = (liveProps) => {
               )}
 
               {thread && links.length > 0 && (
-                <div className="atlas-view-enter">
+                <div className="app-view-enter">
                   <window.F95MirrorPicker
                     key={thread.threadUrl || "thread"}
                     thread={thread}
@@ -221,7 +221,7 @@ const F95UpdateModal = (liveProps) => {
         <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
           <div
             key={selectedLink?.url || "none"}
-            className="atlas-fade-enter min-w-0 text-xs text-text/55"
+            className="app-fade-enter min-w-0 text-xs text-text/55"
           >
             {needsLogin
               ? "Mirrors are shown after you sign in to F95."
@@ -247,7 +247,7 @@ const F95UpdateModal = (liveProps) => {
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-onAccent transition hover:shadow-glow-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isInstalling ? (
-                <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+                <span className="app-spinner app-keep-motion" aria-hidden />
               ) : (
                 <span
                   className="material-symbols-outlined text-[18px] leading-none"

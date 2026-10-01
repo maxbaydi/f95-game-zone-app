@@ -1,5 +1,5 @@
 (function () {
-  const REVEAL_CLASS = "atlas-scrollbar-reveal";
+  const REVEAL_CLASS = "app-scrollbar-reveal";
   const HIDE_AFTER_MS = 900;
   let hideTimer = 0;
 

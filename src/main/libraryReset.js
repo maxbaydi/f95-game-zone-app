@@ -24,7 +24,7 @@ const LIBRARY_RESET_TABLES = Object.freeze([
 ]);
 
 /**
- * Tables a reset must never touch: the downloaded Atlas/F95 catalog, the
+ * Tables a reset must never touch: the downloaded metadata catalog, the
  * user's scan folders, emulators, tags and pending account-library deletes.
  */
 const LIBRARY_RESET_PRESERVED_TABLES = Object.freeze([
@@ -165,7 +165,7 @@ function failure(code, message, backupPath = "") {
  * Wipes the local library index (games, versions, mappings, cached images,
  * save profile metadata, scan history) after backing the database up.
  *
- * The Atlas/F95 catalog, scan folders, emulators, the save vault on disk and
+ * The metadata catalog, scan folders, emulators, the save vault on disk and
  * pending account-library deletes are preserved. Nothing inside game folders
  * is touched.
  *

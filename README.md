@@ -1,13 +1,11 @@
-# F95 Game Zone App
+# F95Launcher
 
-F95 Game Zone App is a desktop manager for F95 games on Windows. It focuses on four things that actually matter in day-to-day use:
+F95Launcher (repository `f95-game-zone-app`) is a desktop manager for F95 games on Windows. It focuses on four things that actually matter in day-to-day use:
 
 - a reliable installed library
 - live F95 thread search and update flow
 - download/install directly into the library
 - save protection with local vault backups and cloud sync
-
-This project started from Atlas foundations, but it is now being shipped as its own application and release line.
 
 ## What it does
 
@@ -61,8 +59,8 @@ When a mirror requires captcha confirmation, the app now keeps that flow resumab
 ## Interface runtime
 
 - Every renderer window loads React, Babel, fonts and icons from `src/assets/vendor`, so the app starts without network access (see `src/assets/vendor/README.md` for versions).
-- `src/core/ui/atlas-ui.js` is the framework-free layer loaded first in each window: boot splash with a recoverable error screen, global error capture (logged to the main process), toasts, confirm/alert dialogs, an Escape-key stack, ripple/press feedback and the offline notice.
-- `src/core/ui/atlas-react.js` adds the React helpers: `usePresence`/`useModalLayer` for enter/exit animations, `useEscape`, `useBusyAction` and error boundaries (`AtlasErrorBoundary`, `AtlasSafe`) that keep a failing panel from blanking the window.
+- `src/core/ui/app-ui.js` is the framework-free layer loaded first in each window: boot splash with a recoverable error screen, global error capture (logged to the main process), toasts, confirm/alert dialogs, an Escape-key stack, ripple/press feedback and the offline notice.
+- `src/core/ui/app-react.js` adds the React helpers: `usePresence`/`useModalLayer` for enter/exit animations, `useEscape`, `useBusyAction` and error boundaries (`AppErrorBoundary`, `AppSafe`) that keep a failing panel from blanking the window.
 - Motion tokens live in `src/assets/css/main.css` (400–700 ms, expo-out easing). Settings → Interface → *Interface animations* switches between System, Full, Reduced and Off; the choice applies instantly to every window.
 - The main process reloads crashed renderers and offers a recovery dialog for hung windows (`src/main/windowResilience.js`); `config.ini` is written atomically (`src/main/atomicFile.js`).
 
@@ -85,7 +83,7 @@ Releases are published from this repository:
 
 - [GitHub Releases](https://github.com/maxbaydi/f95-game-zone-app/releases)
 
-A release is built by the *Atlas Release* workflow when a version tag is pushed (a plain push to `main` only runs the checks):
+A release is built by the *Release* workflow when a version tag is pushed (a plain push to `main` only runs the checks):
 
 ```powershell
 npm version 1.7.1 --no-git-tag-version   # or edit package.json

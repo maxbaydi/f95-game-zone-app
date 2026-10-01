@@ -3,7 +3,7 @@
 /**
  * Background check of the live F95 threads of installed games (ADR 0009).
  *
- * The Atlas catalog is refreshed in batches and can lag behind the site for
+ * The metadata catalog is refreshed in batches and can lag behind the site for
  * days; the thread title always carries the current version. The checker
  * opens the threads of installed games (favorites first) one at a time with a
  * pause between them, stores the version it read and never runs twice at the

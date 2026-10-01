@@ -11,7 +11,7 @@ const migrations = require("../src/main/db/migrations");
 const database = require("../src/database");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-db-quotes-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-db-quotes-"));
 }
 
 function runAsync(db, sql, params = []) {

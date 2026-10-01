@@ -13,11 +13,11 @@ const {
 } = require("../src/main/appPaths");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-"));
 }
 
 test("buildAppPaths computes the expected writable layout", () => {
-  const root = path.join("C:\\", "Users", "tester", "AppData", "Roaming", "Atlas");
+  const root = path.join("C:\\", "Users", "tester", "AppData", "Roaming", "F95Launcher");
   const appPaths = buildAppPaths(root);
 
   assert.equal(appPaths.root, path.resolve(root));
@@ -57,7 +57,7 @@ test("ensureAppDirs creates all required writable directories", () => {
 test("resolveLegacyPaths uses src-root in development and resources root when packaged", () => {
   // Absolute on every platform: a literal `C:\...` is a relative path on Linux.
   const projectRoot = path.resolve(os.tmpdir(), "projects", "atlas");
-  const installRoot = path.resolve(os.tmpdir(), "Program Files", "Atlas");
+  const installRoot = path.resolve(os.tmpdir(), "Program Files", "F95Launcher");
   const development = resolveLegacyPaths({
     appPath: projectRoot,
     isPackaged: false,

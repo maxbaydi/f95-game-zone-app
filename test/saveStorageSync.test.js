@@ -16,7 +16,7 @@ const {
 const codeOf = (error) => /** @type {any} */ (error)?.code;
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-storage-sync-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-storage-sync-"));
 }
 
 function writeFiles(root, files) {

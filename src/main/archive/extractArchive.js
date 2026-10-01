@@ -717,14 +717,14 @@ async function extractWith7z(binaryPath, tool, archivePath, destinationPath, pas
 async function listZipWithPowerShell(archivePath) {
   const script = `
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($env:ATLAS_ARCHIVE_PATH)
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($env:F95LAUNCHER_ARCHIVE_PATH)
     try {
       @($zip.Entries | ForEach-Object { @{ n = $_.FullName; s = $_.Length } }) | ConvertTo-Json -Compress
     } finally {
       $zip.Dispose()
     }
   `;
-  const stdout = await runPowerShell(script, { ATLAS_ARCHIVE_PATH: archivePath });
+  const stdout = await runPowerShell(script, { F95LAUNCHER_ARCHIVE_PATH: archivePath });
   if (!stdout) {
     return [];
   }
@@ -747,8 +747,8 @@ async function listZipWithPowerShell(archivePath) {
 async function extractZipWithPowerShell(archivePath, destinationPath) {
   const script = `
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $destinationPath = $env:ATLAS_DESTINATION_PATH
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($env:ATLAS_ARCHIVE_PATH)
+    $destinationPath = $env:F95LAUNCHER_DESTINATION_PATH
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($env:F95LAUNCHER_ARCHIVE_PATH)
     try {
       foreach ($entry in $zip.Entries) {
         if ([string]::IsNullOrWhiteSpace($entry.FullName)) { continue }
@@ -765,8 +765,8 @@ async function extractZipWithPowerShell(archivePath, destinationPath) {
     }
   `;
   await runPowerShell(script, {
-    ATLAS_ARCHIVE_PATH: archivePath,
-    ATLAS_DESTINATION_PATH: destinationPath,
+    F95LAUNCHER_ARCHIVE_PATH: archivePath,
+    F95LAUNCHER_DESTINATION_PATH: destinationPath,
   });
 }
 

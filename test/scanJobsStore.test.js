@@ -13,7 +13,7 @@ const {
 } = require("../src/main/db/scanJobsStore");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-jobs-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-jobs-"));
 }
 
 function closeAsync(db) {

@@ -52,7 +52,7 @@ const Sidebar = ({
     },
     React.createElement("div", {
       key: "indicator",
-      className: "atlas-sidebar-indicator",
+      className: "app-sidebar-indicator",
       "aria-hidden": "true",
       style: {
         transform: `translateY(${Math.max(activeIndex, 0) * 68 + 1}px)`,
@@ -85,7 +85,7 @@ const Sidebar = ({
             {
               key: `badge-${item.badge > 99 ? "99+" : item.badge}`,
               className:
-                "atlas-badge-enter absolute right-2 top-3 min-w-[18px] border border-glam/50 bg-glam px-1.5 py-0.5 text-center text-[10px] font-semibold text-onAccent shadow-glow-glam",
+                "app-badge-enter absolute right-2 top-3 min-w-[18px] border border-glam/50 bg-glam px-1.5 py-0.5 text-center text-[10px] font-semibold text-onAccent shadow-glow-glam",
             },
             item.badge > 99 ? "99+" : String(item.badge),
           ),
@@ -93,7 +93,7 @@ const Sidebar = ({
           "div",
           {
             className:
-              "atlas-tooltip pointer-events-none absolute left-[68px] z-50 whitespace-nowrap border border-border bg-secondary px-3 py-1.5 text-xs text-text shadow-glass",
+              "app-tooltip pointer-events-none absolute left-[68px] z-50 whitespace-nowrap border border-border bg-secondary px-3 py-1.5 text-xs text-text shadow-glass",
           },
           item.label,
         ),

@@ -144,7 +144,7 @@ const SettingsPanel = ({
   };
 
   const renderPage = () => {
-    const Safe = window.AtlasSafe;
+    const Safe = window.AppSafe;
     return Safe ? (
       <Safe
         name={`settings:${page.id}`}
@@ -167,12 +167,12 @@ const SettingsPanel = ({
           onClick={() => setSelected(item.id)}
           aria-current={isActive ? "page" : undefined}
           title={attention || item.label}
-          className={`atlas-list-enter group relative flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13px] outline-none transition-colors duration-500 focus-visible:bg-white/5 ${
+          className={`app-list-enter group relative flex w-full items-center gap-3 px-4 py-2.5 text-left text-[13px] outline-none transition-colors duration-500 focus-visible:bg-white/5 ${
             isActive
               ? "text-text"
               : "text-text/75 hover:bg-white/5 hover:text-text"
           }`}
-          style={{ "--atlas-index": index }}
+          style={{ "--app-index": index }}
         >
           <span
             className={`material-symbols-outlined text-[20px] leading-none transition-[color,transform] duration-500 ${
@@ -218,7 +218,7 @@ const SettingsPanel = ({
       <div ref={contentRef} className="min-w-0 flex-1 overflow-y-auto">
         <div
           key={page.id}
-          className="atlas-view-enter mx-auto w-full max-w-4xl px-6 pb-10 pt-6"
+          className="app-view-enter mx-auto w-full max-w-4xl px-6 pb-10 pt-6"
         >
           <header className="mb-5 flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">

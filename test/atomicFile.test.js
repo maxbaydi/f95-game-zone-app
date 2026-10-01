@@ -7,7 +7,7 @@ const path = require("node:path");
 const { writeFileAtomicSync } = require("../src/main/atomicFile");
 
 test("writeFileAtomicSync replaces the file and leaves no temp files", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-atomic-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "app-atomic-"));
   const target = path.join(directory, "config.ini");
   fs.writeFileSync(target, "old=1\n");
 
@@ -18,7 +18,7 @@ test("writeFileAtomicSync replaces the file and leaves no temp files", () => {
 });
 
 test("writeFileAtomicSync creates missing directories", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-atomic-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "app-atomic-"));
   const target = path.join(directory, "nested", "deeper", "config.ini");
 
   writeFileAtomicSync(target, "value=1\n");
@@ -27,7 +27,7 @@ test("writeFileAtomicSync creates missing directories", () => {
 });
 
 test("writeFileAtomicSync falls back to a direct write when rename fails", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-atomic-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "app-atomic-"));
   const target = path.join(directory, "config.ini");
   const fallbacks = [];
   const flakyFs = {

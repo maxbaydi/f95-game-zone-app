@@ -309,22 +309,22 @@ function shortlistEntries(candidate, atlasIndex) {
  */
 function describeTitleSources(localSource, remoteSource) {
   if (localSource === "renpy-options") {
-    return `Ren'Py metadata matches Atlas ${remoteSource}`;
+    return `Ren'Py metadata matches catalog ${remoteSource}`;
   }
 
   if (localSource === "executable-name") {
-    return `executable name matches Atlas ${remoteSource}`;
+    return `executable name matches catalog ${remoteSource}`;
   }
 
   if (localSource === "parent-folder") {
-    return `parent folder matches Atlas ${remoteSource}`;
+    return `parent folder matches catalog ${remoteSource}`;
   }
 
   if (localSource === "structured-format") {
-    return `configured path format matches Atlas ${remoteSource}`;
+    return `configured path format matches catalog ${remoteSource}`;
   }
 
-  return `folder/title match against Atlas ${remoteSource}`;
+  return `folder/title match against catalog ${remoteSource}`;
 }
 
 /**
@@ -452,8 +452,8 @@ function scoreCreatorMatch(candidate, entry) {
         bestScore = score;
         bestReason =
           score >= 38
-            ? `creator matches Atlas ${remoteVariant.source}`
-            : `creator is close to Atlas ${remoteVariant.source}`;
+            ? `creator matches catalog ${remoteVariant.source}`
+            : `creator is close to catalog ${remoteVariant.source}`;
       }
     }
   }
@@ -461,7 +461,7 @@ function scoreCreatorMatch(candidate, entry) {
   if (bestScore === 0) {
     return {
       score: -18,
-      reason: "creator conflicts with Atlas metadata",
+      reason: "creator conflicts with catalog metadata",
     };
   }
 
@@ -498,13 +498,13 @@ function scoreVersionMatch(candidate, entry) {
     score: best.score,
     reason:
       best.matchType === "exact"
-        ? "version matches Atlas version"
+        ? "version matches catalog version"
         : best.matchType === "prefix" || best.matchType === "shared-prefix"
-          ? "version is compatible with Atlas version"
+          ? "version is compatible with catalog version"
           : best.matchType === "major-match"
-            ? "major version matches Atlas version"
+            ? "major version matches catalog version"
             : best.matchType === "conflict"
-              ? "version conflicts with Atlas version"
+              ? "version conflicts with catalog version"
               : "",
   };
 }
@@ -524,13 +524,13 @@ function scoreEngineMatch(candidate, entry) {
   if (candidate.normalizedEngine === entry.normalizedEngine) {
     return {
       score: 18,
-      reason: "engine matches Atlas engine",
+      reason: "engine matches catalog engine",
     };
   }
 
   return {
     score: -22,
-    reason: "engine conflicts with Atlas engine",
+    reason: "engine conflicts with catalog engine",
   };
 }
 

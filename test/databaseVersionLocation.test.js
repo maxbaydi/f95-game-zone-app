@@ -8,7 +8,7 @@ const { buildAppPaths, ensureAppDirs } = require("../src/main/appPaths");
 const database = require("../src/database");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-db-version-location-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-db-version-location-"));
 }
 
 function runAsync(db, sql, params = []) {
@@ -73,12 +73,12 @@ test("getF95ZoneDataByAtlasId returns the thread identity for a catalog entry", 
   ensureAppDirs(appPaths);
   const db = await database.initializeDatabase(appPaths);
 
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Atlas Game', 'Atlas Dev', 'renpy', '0.9')`);
-  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/atlas-game.555/')`);
+  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
+  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/app-game.555/')`);
 
   assert.deepEqual(await database.getF95ZoneDataByAtlasId(100), {
     f95_id: 555,
-    site_url: "https://f95zone.to/threads/atlas-game.555/",
+    site_url: "https://f95zone.to/threads/app-game.555/",
   });
   assert.equal(await database.getF95ZoneDataByAtlasId(999), null);
 
@@ -91,9 +91,9 @@ test("live thread versions raise latestVersion above the catalog and are cleaned
   const db = await database.initializeDatabase(appPaths);
   const { upsertLiveVersion, getLiveVersion } = require("../src/main/db/liveVersionsStore");
 
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Atlas Game', 'Atlas Dev', 'renpy', '0.9')`);
-  const recordId = await database.addGame({ title: "Atlas Game", creator: "Atlas Dev", engine: "renpy" });
-  await database.addVersion({ version: "0.9", folder: "C:\\Games\\Atlas", executables: [{ value: "game.exe" }] }, recordId);
+  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
+  const recordId = await database.addGame({ title: "Sample Game", creator: "Sample Dev", engine: "renpy" });
+  await database.addVersion({ version: "0.9", folder: "C:\\Games\\Sample", executables: [{ value: "game.exe" }] }, recordId);
   await database.addAtlasMapping(recordId, 100);
 
   const before = await database.getGame(recordId, appPaths);
@@ -103,9 +103,9 @@ test("live thread versions raise latestVersion above the catalog and are cleaned
 
   await upsertLiveVersion(db, {
     recordId,
-    threadUrl: "https://f95zone.to/threads/atlas-game.555/",
+    threadUrl: "https://f95zone.to/threads/app-game.555/",
     version: "1.1",
-    title: "Atlas Game [v1.1]",
+    title: "Sample Game [v1.1]",
     checkedAt: "2026-09-27T10:00:00.000Z",
     error: "",
   });

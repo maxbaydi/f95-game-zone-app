@@ -1,4 +1,4 @@
-name: Atlas Checks
+name: Checks
 
 on:
   pull_request:

@@ -9,7 +9,7 @@ const {
 } = require("../src/main/install/archiveLayout");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-archive-layout-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-archive-layout-"));
 }
 
 test("resolveArchiveContentRoot unwraps a single nested archive folder", async () => {

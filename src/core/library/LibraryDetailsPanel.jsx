@@ -7,6 +7,9 @@ const {
 } = window.React;
 
 const LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY =
+  "app-library-details-panel-width";
+// Key written by builds before the UI layer was renamed.
+const LIBRARY_DETAILS_PANEL_WIDTH_LEGACY_STORAGE_KEY =
   "atlas-library-details-panel-width";
 const LIBRARY_DETAILS_PANEL_WIDTH_DEFAULT_PX = 420;
 const LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX = 280;
@@ -24,7 +27,9 @@ const getLibraryDetailsPanelMaxWidthPx = () =>
 
 const readStoredLibraryDetailsPanelWidthPx = () => {
   try {
-    const raw = localStorage.getItem(LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY);
+    const raw =
+      localStorage.getItem(LIBRARY_DETAILS_PANEL_WIDTH_STORAGE_KEY) ??
+      localStorage.getItem(LIBRARY_DETAILS_PANEL_WIDTH_LEGACY_STORAGE_KEY);
     const n = Number.parseInt(raw, 10);
     if (Number.isFinite(n)) {
       const max = getLibraryDetailsPanelMaxWidthPx();
@@ -117,8 +122,8 @@ const DetailRow = ({ label, value }) => (
 );
 
 const DetailsImage = ({ src, alt, className, fallback }) =>
-  window.AtlasImage ? (
-    <window.AtlasImage
+  window.AppImage ? (
+    <window.AppImage
       src={src}
       alt={alt}
       className={className}
@@ -156,11 +161,11 @@ const formatDetailRelativeTime = (value, nowMs = Date.now()) => {
 
 window.formatDetailRelativeTime = formatDetailRelativeTime;
 
-const detailsToast = () => window.AtlasUI?.toast || window.AtlasToast || null;
+const detailsToast = () => window.AppUI?.toast || window.AppToast || null;
 
 const detailsConfirm = (options) =>
-  window.AtlasUI?.confirm
-    ? window.AtlasUI.confirm(options)
+  window.AppUI?.confirm
+    ? window.AppUI.confirm(options)
     : Promise.resolve(window.confirm(options?.message || options?.title || ""));
 
 const DETAILS_EXECUTABLE_LIST_LIMIT = 30;
@@ -294,7 +299,7 @@ const DetailsExecutablePicker = ({ game, version, onChosen, onClose }) => {
 
   return (
     <div
-      className="atlas-fade-enter mt-3 border border-accent/35 bg-accent/5 p-3"
+      className="app-fade-enter mt-3 border border-accent/35 bg-accent/5 p-3"
       role="group"
       aria-label="Choose the file that starts the game"
     >
@@ -317,7 +322,7 @@ const DetailsExecutablePicker = ({ game, version, onChosen, onClose }) => {
       )}
       {listState.isLoading ? (
         <div className="flex items-center gap-2 text-xs text-text/60">
-          <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+          <span className="app-spinner app-keep-motion text-[11px]" aria-hidden />
           Looking for launchers in the game folder…
         </div>
       ) : shownCandidates.length === 0 ? (
@@ -335,7 +340,7 @@ const DetailsExecutablePicker = ({ game, version, onChosen, onClose }) => {
               className="flex items-center gap-2 border border-border/70 bg-black/20 px-2 py-1 text-left text-xs text-text transition hover:border-accent/50 hover:bg-accent/10 disabled:opacity-50"
             >
               {busyValue === candidate ? (
-                <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />
+                <span className="app-spinner app-keep-motion text-[10px]" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[14px] leading-none text-accent" aria-hidden>
                   play_circle
@@ -419,7 +424,7 @@ const DetailsMetadataEditor = ({ game, onSaved, onClose }) => {
   return (
     <form
       onSubmit={save}
-      className="atlas-fade-enter space-y-2 border border-border/70 bg-canvas/40 p-3"
+      className="app-fade-enter space-y-2 border border-border/70 bg-canvas/40 p-3"
       aria-label="Edit game details"
     >
       {game?.atlas_id && (
@@ -469,7 +474,7 @@ const DetailsMetadataEditor = ({ game, onSaved, onClose }) => {
           disabled={isSaving}
           className="inline-flex items-center gap-1 bg-accent px-2 py-0.5 text-xs text-onAccent transition hover:brightness-110 disabled:opacity-50"
         >
-          {isSaving && <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />}
+          {isSaving && <span className="app-spinner app-keep-motion text-[10px]" aria-hidden />}
           Save
         </button>
       </div>
@@ -602,8 +607,8 @@ const LibraryDetailsPanel = ({
       setRemovingVersionKey("");
     }
   };
-  const favoriteIconRef = window.AtlasMotion?.useFlashClass
-    ? window.AtlasMotion.useFlashClass(isFavorite, "atlas-pop")
+  const favoriteIconRef = window.AppMotion?.useFlashClass
+    ? window.AppMotion.useFlashClass(isFavorite, "app-pop")
     : null;
 
   const handlePlayVersion = async (version, versionKey) => {
@@ -740,7 +745,7 @@ const LibraryDetailsPanel = ({
 
   return (
     <aside
-      className="atlas-glass-panel atlas-panel-right relative h-full min-h-0 shrink-0 border-l border-border shadow-glass"
+      className="app-glass-panel app-panel-right relative h-full min-h-0 shrink-0 border-l border-border shadow-glass"
       data-state={presenceState}
       aria-label="Game details"
       style={{ width: panelWidthPx }}
@@ -776,12 +781,12 @@ const LibraryDetailsPanel = ({
         <div className="relative z-10 flex min-h-[5rem] items-center justify-between gap-3 border-b border-border bg-black/15 px-4 py-2.5 backdrop-blur-sm">
           <div
             key={isLoading ? "loading" : game?.record_id || "empty"}
-            className="atlas-list-enter min-w-0"
+            className="app-list-enter min-w-0"
           >
             {isLoading ? (
               <div className="space-y-2 py-1">
-                <div className="atlas-skeleton h-5 w-52" />
-                <div className="atlas-skeleton h-3.5 w-28" />
+                <div className="app-skeleton h-5 w-52" />
+                <div className="app-skeleton h-3.5 w-28" />
               </div>
             ) : (
               <>
@@ -815,15 +820,15 @@ const LibraryDetailsPanel = ({
         ) : (
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {isLoading ? (
-              <div className="atlas-fade-enter space-y-3">
-                <div className="atlas-skeleton h-[200px]" />
-                <div className="atlas-skeleton h-16" />
-                <div className="atlas-skeleton h-40" />
+              <div className="app-fade-enter space-y-3">
+                <div className="app-skeleton h-[200px]" />
+                <div className="app-skeleton h-16" />
+                <div className="app-skeleton h-40" />
               </div>
             ) : (
               <div
                 key={game?.record_id || "details"}
-                className="atlas-view-enter space-y-5"
+                className="app-view-enter space-y-5"
               >
                 <section className="overflow-hidden rounded-2xl border border-border bg-secondary/20">
                   <div className="group/banner relative h-[220px] overflow-hidden bg-secondary/40">
@@ -1045,8 +1050,8 @@ const LibraryDetailsPanel = ({
                         return (
                         <div
                           key={versionKey}
-                          className="atlas-list-enter border border-border/70 bg-canvas/40 p-3 transition-colors duration-500 hover:border-accent/35"
-                          style={{ "--atlas-index": versionIndex }}
+                          className="app-list-enter border border-border/70 bg-canvas/40 p-3 transition-colors duration-500 hover:border-accent/35"
+                          style={{ "--app-index": versionIndex }}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
@@ -1111,7 +1116,7 @@ const LibraryDetailsPanel = ({
                                   title={`Play ${version.version || ""}`.trim()}
                                 >
                                   {isLaunching ? (
-                                    <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+                                    <span className="app-spinner app-keep-motion text-[11px]" aria-hidden />
                                   ) : (
                                     <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                                       play_arrow
@@ -1145,7 +1150,7 @@ const LibraryDetailsPanel = ({
                                 title="Remove this version from the library (the folder stays on disk)"
                               >
                                 {removingVersionKey === versionKey ? (
-                                  <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />
+                                  <span className="app-spinner app-keep-motion text-[10px]" aria-hidden />
                                 ) : (
                                   <span className="material-symbols-outlined text-[14px] leading-none" aria-hidden>
                                     delete
@@ -1350,8 +1355,8 @@ const LibraryDetailsPanel = ({
                             key={`${previewUrl}-${index}`}
                             type="button"
                             onClick={() => onPreviewSelect(index)}
-                            className="atlas-card-enter group overflow-hidden rounded-xl border border-border bg-canvas/40 transition-[border-color,box-shadow] duration-500 hover:border-accent/50 hover:shadow-glow-accent"
-                            style={{ "--atlas-index": Math.min(index, 12) }}
+                            className="app-card-enter group overflow-hidden rounded-xl border border-border bg-canvas/40 transition-[border-color,box-shadow] duration-500 hover:border-accent/50 hover:shadow-glow-accent"
+                            style={{ "--app-index": Math.min(index, 12) }}
                             aria-label={`Open screenshot ${index + 1}`}
                           >
                             <DetailsImage

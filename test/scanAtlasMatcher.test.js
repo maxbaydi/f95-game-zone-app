@@ -95,7 +95,7 @@ async function seedAtlasTables(db) {
   );
 }
 
-test("Atlas scan matcher auto-matches when title and creator corroborate the same entry", async () => {
+test("catalog scan matcher auto-matches when title and creator corroborate the same entry", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -119,7 +119,7 @@ test("Atlas scan matcher auto-matches when title and creator corroborate the sam
   assert.equal(result.bestMatch?.f95Id, 1001);
 });
 
-test("Atlas scan matcher keeps same-title collisions ambiguous without corroborating signals", async () => {
+test("catalog scan matcher keeps same-title collisions ambiguous without corroborating signals", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -142,7 +142,7 @@ test("Atlas scan matcher keeps same-title collisions ambiguous without corrobora
   assert.equal(result.matches.length, 2);
 });
 
-test("Atlas scan matcher can use Atlas short_name aliases for high-confidence matches", async () => {
+test("catalog scan matcher can use catalog short_name aliases for high-confidence matches", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -165,7 +165,7 @@ test("Atlas scan matcher can use Atlas short_name aliases for high-confidence ma
   assert.equal(result.bestMatch?.atlasId, 1);
 });
 
-test("Atlas scan matcher auto-matches exact titles even when a nearby fuzzy title exists", async () => {
+test("catalog scan matcher auto-matches exact titles even when a nearby fuzzy title exists", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -188,7 +188,7 @@ test("Atlas scan matcher auto-matches exact titles even when a nearby fuzzy titl
   assert.equal(result.bestMatch?.atlasId, 4);
 });
 
-test("Atlas scan matcher prefers the correct same-title branch using version evidence", async () => {
+test("catalog scan matcher prefers the correct same-title branch using version evidence", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -212,7 +212,7 @@ test("Atlas scan matcher prefers the correct same-title branch using version evi
   assert.ok((result.margin || 0) >= 15);
 });
 
-test("Atlas scan matcher rejects short substring collisions when a full exact title exists", async () => {
+test("catalog scan matcher rejects short substring collisions when a full exact title exists", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -235,7 +235,7 @@ test("Atlas scan matcher rejects short substring collisions when a full exact ti
   assert.equal(result.bestMatch?.atlasId, 8);
 });
 
-test("Atlas scan matcher can auto-match a near-exact parent-folder title when the margin is decisive", async () => {
+test("catalog scan matcher can auto-match a near-exact parent-folder title when the margin is decisive", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -263,7 +263,7 @@ test("Atlas scan matcher can auto-match a near-exact parent-folder title when th
   assert.equal(result.bestMatch?.atlasId, 12);
 });
 
-test("Atlas scan matcher can auto-match exact version plus creator derived from folder metadata", async () => {
+test("catalog scan matcher can auto-match exact version plus creator derived from folder metadata", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -291,7 +291,7 @@ test("Atlas scan matcher can auto-match exact version plus creator derived from 
   assert.equal(result.bestMatch?.atlasId, 13);
 });
 
-test("Atlas scan matcher can auto-match creator-anchored titles with wording drift", async () => {
+test("catalog scan matcher can auto-match creator-anchored titles with wording drift", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 
@@ -319,7 +319,7 @@ test("Atlas scan matcher can auto-match creator-anchored titles with wording dri
   assert.equal(result.bestMatch?.atlasId, 14);
 });
 
-test("Atlas scan matcher can auto-match a single clear title even when Atlas only has final version", async () => {
+test("catalog scan matcher can auto-match a single clear title even when the catalog only has final version", async () => {
   const db = openMemoryDatabase();
   await seedAtlasTables(db);
 

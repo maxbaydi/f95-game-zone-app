@@ -11,7 +11,7 @@ const {
 } = require("../src/main/saveVault");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-vault-test-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-vault-test-"));
 }
 
 test("buildSaveVaultIdentity prefers F95 thread id", () => {

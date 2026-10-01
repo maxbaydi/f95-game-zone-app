@@ -11,13 +11,13 @@ body {
     Arial, sans-serif;
 }
 
-.atlas-app {
+.app-shell {
   position: relative;
   isolation: isolate;
   box-shadow: inset 0 0 0 1px #3d4450;
 }
 
-.atlas-app::before {
+.app-shell::before {
   content: "";
   position: fixed;
   inset: 0;
@@ -30,19 +30,19 @@ body {
     #171a21;
 }
 
-.atlas-glass-panel {
+.app-glass-panel {
   background: linear-gradient(180deg, #1b2838 0%, #16202d 100%);
   border: 1px solid #3d4450;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-.atlas-glass-subtle {
+.app-glass-subtle {
   background: rgba(27, 40, 56, 0.96);
   border: 1px solid #3d4450;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-.atlas-skeleton {
+.app-skeleton {
   background: linear-gradient(
     110deg,
     rgba(255, 255, 255, 0.04) 0%,
@@ -53,32 +53,32 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .atlas-skeleton {
+  .app-skeleton {
     animation: none;
     background: rgba(255, 255, 255, 0.06);
   }
 }
 
 :root {
-  --atlas-scrollbar-size: 7px;
-  --atlas-scrollbar-thumb: #3d4450;
-  --atlas-scrollbar-thumb-hover: #66c0f4;
-  --atlas-scrollbar-thumb-hidden: rgba(61, 68, 80, 0);
+  --app-scrollbar-size: 7px;
+  --app-scrollbar-thumb: #3d4450;
+  --app-scrollbar-thumb-hover: #66c0f4;
+  --app-scrollbar-thumb-hidden: rgba(61, 68, 80, 0);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--atlas-scrollbar-thumb-hidden) transparent;
+  scrollbar-color: var(--app-scrollbar-thumb-hidden) transparent;
 }
 
-html.atlas-scrollbar-reveal *,
+html.app-scrollbar-reveal *,
 *:hover {
-  scrollbar-color: var(--atlas-scrollbar-thumb) transparent;
+  scrollbar-color: var(--app-scrollbar-thumb) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: var(--atlas-scrollbar-size);
-  height: var(--atlas-scrollbar-size);
+  width: var(--app-scrollbar-size);
+  height: var(--app-scrollbar-size);
 }
 
 *::-webkit-scrollbar-track {
@@ -96,23 +96,23 @@ html.atlas-scrollbar-reveal *,
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--atlas-scrollbar-thumb-hidden);
+  background-color: var(--app-scrollbar-thumb-hidden);
   border-radius: 0;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
-html.atlas-scrollbar-reveal *::-webkit-scrollbar-thumb,
+html.app-scrollbar-reveal *::-webkit-scrollbar-thumb,
 *:hover::-webkit-scrollbar-thumb {
-  background-color: var(--atlas-scrollbar-thumb);
+  background-color: var(--app-scrollbar-thumb);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: var(--atlas-scrollbar-thumb-hover);
+  background-color: var(--app-scrollbar-thumb-hover);
 }
 
 details.tags-spoiler > summary .tag-chevron {
-  transition: transform var(--atlas-dur-fast) var(--atlas-ease-out);
+  transition: transform var(--app-dur-fast) var(--app-ease-out);
 }
 
 details.tags-spoiler[open] > summary .tag-chevron {
@@ -124,44 +124,44 @@ details.tags-spoiler[open] > summary .tag-chevron {
    Every interactive surface animates in the 400-700ms range with an
    expo-out curve so long durations still feel responsive. The
    `data-motion` attribute on <html> (auto | full | reduced | off) is set by
-   atlas-ui.js from Settings > Interface and respects the OS preference in
+   app-ui.js from Settings > Interface and respects the OS preference in
    "auto" mode.
    ========================================================================== */
 
 :root {
-  --atlas-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --atlas-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
-  --atlas-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --atlas-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --atlas-dur-fast: 400ms;
-  --atlas-dur-base: 500ms;
-  --atlas-dur-slow: 650ms;
-  --atlas-dur-exit: 400ms;
-  --atlas-stagger: 35ms;
+  --app-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --app-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
+  --app-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --app-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --app-dur-fast: 400ms;
+  --app-dur-base: 500ms;
+  --app-dur-slow: 650ms;
+  --app-dur-exit: 400ms;
+  --app-stagger: 35ms;
   interpolate-size: allow-keywords;
   accent-color: #66c0f4;
   color-scheme: dark;
 }
 
 html[data-motion="reduced"] {
-  --atlas-dur-fast: 160ms;
-  --atlas-dur-base: 180ms;
-  --atlas-dur-slow: 200ms;
-  --atlas-dur-exit: 150ms;
-  --atlas-stagger: 0ms;
+  --app-dur-fast: 160ms;
+  --app-dur-base: 180ms;
+  --app-dur-slow: 200ms;
+  --app-dur-exit: 150ms;
+  --app-stagger: 0ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
   html[data-motion="auto"] {
-    --atlas-dur-fast: 160ms;
-    --atlas-dur-base: 180ms;
-    --atlas-dur-slow: 200ms;
-    --atlas-dur-exit: 150ms;
-    --atlas-stagger: 0ms;
+    --app-dur-fast: 160ms;
+    --app-dur-base: 180ms;
+    --app-dur-slow: 200ms;
+    --app-dur-exit: 150ms;
+    --app-stagger: 0ms;
   }
 }
 
-html[data-motion="off"] *:not(.atlas-keep-motion):not(.animate-spin):not(.atlas-skeleton),
+html[data-motion="off"] *:not(.app-keep-motion):not(.animate-spin):not(.app-skeleton),
 html[data-motion="off"] *::before,
 html[data-motion="off"] *::after {
   animation-duration: 1ms !important;
@@ -181,8 +181,8 @@ html[data-motion="off"] *::after {
     [role="tab"], [role="option"], .cursor-pointer) {
   transition-property: color, background-color, border-color, outline-color,
     text-decoration-color, fill, stroke, box-shadow, opacity, filter;
-  transition-duration: var(--atlas-dur-fast);
-  transition-timing-function: var(--atlas-ease-out);
+  transition-duration: var(--app-dur-fast);
+  transition-timing-function: var(--app-ease-out);
 }
 
 :where(input, select, textarea):focus-visible {
@@ -191,7 +191,7 @@ html[data-motion="off"] *::after {
 
 :where(button, a, [role="button"], [tabindex]):focus-visible {
   outline-offset: 2px;
-  animation: atlas-focus-ring var(--atlas-dur-base) var(--atlas-ease-out);
+  animation: app-focus-ring var(--app-dur-base) var(--app-ease-out);
 }
 
 :where(button):disabled {
@@ -204,9 +204,9 @@ details::details-content {
   overflow: hidden;
   opacity: 0;
   transition:
-    block-size var(--atlas-dur-base) var(--atlas-ease-out),
-    opacity var(--atlas-dur-base) var(--atlas-ease-out),
-    content-visibility var(--atlas-dur-base) allow-discrete;
+    block-size var(--app-dur-base) var(--app-ease-out),
+    opacity var(--app-dur-base) var(--app-ease-out),
+    content-visibility var(--app-dur-base) allow-discrete;
 }
 
 details[open]::details-content {
@@ -214,103 +214,103 @@ details[open]::details-content {
   opacity: 1;
 }
 
-@keyframes atlas-fade-in {
+@keyframes app-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes atlas-fade-out {
+@keyframes app-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
 }
 
-@keyframes atlas-rise-in {
+@keyframes app-rise-in {
   from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.985); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-sink-out {
+@keyframes app-sink-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
 }
 
-@keyframes atlas-dialog-in {
+@keyframes app-dialog-in {
   from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.955); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-dialog-out {
+@keyframes app-dialog-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); }
 }
 
-@keyframes atlas-drawer-in-right {
+@keyframes app-drawer-in-right {
   from { opacity: 0.4; transform: translate3d(104%, 0, 0); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-drawer-out-right {
+@keyframes app-drawer-out-right {
   from { opacity: 1; transform: none; }
   to { opacity: 0.4; transform: translate3d(104%, 0, 0); }
 }
 
-@keyframes atlas-panel-in-right {
+@keyframes app-panel-in-right {
   from { opacity: 0; transform: translate3d(48px, 0, 0); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-panel-out-right {
+@keyframes app-panel-out-right {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translate3d(48px, 0, 0); }
 }
 
-@keyframes atlas-popover-in {
+@keyframes app-popover-in {
   from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-popover-out {
+@keyframes app-popover-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.97); }
 }
 
-@keyframes atlas-dock-in {
+@keyframes app-dock-in {
   from { opacity: 0; transform: translate3d(-50%, 20px, 0) scale(0.97); }
   to { opacity: 1; transform: translate3d(-50%, 0, 0); }
 }
 
-@keyframes atlas-dock-out {
+@keyframes app-dock-out {
   from { opacity: 1; transform: translate3d(-50%, 0, 0); }
   to { opacity: 0; transform: translate3d(-50%, 16px, 0) scale(0.97); }
 }
 
-@keyframes atlas-view-in {
+@keyframes app-view-in {
   from { opacity: 0; transform: translate3d(0, 12px, 0); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-card-in {
+@keyframes app-card-in {
   from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.965); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-slide-in-left {
+@keyframes app-slide-in-left {
   from { opacity: 0; transform: translate3d(-14px, 0, 0); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-ripple {
+@keyframes app-ripple {
   from { transform: translate(-50%, -50%) scale(0); opacity: 0.42; }
   to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
 }
 
-@keyframes atlas-pop {
+@keyframes app-pop {
   0% { transform: scale(1); }
   40% { transform: scale(1.28); }
   100% { transform: scale(1); }
 }
 
-@keyframes atlas-shake {
+@keyframes app-shake {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-6px); }
   40% { transform: translateX(5px); }
@@ -318,163 +318,163 @@ details[open]::details-content {
   80% { transform: translateX(2px); }
 }
 
-@keyframes atlas-focus-ring {
+@keyframes app-focus-ring {
   from { outline-offset: 6px; outline-color: rgba(102, 192, 244, 0); }
   to { outline-offset: 2px; }
 }
 
-@keyframes atlas-progress-stripes {
+@keyframes app-progress-stripes {
   from { background-position: 0 0; }
   to { background-position: 28px 0; }
 }
 
-@keyframes atlas-indeterminate {
+@keyframes app-indeterminate {
   0% { transform: translateX(-110%) scaleX(0.6); }
   60% { transform: translateX(80%) scaleX(0.9); }
   100% { transform: translateX(260%) scaleX(0.6); }
 }
 
-@keyframes atlas-spin {
+@keyframes app-spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes atlas-glow-pulse {
+@keyframes app-glow-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(102, 192, 244, 0); }
   50% { box-shadow: 0 0 0 4px rgba(102, 192, 244, 0.22); }
 }
 
-@keyframes atlas-badge-in {
+@keyframes app-badge-in {
   from { opacity: 0; transform: scale(0.4); }
   to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes atlas-shimmer-x {
+@keyframes app-shimmer-x {
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
 }
 
-/* ---- Presence states (driven by AtlasMotion.usePresence) ---------------- */
+/* ---- Presence states (driven by AppMotion.usePresence) ---------------- */
 
-.atlas-overlay[data-state="open"] {
-  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+.app-overlay[data-state="open"] {
+  animation: app-fade-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-overlay[data-state="closed"] {
-  animation: atlas-fade-out var(--atlas-dur-exit) var(--atlas-ease-in-out) both;
+.app-overlay[data-state="closed"] {
+  animation: app-fade-out var(--app-dur-exit) var(--app-ease-in-out) both;
   pointer-events: none;
 }
 
-.atlas-dialog[data-state="open"] {
-  animation: atlas-dialog-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+.app-dialog[data-state="open"] {
+  animation: app-dialog-in var(--app-dur-slow) var(--app-ease-out) backwards;
 }
 
-.atlas-dialog[data-state="closed"] {
-  animation: atlas-dialog-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+.app-dialog[data-state="closed"] {
+  animation: app-dialog-out var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
-.atlas-drawer-right[data-state="open"] {
-  animation: atlas-drawer-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+.app-drawer-right[data-state="open"] {
+  animation: app-drawer-in-right var(--app-dur-slow) var(--app-ease-out) backwards;
 }
 
-.atlas-drawer-right[data-state="closed"] {
-  animation: atlas-drawer-out-right var(--atlas-dur-exit) var(--atlas-ease-in) both;
+.app-drawer-right[data-state="closed"] {
+  animation: app-drawer-out-right var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
-.atlas-panel-right[data-state="open"] {
-  animation: atlas-panel-in-right var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+.app-panel-right[data-state="open"] {
+  animation: app-panel-in-right var(--app-dur-slow) var(--app-ease-out) backwards;
 }
 
-.atlas-panel-right[data-state="closed"] {
-  animation: atlas-panel-out-right var(--atlas-dur-exit) var(--atlas-ease-in) both;
+.app-panel-right[data-state="closed"] {
+  animation: app-panel-out-right var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
-.atlas-popover[data-state="open"] {
+.app-popover[data-state="open"] {
   transform-origin: bottom right;
-  animation: atlas-popover-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+  animation: app-popover-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-popover[data-state="closed"] {
+.app-popover[data-state="closed"] {
   transform-origin: bottom right;
-  animation: atlas-popover-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+  animation: app-popover-out var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
-.atlas-dock[data-state="open"] {
-  animation: atlas-dock-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+.app-dock[data-state="open"] {
+  animation: app-dock-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-dock[data-state="closed"] {
-  animation: atlas-dock-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+.app-dock[data-state="closed"] {
+  animation: app-dock-out var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
 /* ---- One-shot entrance helpers ------------------------------------------ */
 
-.atlas-view-enter {
-  animation: atlas-view-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
+.app-view-enter {
+  animation: app-view-in var(--app-dur-slow) var(--app-ease-out) backwards;
 }
 
-.atlas-fade-enter {
-  animation: atlas-fade-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+.app-fade-enter {
+  animation: app-fade-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-rise-enter {
-  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+.app-rise-enter {
+  animation: app-rise-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-card-enter {
-  animation: atlas-card-in var(--atlas-dur-slow) var(--atlas-ease-out) backwards;
-  animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
+.app-card-enter {
+  animation: app-card-in var(--app-dur-slow) var(--app-ease-out) backwards;
+  animation-delay: calc(var(--app-stagger) * var(--app-index, 0));
 }
 
-.atlas-list-enter {
-  animation: atlas-slide-in-left var(--atlas-dur-base) var(--atlas-ease-out) backwards;
-  animation-delay: calc(var(--atlas-stagger) * var(--atlas-index, 0));
+.app-list-enter {
+  animation: app-slide-in-left var(--app-dur-base) var(--app-ease-out) backwards;
+  animation-delay: calc(var(--app-stagger) * var(--app-index, 0));
 }
 
-.atlas-pop {
-  animation: atlas-pop var(--atlas-dur-base) var(--atlas-ease-spring);
+.app-pop {
+  animation: app-pop var(--app-dur-base) var(--app-ease-spring);
 }
 
-.atlas-shake {
-  animation: atlas-shake var(--atlas-dur-base) var(--atlas-ease-out);
+.app-shake {
+  animation: app-shake var(--app-dur-base) var(--app-ease-out);
 }
 
-.atlas-badge-enter {
-  animation: atlas-badge-in var(--atlas-dur-base) var(--atlas-ease-spring) backwards;
+.app-badge-enter {
+  animation: app-badge-in var(--app-dur-base) var(--app-ease-spring) backwards;
 }
 
-.atlas-attention {
-  animation: atlas-glow-pulse 1.8s var(--atlas-ease-in-out) infinite;
+.app-attention {
+  animation: app-glow-pulse 1.8s var(--app-ease-in-out) infinite;
 }
 
-.atlas-spinner {
+.app-spinner {
   display: inline-block;
   width: 1em;
   height: 1em;
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: 9999px;
-  animation: atlas-spin 0.8s linear infinite;
+  animation: app-spin 0.8s linear infinite;
   vertical-align: -0.125em;
 }
 
-.atlas-skeleton {
-  animation: atlas-shimmer-x 1.8s ease-in-out infinite;
+.app-skeleton {
+  animation: app-shimmer-x 1.8s ease-in-out infinite;
 }
 
 /* ---- Progress bars ------------------------------------------------------ */
 
-.atlas-progress-fill {
+.app-progress-fill {
   transition:
-    width var(--atlas-dur-slow) var(--atlas-ease-out),
-    background-color var(--atlas-dur-base) var(--atlas-ease-out);
+    width var(--app-dur-slow) var(--app-ease-out),
+    background-color var(--app-dur-base) var(--app-ease-out);
 }
 
-.atlas-progress-fill--active {
+.app-progress-fill--active {
   background-image: linear-gradient(
     135deg,
     rgba(255, 255, 255, 0.16) 25%,
@@ -486,26 +486,26 @@ details[open]::details-content {
     transparent
   );
   background-size: 28px 28px;
-  animation: atlas-progress-stripes 0.9s linear infinite;
+  animation: app-progress-stripes 0.9s linear infinite;
 }
 
-.atlas-progress-indeterminate {
+.app-progress-indeterminate {
   position: relative;
   overflow: hidden;
 }
 
-.atlas-progress-indeterminate::after {
+.app-progress-indeterminate::after {
   content: "";
   position: absolute;
   inset: 0;
   width: 40%;
   background: linear-gradient(90deg, transparent, #66c0f4, transparent);
-  animation: atlas-indeterminate 1.4s var(--atlas-ease-in-out) infinite;
+  animation: app-indeterminate 1.4s var(--app-ease-in-out) infinite;
 }
 
-/* ---- Ripple (atlas-ui.js) ----------------------------------------------- */
+/* ---- Ripple (app-ui.js) ----------------------------------------------- */
 
-.atlas-ripple-host {
+.app-ripple-host {
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -514,20 +514,20 @@ details[open]::details-content {
   z-index: 0;
 }
 
-.atlas-ripple-dot {
+.app-ripple-dot {
   position: absolute;
   border-radius: 9999px;
   pointer-events: none;
-  animation: atlas-ripple 620ms var(--atlas-ease-out) forwards;
+  animation: app-ripple 620ms var(--app-ease-out) forwards;
 }
 
 /* Generic rise/sink presence used by status docks and inline notices. */
-.atlas-rise[data-state="open"] {
-  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) backwards;
+.app-rise[data-state="open"] {
+  animation: app-rise-in var(--app-dur-base) var(--app-ease-out) backwards;
 }
 
-.atlas-rise[data-state="closed"] {
-  animation: atlas-sink-out var(--atlas-dur-exit) var(--atlas-ease-in) both;
+.app-rise[data-state="closed"] {
+  animation: app-sink-out var(--app-dur-exit) var(--app-ease-in) both;
   pointer-events: none;
 }
 
@@ -538,8 +538,8 @@ details[open]::details-content {
   transform-style: preserve-3d;
   transform: skewX(0.001deg);
   transition:
-    transform var(--atlas-dur-base) var(--atlas-ease-out),
-    box-shadow var(--atlas-dur-base) var(--atlas-ease-out);
+    transform var(--app-dur-base) var(--app-ease-out),
+    box-shadow var(--app-dur-base) var(--app-ease-out);
 }
 
 .banner-root:hover {
@@ -563,8 +563,8 @@ details[open]::details-content {
   transform-origin: top center;
   transform: skewX(0.001deg);
   transition:
-    transform var(--atlas-dur-base) var(--atlas-ease-out) 80ms,
-    opacity var(--atlas-dur-slow) ease 80ms;
+    transform var(--app-dur-base) var(--app-ease-out) 80ms,
+    opacity var(--app-dur-slow) ease 80ms;
 }
 
 .banner-root:hover::before {
@@ -576,8 +576,8 @@ details[open]::details-content {
   opacity: 0;
   transform: scale(1.04);
   transition:
-    opacity var(--atlas-dur-slow) var(--atlas-ease-out),
-    transform 700ms var(--atlas-ease-out);
+    opacity var(--app-dur-slow) var(--app-ease-out),
+    transform 700ms var(--app-ease-out);
 }
 
 .banner-thumb-img[data-loaded="true"] {
@@ -601,18 +601,18 @@ html[data-motion="off"] .banner-root:hover {
   }
 }
 
-.atlas-img-fade {
+.app-img-fade {
   opacity: 0;
-  transition: opacity var(--atlas-dur-slow) var(--atlas-ease-out);
+  transition: opacity var(--app-dur-slow) var(--app-ease-out);
 }
 
-.atlas-img-fade[data-loaded="true"] {
+.app-img-fade[data-loaded="true"] {
   opacity: 1;
 }
 
 /* ---- Sidebar ------------------------------------------------------------ */
 
-.atlas-sidebar-indicator {
+.app-sidebar-indicator {
   position: absolute;
   left: 0;
   top: 0;
@@ -621,45 +621,45 @@ html[data-motion="off"] .banner-root:hover {
   background: linear-gradient(180deg, #67c1f5, #66c0f4);
   box-shadow: 0 0 14px rgba(102, 192, 244, 0.35);
   transition:
-    transform var(--atlas-dur-slow) var(--atlas-ease-spring),
-    opacity var(--atlas-dur-base) var(--atlas-ease-out);
+    transform var(--app-dur-slow) var(--app-ease-spring),
+    opacity var(--app-dur-base) var(--app-ease-out);
   pointer-events: none;
 }
 
-.atlas-tooltip {
+.app-tooltip {
   opacity: 0;
   transform: translate3d(-6px, 0, 0);
   transition:
-    opacity var(--atlas-dur-fast) var(--atlas-ease-out),
-    transform var(--atlas-dur-fast) var(--atlas-ease-out);
+    opacity var(--app-dur-fast) var(--app-ease-out),
+    transform var(--app-dur-fast) var(--app-ease-out);
 }
 
-.group:hover > .atlas-tooltip,
-.group:focus-visible > .atlas-tooltip {
+.group:hover > .app-tooltip,
+.group:focus-visible > .app-tooltip {
   opacity: 1;
   transform: none;
 }
 
-/* ---- Toasts (atlas-ui.js) ----------------------------------------------- */
+/* ---- Toasts (app-ui.js) ----------------------------------------------- */
 
-.atlas-toast-viewport {
+.app-toast-viewport {
   position: fixed;
   right: 14px;
   bottom: 52px;
   z-index: 2100;
   display: flex;
   flex-direction: column-reverse;
-  transition: right var(--atlas-dur-slow) var(--atlas-ease-out);
+  transition: right var(--app-dur-slow) var(--app-ease-out);
   width: min(380px, calc(100vw - 28px));
   pointer-events: none;
 }
 
 /* Keep toasts beside the downloads popover instead of on top of it. */
-html.atlas-downloads-open .atlas-toast-viewport {
+html.app-downloads-open .app-toast-viewport {
   right: calc(min(520px, 100vw - 1rem) + 24px);
 }
 
-.atlas-toast {
+.app-toast {
   position: relative;
   display: flex;
   flex: none;
@@ -680,52 +680,52 @@ html.atlas-downloads-open .atlas-toast-viewport {
   pointer-events: auto;
   font-size: 12px;
   line-height: 1.45;
-  animation: atlas-toast-in var(--atlas-dur-slow) var(--atlas-ease-spring) both;
+  animation: app-toast-in var(--app-dur-slow) var(--app-ease-spring) both;
 }
 
-.atlas-toast[data-type="success"] { border-left-color: #34d399; }
-.atlas-toast[data-type="error"] { border-left-color: #f87171; }
-.atlas-toast[data-type="warning"] { border-left-color: #fbbf24; }
-.atlas-toast[data-type="loading"] { border-left-color: #66c0f4; }
+.app-toast[data-type="success"] { border-left-color: #34d399; }
+.app-toast[data-type="error"] { border-left-color: #f87171; }
+.app-toast[data-type="warning"] { border-left-color: #fbbf24; }
+.app-toast[data-type="loading"] { border-left-color: #66c0f4; }
 
-.atlas-toast__icon {
+.app-toast__icon {
   flex: none;
   font-size: 20px !important;
   line-height: 1;
   margin-top: 1px;
 }
 
-.atlas-toast[data-type="success"] .atlas-toast__icon { color: #6ee7b7; }
-.atlas-toast[data-type="error"] .atlas-toast__icon { color: #fca5a5; }
-.atlas-toast[data-type="warning"] .atlas-toast__icon { color: #fcd34d; }
-.atlas-toast[data-type="info"] .atlas-toast__icon,
-.atlas-toast[data-type="loading"] .atlas-toast__icon { color: #66c0f4; }
+.app-toast[data-type="success"] .app-toast__icon { color: #6ee7b7; }
+.app-toast[data-type="error"] .app-toast__icon { color: #fca5a5; }
+.app-toast[data-type="warning"] .app-toast__icon { color: #fcd34d; }
+.app-toast[data-type="info"] .app-toast__icon,
+.app-toast[data-type="loading"] .app-toast__icon { color: #66c0f4; }
 
-.atlas-toast__body {
+.app-toast__body {
   flex: 1;
   min-width: 0;
 }
 
-.atlas-toast__title {
+.app-toast__title {
   font-weight: 700;
   color: #ffffff;
   font-size: 12.5px;
 }
 
-.atlas-toast__message {
+.app-toast__message {
   margin-top: 2px;
   color: rgba(199, 213, 224, 0.82);
   white-space: pre-line;
   word-break: break-word;
 }
 
-.atlas-toast__actions {
+.app-toast__actions {
   display: flex;
   gap: 6px;
   margin-top: 8px;
 }
 
-.atlas-toast__action {
+.app-toast__action {
   border: 1px solid rgba(102, 192, 244, 0.45);
   background: rgba(102, 192, 244, 0.14);
   color: #e6f4ff;
@@ -735,11 +735,11 @@ html.atlas-downloads-open .atlas-toast-viewport {
   cursor: pointer;
 }
 
-.atlas-toast__action:hover {
+.app-toast__action:hover {
   background: rgba(102, 192, 244, 0.28);
 }
 
-.atlas-toast__close {
+.app-toast__close {
   flex: none;
   display: flex;
   align-items: center;
@@ -753,12 +753,12 @@ html.atlas-downloads-open .atlas-toast-viewport {
   cursor: pointer;
 }
 
-.atlas-toast__close:hover {
+.app-toast__close:hover {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.08);
 }
 
-.atlas-toast__timer {
+.app-toast__timer {
   position: absolute;
   left: 0;
   right: 0;
@@ -767,37 +767,37 @@ html.atlas-downloads-open .atlas-toast-viewport {
   background: currentColor;
   opacity: 0.35;
   transform-origin: left center;
-  animation-name: atlas-toast-timer;
+  animation-name: app-toast-timer;
   animation-timing-function: linear;
   animation-fill-mode: both;
 }
 
-.atlas-toast:hover .atlas-toast__timer {
+.app-toast:hover .app-toast__timer {
   animation-play-state: paused;
 }
 
-.atlas-toast[data-type="success"] .atlas-toast__timer { color: #34d399; }
-.atlas-toast[data-type="error"] .atlas-toast__timer { color: #f87171; }
-.atlas-toast[data-type="warning"] .atlas-toast__timer { color: #fbbf24; }
-.atlas-toast[data-type="info"] .atlas-toast__timer { color: #66c0f4; }
+.app-toast[data-type="success"] .app-toast__timer { color: #34d399; }
+.app-toast[data-type="error"] .app-toast__timer { color: #f87171; }
+.app-toast[data-type="warning"] .app-toast__timer { color: #fbbf24; }
+.app-toast[data-type="info"] .app-toast__timer { color: #66c0f4; }
 
-.atlas-toast--bump {
-  animation: atlas-shake var(--atlas-dur-base) var(--atlas-ease-out);
+.app-toast--bump {
+  animation: app-shake var(--app-dur-base) var(--app-ease-out);
 }
 
-@keyframes atlas-toast-in {
+@keyframes app-toast-in {
   from { opacity: 0; transform: translate3d(110%, 0, 0) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 
-@keyframes atlas-toast-timer {
+@keyframes app-toast-timer {
   from { transform: scaleX(1); }
   to { transform: scaleX(0); }
 }
 
-/* ---- Confirm dialog (atlas-ui.js) --------------------------------------- */
+/* ---- Confirm dialog (app-ui.js) --------------------------------------- */
 
-.atlas-confirm-overlay {
+.app-confirm-overlay {
   position: fixed;
   inset: 0;
   z-index: 2050;
@@ -809,7 +809,7 @@ html.atlas-downloads-open .atlas-toast-viewport {
   backdrop-filter: blur(8px);
 }
 
-.atlas-confirm {
+.app-confirm {
   width: min(460px, 100%);
   color: #c7d5e0;
   background: linear-gradient(180deg, #1b2838 0%, #16202d 100%);
@@ -818,14 +818,14 @@ html.atlas-downloads-open .atlas-toast-viewport {
   outline: none;
 }
 
-.atlas-confirm__header {
+.app-confirm__header {
   padding: 18px 20px 6px;
   font-size: 16px;
   font-weight: 700;
   color: #ffffff;
 }
 
-.atlas-confirm__message {
+.app-confirm__message {
   padding: 0 20px 18px;
   font-size: 13px;
   line-height: 1.55;
@@ -833,7 +833,7 @@ html.atlas-downloads-open .atlas-toast-viewport {
   white-space: pre-line;
 }
 
-.atlas-confirm__footer {
+.app-confirm__footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -842,7 +842,7 @@ html.atlas-downloads-open .atlas-toast-viewport {
   background: rgba(0, 0, 0, 0.15);
 }
 
-.atlas-confirm__btn {
+.app-confirm__btn {
   padding: 7px 16px;
   font-size: 13px;
   font-weight: 600;
@@ -852,33 +852,33 @@ html.atlas-downloads-open .atlas-toast-viewport {
   cursor: pointer;
 }
 
-.atlas-confirm__btn:hover {
+.app-confirm__btn:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.atlas-confirm__btn--primary {
+.app-confirm__btn--primary {
   border-color: rgba(102, 192, 244, 0.6);
   background: #66c0f4;
   color: #0e141b;
 }
 
-.atlas-confirm__btn--primary:hover {
+.app-confirm__btn--primary:hover {
   background: #8fd2f8;
 }
 
-.atlas-confirm__btn--danger {
+.app-confirm__btn--danger {
   border-color: rgba(248, 113, 113, 0.6);
   background: #dc2626;
   color: #ffffff;
 }
 
-.atlas-confirm__btn--danger:hover {
+.app-confirm__btn--danger:hover {
   background: #ef4444;
 }
 
 /* ---- Boot splash / fatal screen ----------------------------------------- */
 
-.atlas-boot {
+.app-boot {
   position: fixed;
   inset: 0;
   z-index: 3000;
@@ -896,50 +896,50 @@ html.atlas-downloads-open .atlas-toast-viewport {
   font-family: Manrope, "Segoe UI", Arial, sans-serif;
   -webkit-app-region: drag;
   transition:
-    opacity var(--atlas-dur-slow) var(--atlas-ease-out),
-    transform var(--atlas-dur-slow) var(--atlas-ease-out),
-    visibility 0s linear var(--atlas-dur-slow);
+    opacity var(--app-dur-slow) var(--app-ease-out),
+    transform var(--app-dur-slow) var(--app-ease-out),
+    visibility 0s linear var(--app-dur-slow);
 }
 
-.atlas-boot[data-state="done"] {
+.app-boot[data-state="done"] {
   opacity: 0;
   transform: scale(1.02);
   visibility: hidden;
   pointer-events: none;
 }
 
-.atlas-boot__logo {
+.app-boot__logo {
   width: 72px;
   height: 72px;
   object-fit: contain;
-  animation: atlas-dialog-in 700ms var(--atlas-ease-out) both;
+  animation: app-dialog-in 700ms var(--app-ease-out) both;
   filter: drop-shadow(0 0 24px rgba(102, 192, 244, 0.25));
 }
 
-.atlas-boot__title {
+.app-boot__title {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.24em;
   text-transform: uppercase;
   color: #ffffff;
-  animation: atlas-rise-in 650ms var(--atlas-ease-out) 120ms both;
+  animation: app-rise-in 650ms var(--app-ease-out) 120ms both;
 }
 
-.atlas-boot__bar {
+.app-boot__bar {
   width: 220px;
   height: 3px;
   background: rgba(255, 255, 255, 0.08);
-  animation: atlas-fade-in 500ms var(--atlas-ease-out) 200ms both;
+  animation: app-fade-in 500ms var(--app-ease-out) 200ms both;
 }
 
-.atlas-boot__status {
+.app-boot__status {
   min-height: 18px;
   font-size: 12px;
   color: rgba(199, 213, 224, 0.6);
-  animation: atlas-fade-in 500ms var(--atlas-ease-out) 260ms both;
+  animation: app-fade-in 500ms var(--app-ease-out) 260ms both;
 }
 
-.atlas-boot__error {
+.app-boot__error {
   display: none;
   width: min(560px, calc(100vw - 48px));
   padding: 16px 18px;
@@ -949,18 +949,18 @@ html.atlas-downloads-open .atlas-toast-viewport {
   font-size: 12px;
   line-height: 1.55;
   -webkit-app-region: no-drag;
-  animation: atlas-dialog-in 500ms var(--atlas-ease-out) both;
+  animation: app-dialog-in 500ms var(--app-ease-out) both;
 }
 
-.atlas-boot[data-state="error"] .atlas-boot__error {
+.app-boot[data-state="error"] .app-boot__error {
   display: block;
 }
 
-.atlas-boot[data-state="error"] .atlas-boot__bar {
+.app-boot[data-state="error"] .app-boot__bar {
   display: none;
 }
 
-.atlas-boot__error pre {
+.app-boot__error pre {
   max-height: 160px;
   margin: 10px 0 0;
   overflow: auto;
@@ -971,13 +971,13 @@ html.atlas-downloads-open .atlas-toast-viewport {
   user-select: text;
 }
 
-.atlas-boot__actions {
+.app-boot__actions {
   display: flex;
   gap: 8px;
   margin-top: 12px;
 }
 
-.atlas-boot__actions button {
+.app-boot__actions button {
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 600;
@@ -987,11 +987,11 @@ html.atlas-downloads-open .atlas-toast-viewport {
   cursor: pointer;
 }
 
-.atlas-boot__actions button:hover {
+.app-boot__actions button:hover {
   background: rgba(255, 255, 255, 0.14);
 }
 
-.atlas-boot__actions button[data-primary] {
+.app-boot__actions button[data-primary] {
   border-color: rgba(102, 192, 244, 0.6);
   background: #66c0f4;
   color: #0e141b;
@@ -999,7 +999,7 @@ html.atlas-downloads-open .atlas-toast-viewport {
 
 /* ---- Error boundary ----------------------------------------------------- */
 
-.atlas-crash {
+.app-crash {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1011,10 +1011,10 @@ html.atlas-downloads-open .atlas-toast-viewport {
   border: 1px solid rgba(248, 113, 113, 0.35);
   background: rgba(127, 29, 29, 0.14);
   color: #fecaca;
-  animation: atlas-rise-in var(--atlas-dur-base) var(--atlas-ease-out) both;
+  animation: app-rise-in var(--app-dur-base) var(--app-ease-out) both;
 }
 
-.atlas-crash--screen {
+.app-crash--screen {
   position: fixed;
   inset: 0;
   margin: 0;
@@ -1024,17 +1024,17 @@ html.atlas-downloads-open .atlas-toast-viewport {
   -webkit-app-region: drag;
 }
 
-.atlas-crash--screen button {
+.app-crash--screen button {
   -webkit-app-region: no-drag;
 }
 
-.atlas-crash__title {
+.app-crash__title {
   font-size: 15px;
   font-weight: 700;
   color: #ffffff;
 }
 
-.atlas-crash__message {
+.app-crash__message {
   max-width: 560px;
   font-size: 12px;
   color: rgba(254, 202, 202, 0.85);
@@ -1042,13 +1042,13 @@ html.atlas-downloads-open .atlas-toast-viewport {
   user-select: text;
 }
 
-.atlas-crash__actions {
+.app-crash__actions {
   display: flex;
   gap: 8px;
   margin-top: 6px;
 }
 
-.atlas-crash__actions button {
+.app-crash__actions button {
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 600;
@@ -1058,11 +1058,11 @@ html.atlas-downloads-open .atlas-toast-viewport {
   cursor: pointer;
 }
 
-.atlas-crash__actions button:hover {
+.app-crash__actions button:hover {
   background: rgba(255, 255, 255, 0.14);
 }
 
-.atlas-crash__actions button[data-primary] {
+.app-crash__actions button[data-primary] {
   border-color: rgba(102, 192, 244, 0.6);
   background: #66c0f4;
   color: #0e141b;
