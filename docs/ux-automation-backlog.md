@@ -42,7 +42,7 @@
 9. **Периодическая синхронизация сохранений** (например, каждые 30 мин), а не только после запуска игры из приложения.
 10. **«Установить и восстановить»** из каталога бэкапов для игр, которых нет в библиотеке.
 11. **Хосты с Turnstile/Adscore** (Mixdrop, Krakenfiles, DataNodes шаг 2 …) — только с человеком; можно хотя бы заранее помечать такие зеркала как «ручные» в выборе.
-12. **Удаление мёртвых ключей конфига** (`Interface.atlasStartup`, `gameStartup`, `Performance.maxHeapSize`, `Metadata.downloadPreviews`) и старого окна `settings.html`.
+12. **Удаление мёртвых ключей конфига** (`gameStartup`, `Performance.maxHeapSize`, `Metadata.downloadPreviews`) и старого окна `settings.html`.
 13. **Ручной smoke на Windows**: трей в упакованной сборке, уведомления при Focus Assist, autostart с `--hidden`, авто‑установка обновления при выходе.
 
 ## История изменений

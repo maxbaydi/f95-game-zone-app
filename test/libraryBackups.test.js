@@ -49,14 +49,14 @@ async function countRows(db, table) {
 
 async function seedLibrary(db) {
   const now = new Date().toISOString();
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
+  await runAsync(db, `INSERT INTO f95_catalog (f95_id, title, creator, engine, version, site_url) VALUES (555, 'Sample Game', 'Sample Dev', 'renpy', '0.9', 'https://f95zone.to/threads/555/')`);
   await runAsync(db, `INSERT INTO scan_sources (path, is_enabled, created_at, updated_at) VALUES ('C:\\Games', 1, ?, ?)`, [now, now]);
   const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime, is_favorite) VALUES ('Sample Game', 'Sample Dev', 'renpy', 0, 0, 1)`);
   const recordId = game.lastID;
   await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Sample', 'C:\\Games\\Sample\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
-  await runAsync(db, `INSERT INTO atlas_mappings (record_id, atlas_id) VALUES (?, 100)`, [recordId]);
+  await runAsync(db, `INSERT INTO f95_zone_mappings (record_id, f95_id, site_url) VALUES (?, 555, 'https://f95zone.to/threads/555/')`, [recordId]);
   await runAsync(db, `INSERT INTO banners (record_id, path, type) VALUES (?, 'cache/images/${recordId}/banner_mc.webp', 'small')`, [recordId]);
-  await runAsync(db, `INSERT INTO save_sync_state (record_id, cloud_identity, sync_status, updated_at) VALUES (?, 'atlas-100', 'idle', ?)`, [recordId, now]);
+  await runAsync(db, `INSERT INTO save_sync_state (record_id, cloud_identity, sync_status, updated_at) VALUES (?, 'f95-555', 'idle', ?)`, [recordId, now]);
   return recordId;
 }
 
@@ -112,14 +112,14 @@ test("restoreLibraryBackup brings the library back after a reset and keeps a saf
   assert.notEqual(result.safetyBackupPath, backupPath);
   assert.equal(result.restored.games, 1);
   assert.equal(result.restored.versions, 1);
-  assert.equal(result.restored.atlas_mappings, 1);
+  assert.equal(result.restored.f95_zone_mappings, 1);
   assert.equal(result.restored.banners, 1);
   assert.equal(result.restored.save_sync_state, 1);
   assert.deepEqual(result.recordIds, [recordId]);
 
   const game = await getAsync(db, "SELECT title, is_favorite FROM games WHERE record_id = ?", [recordId]);
   assert.deepEqual(game, { title: "Sample Game", is_favorite: 1 });
-  assert.equal(await countRows(db, "atlas_data"), 1, "catalog untouched");
+  assert.equal(await countRows(db, "f95_catalog"), 1, "catalog untouched");
   assert.equal(await countRows(db, "scan_sources"), 1, "scan folders untouched");
 
   // The database is usable afterwards (the backup file is detached again).
@@ -151,7 +151,7 @@ test("restoreLibraryBackup copies only the columns both schemas share", async ()
   assert.equal(result.success, true, JSON.stringify(result));
   assert.equal(result.restored.games, 1);
   assert.equal(result.restored.versions, 1);
-  assert.equal(result.restored.atlas_mappings, 0, "tables missing in the backup restore nothing");
+  assert.equal(result.restored.f95_zone_mappings, 0, "tables missing in the backup restore nothing");
   const game = await getAsync(db, "SELECT record_id, title, is_favorite FROM games");
   assert.deepEqual(game, { record_id: 42, title: "Legacy Game", is_favorite: 0 });
 

@@ -148,8 +148,10 @@
     startScanSources: p({ success: false, error: "Desktop only" }),
     cancelScan: p({ success: true, cancelled: true }),
     scanLibrary: p({ success: false, error: "Desktop only", cancelled: false }),
-    searchAtlasByF95Id: () => Promise.resolve(null),
-    searchAtlas: () => Promise.resolve(null),
+    searchCatalog: () => Promise.resolve([]),
+    getCatalogEntry: () => Promise.resolve(null),
+    getCatalogSyncState: () =>
+      Promise.resolve({ success: true, state: { fullDone: true, entryCount: 0, running: false, lastSummary: null } }),
     searchSiteCatalog: () =>
       Promise.resolve({ results: [], total: 0, limit: 50, limited: false }),
     getF95AuthStatus: () =>
@@ -210,9 +212,7 @@
     refreshLibraryPreviews: p({ success: false, error: "Desktop only" }),
     setGameFavorite: p({ success: false, error: "Desktop only" }),
     removeLibraryGame: p({ success: false, error: "Desktop only" }),
-    addAtlasMapping: p({}),
     findF95Id: () => Promise.resolve(null),
-    getAtlasData: () => Promise.resolve(null),
     checkRecordExist: p({ exists: false }),
     importGames: p({ success: false }),
     log: pn,
@@ -659,7 +659,6 @@
       });
       return {
         record_id: spec.record_id,
-        atlas_id: 5000 + spec.record_id,
         title: spec.title,
         creator: spec.creator,
         engine: spec.engine,
@@ -679,8 +678,8 @@
         likes: 400 + spec.record_id * 91,
         f95_tags: spec.f95_tags,
         rating: spec.rating,
-        atlas_title: spec.title,
-        atlas_creator: spec.creator,
+        catalog_title: spec.title,
+        catalog_creator: spec.creator,
         status: spec.status,
         category: "Game",
         censored: "No",
@@ -693,7 +692,7 @@
         voice: "No",
         short_name: slug(spec.title),
         tags: spec.f95_tags,
-        atlasLatestVersion: latestVersion,
+        catalogLatestVersion: latestVersion,
         liveVersion: spec.liveVersion || "",
         liveCheckedAt: spec.liveVersion ? minutesAgo(spec.liveCheckedMinutesAgo || 120) : "",
         latestVersion,

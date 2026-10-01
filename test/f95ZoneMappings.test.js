@@ -51,10 +51,10 @@ test("f95 zone mappings resolve site urls for library stubs without installed fi
   await runAsync(
     db,
     `
-      INSERT INTO f95_zone_data (f95_id, atlas_id, site_url, banner_url, views, likes, tags, rating, screens, replies)
-      VALUES (?, ?, ?, '', '', '', '', '', '', '')
+      INSERT INTO f95_catalog (f95_id, title, site_url)
+      VALUES (?, ?, ?)
     `,
-    [123, null, "https://f95zone.to/threads/example-thread.123/"],
+    [123, "Mapped Thread", "https://f95zone.to/threads/example-thread.123/"],
   );
 
   const mappedRecordId = await addGame({

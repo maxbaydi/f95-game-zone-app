@@ -47,19 +47,19 @@ function normalizePathKey(value) {
  *   creator?: string,
  *   engine?: string,
  *   version?: string
- * } | null | undefined} atlasData
+ * } | null | undefined} catalogData
  */
-function mergeImportedGameMetadata(game, atlasData) {
+function mergeImportedGameMetadata(game, catalogData) {
   const resolvedTitle =
-    normalizeText(atlasData?.title) || normalizeText(game.title);
+    normalizeText(catalogData?.title) || normalizeText(game.title);
   const resolvedCreator =
-    normalizeText(atlasData?.creator) ||
+    normalizeText(catalogData?.creator) ||
     normalizeText(game.creator) ||
     "Unknown";
   const resolvedEngine =
-    normalizeText(atlasData?.engine) || normalizeText(game.engine) || "Unknown";
+    normalizeText(catalogData?.engine) || normalizeText(game.engine) || "Unknown";
   const localVersion = normalizeText(game.version);
-  const atlasVersion = normalizeText(atlasData?.version);
+  const catalogVersion = normalizeText(catalogData?.version);
 
   return {
     ...game,
@@ -67,8 +67,8 @@ function mergeImportedGameMetadata(game, atlasData) {
     creator: resolvedCreator,
     engine: resolvedEngine,
     version:
-      isUnknownVersion(localVersion) && atlasVersion
-        ? atlasVersion
+      isUnknownVersion(localVersion) && catalogVersion
+        ? catalogVersion
         : localVersion || "Unknown",
   };
 }
@@ -94,7 +94,7 @@ function mergeImportedGameMetadata(game, atlasData) {
  *   creator?: string,
  *   engine?: string,
  *   version?: string,
- *   atlasId?: string | number,
+ *   f95Id?: string | number,
  *   autoMatched?: boolean,
  *   folder?: string
  * }} scannedGame
@@ -106,9 +106,9 @@ function mergeRefreshedGameMetadata(existingGame, scannedGame) {
     return { ...scanned };
   }
 
-  // A catalog id means the metadata was enriched from the catalog, either by a
+  // A thread id means the metadata was enriched from the catalog, either by a
   // confident automatic match or by the user picking the entry in the importer.
-  const confident = Boolean(scanned.atlasId) || Boolean(scanned.autoMatched);
+  const confident = Boolean(scanned.f95Id) || Boolean(scanned.autoMatched);
 
   /**
    * @param {string | undefined} scannedValue

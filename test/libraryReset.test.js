@@ -48,9 +48,8 @@ async function countRows(db, table) {
 
 async function seedLibrary(db, appPaths) {
   const now = new Date().toISOString();
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
-  await runAsync(db, `INSERT INTO f95_zone_data (f95_id, atlas_id, site_url) VALUES (555, 100, 'https://f95zone.to/threads/app-game.555/')`);
-  await runAsync(db, `INSERT INTO updates (update_time, processed_time, md5) VALUES (1, 1, 'abc')`);
+  await runAsync(db, `INSERT INTO f95_catalog (f95_id, title, creator, engine, version, site_url) VALUES (555, 'Sample Game', 'Sample Dev', 'renpy', '0.9', 'https://f95zone.to/threads/app-game.555/')`);
+  await runAsync(db, `INSERT INTO f95_catalog_sync (key, value) VALUES ('fullDone', '1')`);
   await runAsync(db, `INSERT INTO scan_sources (path, is_enabled, created_at, updated_at) VALUES ('C:\\Games', 1, ?, ?)`, [now, now]);
   await runAsync(db, `INSERT INTO emulators (extension, program_path, parameters) VALUES ('swf', 'C:\\flash.exe', '')`);
   await runAsync(db, `INSERT INTO tags (tag_id, tag) VALUES (1, 'fantasy')`);
@@ -58,7 +57,6 @@ async function seedLibrary(db, appPaths) {
   const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime) VALUES ('Sample Game', 'Sample Dev', 'renpy', 0, 0)`);
   const recordId = game.lastID;
   await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Sample', 'C:\\Games\\Sample\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
-  await runAsync(db, `INSERT INTO atlas_mappings (record_id, atlas_id) VALUES (?, 100)`, [recordId]);
   await runAsync(db, `INSERT INTO f95_zone_mappings (record_id, f95_id, site_url) VALUES (?, 555, 'https://f95zone.to/threads/app-game.555/')`, [recordId]);
   await runAsync(db, `INSERT INTO tag_mappings (record_id, tag_id) VALUES (?, 1)`, [recordId]);
   await runAsync(db, `INSERT INTO banners (record_id, path, type) VALUES (?, 'cache/images/${recordId}/banner_mc.webp', 'small')`, [recordId]);
@@ -109,7 +107,7 @@ test("resetLibraryIndex clears library tables, keeps catalog data and backs the 
   }
   assert.equal(await countRows(db, "cloud_library_delete_queue"), 1);
   assert.equal(await countRows(db, "scan_sources"), 1);
-  assert.equal(await countRows(db, "atlas_data"), 1);
+  assert.equal(await countRows(db, "f95_catalog"), 1);
 
   assert.equal(fs.existsSync(imageDir), false, "image folder of the record was removed");
   assert.equal(fs.existsSync(orphanImageDir), false, "leftover image folders go too (ids restart at 1)");

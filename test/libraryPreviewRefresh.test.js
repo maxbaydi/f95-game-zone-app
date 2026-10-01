@@ -6,26 +6,26 @@ const {
   shouldRefreshCachedPreviews,
 } = require("../src/main/libraryPreviewRefresh");
 
-test("buildLibraryPreviewRefreshTargets keeps only installed games with valid atlas mappings", () => {
+test("buildLibraryPreviewRefreshTargets keeps only installed games with a catalog thread", () => {
   const result = buildLibraryPreviewRefreshTargets([
     {
       record_id: 101,
-      atlas_id: 202,
+      f95_id: 202,
       title: "Alpha",
     },
     {
       record_id: 102,
-      atlas_id: null,
+      f95_id: null,
       title: "No catalog",
     },
     {
       record_id: 0,
-      atlas_id: 303,
+      f95_id: 303,
       title: "Bad Record",
     },
     {
       record_id: 103,
-      atlas_id: "404",
+      f95_id: "404",
       displayTitle: "Display Title",
     },
   ]);
@@ -33,12 +33,12 @@ test("buildLibraryPreviewRefreshTargets keeps only installed games with valid at
   assert.deepEqual(result, [
     {
       recordId: 101,
-      atlasId: 202,
+      f95Id: 202,
       title: "Alpha",
     },
     {
       recordId: 103,
-      atlasId: 404,
+      f95Id: 404,
       title: "Display Title",
     },
   ]);

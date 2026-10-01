@@ -92,12 +92,11 @@ const Importer = () => {
         );
         if (selected) {
           const parts = selected.value.split(" | ");
-          game.atlasId = parts[0];
-          game.f95Id = parts[1] || "";
-          game.title = parts[2];
-          game.creator = parts[3];
-          window.electronAPI.getAtlasData(game.atlasId).then((atlasData) => {
-            game.engine = atlasData.engine || "Unknown";
+          game.f95Id = parts[0] || "";
+          game.title = parts[1];
+          game.creator = parts[2];
+          window.electronAPI.getCatalogEntry(game.f95Id).then((catalogData) => {
+            game.engine = catalogData?.engine || "Unknown";
             setGamesList((prev) => [...prev, game]);
             console.log(`Updated game on scan: ${JSON.stringify(game)}`);
             window.electronAPI.log(
@@ -125,14 +124,13 @@ const Importer = () => {
           );
           if (selected) {
             const parts = selected.value.split(" | ");
-            game.atlasId = parts[0];
-            game.f95Id = parts[1] || "";
-            game.title = parts[2];
-            game.creator = parts[3];
+            game.f95Id = parts[0] || "";
+            game.title = parts[1];
+            game.creator = parts[2];
             return window.electronAPI
-              .getAtlasData(game.atlasId)
-              .then((atlasData) => {
-                game.engine = atlasData.engine || "Unknown";
+              .getCatalogEntry(game.f95Id)
+              .then((catalogData) => {
+                game.engine = catalogData?.engine || "Unknown";
                 return game;
               });
           }
@@ -381,14 +379,13 @@ const Importer = () => {
         const selected = game.results.find((r) => r.key === value);
         if (selected && value !== "match") {
           const parts = selected.value.split(" | ");
-          updatedGame.atlasId = parts[0];
-          updatedGame.f95Id = parts[1] || "";
-          updatedGame.title = parts[2];
-          updatedGame.creator = parts[3];
+          updatedGame.f95Id = parts[0] || "";
+          updatedGame.title = parts[1];
+          updatedGame.creator = parts[2];
           return window.electronAPI
-            .getAtlasData(updatedGame.atlasId)
-            .then((atlasData) => {
-              updatedGame.engine = atlasData.engine || "Unknown";
+            .getCatalogEntry(updatedGame.f95Id)
+            .then((catalogData) => {
+              updatedGame.engine = catalogData?.engine || "Unknown";
               console.log(
                 `Updated game at index ${index}: ${JSON.stringify(updatedGame)}`,
               );
@@ -431,7 +428,7 @@ const Importer = () => {
 
       // ─── Skip if already has a good match ────────────────────────────────
       if (
-        game.atlasId &&
+        game.f95Id &&
         game.results?.length === 1 &&
         game.results[0]?.key === "match" &&
         game.resultVisibility === "visible"
@@ -461,10 +458,11 @@ const Importer = () => {
         // Safe f95Id handling (prevents "trim is not a function")
         const f95IdStr = String(game.f95Id || "").trim();
         if (f95IdStr) {
-          data = await window.electronAPI.searchAtlasByF95Id(f95IdStr);
+          const entry = await window.electronAPI.getCatalogEntry(f95IdStr);
+          data = entry ? [entry] : [];
           console.log("Searching by f95_id");
         } else {
-          data = await window.electronAPI.searchAtlas(game.title, game.creator);
+          data = await window.electronAPI.searchCatalog(game.title, game.creator);
         }
       } catch (searchErr) {
         console.error(`Search failed for game ${i + 1}:`, searchErr);
@@ -480,8 +478,7 @@ const Importer = () => {
       if (data.length === 1) {
         game = {
           ...game,
-          atlasId: String(data[0].atlas_id),
-          f95Id: data[0].f95_id || "",
+          f95Id: String(data[0].f95Id || ""),
           title: data[0].title,
           creator: data[0].creator,
           engine: data[0].engine || game.engine || "Unknown",
@@ -491,8 +488,8 @@ const Importer = () => {
         };
       } else if (data.length > 1) {
         const results = data.map((d) => ({
-          key: String(d.atlas_id),
-          value: `${d.atlas_id} | ${d.f95_id || ""} | ${d.title} | ${d.creator}`,
+          key: String(d.f95Id),
+          value: `${d.f95Id} | ${d.title} | ${d.creator}`,
         }));
 
         const current = game.resultSelectedValue;
@@ -504,7 +501,6 @@ const Importer = () => {
           results,
           resultSelectedValue: selectedKey,
           resultVisibility: "visible",
-          atlasId: valid ? game.atlasId : "",
           f95Id: valid ? game.f95Id : "",
         };
 
@@ -514,25 +510,24 @@ const Importer = () => {
 
           game = {
             ...game,
-            atlasId: parts[0],
-            f95Id: parts[1] || "",
-            title: parts[2],
-            creator: parts[3],
+            f95Id: parts[0] || "",
+            title: parts[1],
+            creator: parts[2],
           };
 
           try {
-            const atlasData = await window.electronAPI.getAtlasData(parts[0]);
+            const catalogData = await window.electronAPI.getCatalogEntry(parts[0]);
             game = {
               ...game,
-              engine: atlasData.engine || game.engine || "Unknown",
+              engine: catalogData?.engine || game.engine || "Unknown",
             };
-          } catch (atlasErr) {
+          } catch (catalogErr) {
             console.error(
-              `Failed to fetch catalog data for game ${i + 1} (catalog id ${parts[0]}):`,
-              atlasErr,
+              `Failed to fetch catalog data for game ${i + 1} (thread ${parts[0]}):`,
+              catalogErr,
             );
             window.electronAPI.log(
-              `Failed to fetch catalog data for game ${i + 1}: ${atlasErr.message}`,
+              `Failed to fetch catalog data for game ${i + 1}: ${catalogErr.message}`,
             );
             // Continue without engine update
           }
@@ -540,7 +535,6 @@ const Importer = () => {
       } else {
         game = {
           ...game,
-          atlasId: "",
           f95Id: "",
           results: [],
           resultSelectedValue: "",
@@ -1059,9 +1053,6 @@ const Importer = () => {
                 <thead>
                   <tr className="bg-secondary sticky top-0">
                     <th className="border border-border p-1 min-w-[80px]">
-                      Catalog ID
-                    </th>
-                    <th className="border border-border p-1 min-w-[80px]">
                       F95 ID
                     </th>
                     <th className="border border-border p-1 min-w-[200px]">
@@ -1109,9 +1100,6 @@ const Importer = () => {
                             game.results[0].key !== "match" && (
                             <i className="fa-solid fa-triangle-exclamation text-yellow-400 mr-1"></i>
                           )}
-                          {game.atlasId}
-                        </td>
-                        <td className="border border-border p-1 min-w-[100px]">
                           <input
                             value={game.f95Id}
                             onChange={(e) =>

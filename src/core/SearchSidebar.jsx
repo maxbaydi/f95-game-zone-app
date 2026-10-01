@@ -33,8 +33,6 @@ const SearchSidebar = ({
     categories: [],
     engines: [],
     statuses: [],
-    censored: [],
-    languages: [],
     tags: [],
   });
 
@@ -429,56 +427,6 @@ const SearchSidebar = ({
                     className="-webkit-app-region-no-drag"
                   />
                   <span>{status}</span>
-                </label>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Language */}
-        <div className="mb-6 border-b border-border pb-4">
-          <h4 className="font-bold mb-3">Language</h4>
-          <div className="max-h-40 overflow-y-auto border border-border p-2 rounded bg-tertiary">
-            {options.languages.length === 0 ? (
-              <p className="text-sm text-gray-500">No languages found</p>
-            ) : (
-              options.languages.map((language) => (
-                <label
-                  key={language}
-                  className="flex items-center space-x-2 py-1 text-sm block hover:bg-highlight px-1 rounded cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedFilters.language.includes(language)}
-                    onChange={() => handleCheckbox("language", language)}
-                    className="-webkit-app-region-no-drag"
-                  />
-                  <span>{language}</span>
-                </label>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Censored */}
-        <div className="mb-6 border-b border-border pb-4">
-          <h4 className="font-bold mb-3">Censorship</h4>
-          <div className="max-h-40 overflow-y-auto border border-border p-2 rounded bg-tertiary">
-            {options.censored.length === 0 ? (
-              <p className="text-sm text-gray-500">No censorship flags found</p>
-            ) : (
-              options.censored.map((value) => (
-                <label
-                  key={value}
-                  className="flex items-center space-x-2 py-1 text-sm block hover:bg-highlight px-1 rounded cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedFilters.censored.includes(value)}
-                    onChange={() => handleCheckbox("censored", value)}
-                    className="-webkit-app-region-no-drag"
-                  />
-                  <span>{value}</span>
                 </label>
               ))
             )}

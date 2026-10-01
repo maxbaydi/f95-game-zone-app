@@ -147,7 +147,7 @@ function isKnownInstallFolder(games, gamePath) {
  *   updateVersionLocation: (recordId: number, version: string, gamePath: string, execPath: string) => Promise<number>,
  *   updateVersionExecutable: (recordId: number, version: string, execPath: string) => Promise<number>,
  *   catalogDeps: Parameters<typeof linkGameToCatalog>[0]["deps"],
- *   downloadImages: (recordId: number, atlasId: number, onProgress: Function, banners: boolean, previews: boolean, previewLimit: any, videos: boolean) => Promise<unknown>,
+ *   downloadImages: (recordId: number, f95Id: number, onProgress: Function, banners: boolean, previews: boolean, previewLimit: any, videos: boolean) => Promise<unknown>,
  *   previewLimit: any,
  *   refreshSaveProfiles: (recordId: number) => Promise<unknown>,
  *   broadcastGamesLibrarySynced: (payload: any) => void,
@@ -421,13 +421,13 @@ function registerLibraryMaintenanceIpc(deps) {
     const wanted = new Set(recordIds);
     const games = await deps.getGames(deps.appPaths, 0, null);
     const targets = games.filter(
-      (game) => wanted.has(Number(game?.record_id)) && parsePositiveInteger(game?.atlas_id),
+      (game) => wanted.has(Number(game?.record_id)) && parsePositiveInteger(game?.f95_id),
     );
     for (const game of targets) {
       try {
         await deps.downloadImages(
           Number(game.record_id),
-          Number(game.atlas_id),
+          Number(game.f95_id),
           () => {},
           true,
           false,
@@ -493,8 +493,8 @@ function registerLibraryMaintenanceIpc(deps) {
 
   ipcMain.handle("link-game-to-catalog", async (_event, payload) => {
     const recordId = parsePositiveInteger(payload?.recordId);
-    const atlasId = parsePositiveInteger(payload?.atlasId);
-    if (!recordId || !atlasId) {
+    const f95Id = parsePositiveInteger(payload?.f95Id);
+    if (!recordId || !f95Id) {
       return invalidInput("Choose a game from the catalog list.");
     }
 
@@ -506,7 +506,7 @@ function registerLibraryMaintenanceIpc(deps) {
 
       const result = await linkGameToCatalog({
         recordId,
-        atlasId,
+        f95Id,
         game,
         deps: deps.catalogDeps,
         logger,
@@ -525,13 +525,13 @@ function registerLibraryMaintenanceIpc(deps) {
 
       logger.info(`${SCOPES.catalog} Game linked to the catalog:`, {
         recordId,
-        atlasId,
+        f95Id,
         hasThread: Boolean(result.f95Id),
         metadataUpdated: result.metadataUpdated,
       });
       sendToMainWindow("game-updated", recordId);
       void deps
-        .downloadImages(recordId, atlasId, () => {}, true, true, deps.previewLimit, false)
+        .downloadImages(recordId, f95Id, () => {}, true, true, deps.previewLimit, false)
         .then(() => sendToMainWindow("game-updated", recordId))
         .catch((error) => {
           logger.warn(`${SCOPES.catalog} Images were not downloaded:`, {

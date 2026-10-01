@@ -9,7 +9,6 @@ const path = require("path");
  */
 const LIBRARY_RESET_TABLES = Object.freeze([
   "tag_mappings",
-  "atlas_mappings",
   "steam_mappings",
   "f95_zone_mappings",
   "save_profiles",
@@ -28,9 +27,8 @@ const LIBRARY_RESET_TABLES = Object.freeze([
  * user's scan folders, emulators, tags and pending account-library deletes.
  */
 const LIBRARY_RESET_PRESERVED_TABLES = Object.freeze([
-  "atlas_data",
-  "f95_zone_data",
-  "updates",
+  "f95_catalog",
+  "f95_catalog_sync",
   "tags",
   "emulators",
   "scan_sources",

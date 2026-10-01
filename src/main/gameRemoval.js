@@ -326,7 +326,6 @@ async function removeLibraryGame(request, dependencies) {
   const installDirectories = collectInstallDirectories(game);
   const identity = buildSaveVaultIdentity({
     threadUrl: game?.siteUrl || "",
-    atlasId: game?.atlas_id || "",
     title: game?.displayTitle || game?.title || "",
     creator: game?.displayCreator || game?.creator || "",
   });
@@ -365,7 +364,6 @@ async function removeLibraryGame(request, dependencies) {
       backupResult = await (backupGameSavesOverride || backupGameSaves)({
         appPaths,
         threadUrl: game?.siteUrl || "",
-        atlasId: game?.atlas_id || "",
         title: game?.displayTitle || game?.title || "",
         creator: game?.displayCreator || game?.creator || "",
         installDirectory: getPrimaryInstallPath(game),

@@ -100,10 +100,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   cancelScan: () => ipcRenderer.invoke("cancel-scan"),
   scanLibrary: (options) => ipcRenderer.invoke("scan-library", options),
   refreshLibraryPreviews: () => ipcRenderer.invoke("refresh-library-previews"),
-  searchAtlasByF95Id: (f95Id) =>
-    ipcRenderer.invoke("search-atlas-by-f95-id", f95Id),
-  searchAtlas: (title, creator) =>
-    ipcRenderer.invoke("search-atlas", { title, creator }),
+  searchCatalog: (title, creator, limit) =>
+    ipcRenderer.invoke("search-catalog", { title, creator, limit }),
+  getCatalogEntry: (f95Id) => ipcRenderer.invoke("get-catalog-entry", f95Id),
+  getCatalogSyncState: () => ipcRenderer.invoke("get-catalog-sync-state"),
   searchSiteCatalog: (filters, limit) =>
     ipcRenderer.invoke("search-site-catalog", { filters, limit }),
   getF95AuthStatus: () => ipcRenderer.invoke("get-f95-auth-status"),
@@ -134,10 +134,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("clear-f95-download-history"),
   showF95DownloadInFolder: (id) =>
     ipcRenderer.invoke("show-f95-download-in-folder", id),
-  addAtlasMapping: (recordId, atlasId) =>
-    ipcRenderer.invoke("add-atlas-mapping", { recordId, atlasId }),
-  findF95Id: (atlasId) => ipcRenderer.invoke("find-f95-id", atlasId),
-  getAtlasData: (atlasId) => ipcRenderer.invoke("get-atlas-data", atlasId),
   checkRecordExist: (params) =>
     ipcRenderer.invoke("check-record-exist", params),
   importGames: (params) => ipcRenderer.invoke("import-games", params),

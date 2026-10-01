@@ -10,25 +10,7 @@ const {
   normalizeEngineName,
   tokenOverlap,
 } = require("../shared/scanMatchUtils");
-
-/**
- * @param {import("sqlite3").Database} db
- * @param {string} sql
- * @param {unknown[]=} params
- * @returns {Promise<any[]>}
- */
-function allAsync(db, sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      resolve(rows || []);
-    });
-  });
-}
+const { listCatalogEntriesForMatcher } = require("./db/f95CatalogStore");
 
 /**
  * @param {string | null | undefined} value
@@ -119,22 +101,16 @@ function countSharedTokens(leftTokens, rightTokens) {
 function buildIndexedEntry(row) {
   const titleVariants = dedupeVariants([
     buildVariant(row.title, "title", 10),
-    buildVariant(row.original_name, "original-title", 6),
-    buildVariant(row.short_name, "short-name", 12),
-    buildVariant(row.id_name, "id-name", 12),
   ]);
   const creatorVariants = dedupeVariants([
     buildVariant(row.creator, "creator", 8),
-    buildVariant(row.developer, "developer", 6),
   ]);
 
   return {
-    atlasId: row.atlas_id,
     f95Id: row.f95_id || "",
     siteUrl: row.site_url || "",
     title: trimText(row.title),
     creator: trimText(row.creator),
-    developer: trimText(row.developer),
     engine: trimText(row.engine),
     version: trimText(row.version),
     titleVariants,
@@ -190,27 +166,8 @@ function buildLookupIndex(entries) {
  * @param {import("sqlite3").Database} db
  * @returns {Promise<{ entries: Array<ReturnType<typeof buildIndexedEntry>>, lookup: ReturnType<typeof buildLookupIndex>, matchCandidate: (candidate: any) => any }>}
  */
-async function createAtlasScanMatcher(db) {
-  const rows = await allAsync(
-    db,
-    `
-      SELECT
-        atlas_data.atlas_id as atlas_id,
-        atlas_data.id_name as id_name,
-        atlas_data.short_name as short_name,
-        atlas_data.title as title,
-        atlas_data.original_name as original_name,
-        atlas_data.creator as creator,
-        atlas_data.developer as developer,
-        atlas_data.engine as engine,
-        atlas_data.version as version,
-        f95_zone_data.f95_id as f95_id,
-        f95_zone_data.site_url as site_url
-      FROM atlas_data
-      LEFT JOIN f95_zone_data ON atlas_data.atlas_id = f95_zone_data.atlas_id
-    `,
-  );
-
+async function createCatalogScanMatcher(db) {
+  const rows = await listCatalogEntriesForMatcher(db);
   const entries = rows.map(buildIndexedEntry);
   const lookup = buildLookupIndex(entries);
 
@@ -218,7 +175,7 @@ async function createAtlasScanMatcher(db) {
     entries,
     lookup,
     matchCandidate(candidate) {
-      return matchAtlasCandidate(candidate, { entries, lookup });
+      return matchCatalogCandidate(candidate, { entries, lookup });
     },
   };
 }
@@ -256,28 +213,28 @@ function buildCandidateFingerprint(candidate) {
 
 /**
  * @param {{ titleVariants: Array<any>, creatorTokens: Set<string>, titleTokens: Set<string> }} candidate
- * @param {{ entries: Array<ReturnType<typeof buildIndexedEntry>>, lookup: ReturnType<typeof buildLookupIndex> }} atlasIndex
+ * @param {{ entries: Array<ReturnType<typeof buildIndexedEntry>>, lookup: ReturnType<typeof buildLookupIndex> }} catalogIndex
  */
-function shortlistEntries(candidate, atlasIndex) {
+function shortlistEntries(candidate, catalogIndex) {
   const hitScores = new Map();
   const exactIndexes = new Set();
 
   for (const variant of candidate.titleVariants) {
-    const exactMatches = atlasIndex.lookup.compactKeyIndex.get(variant.compactKey) || [];
+    const exactMatches = catalogIndex.lookup.compactKeyIndex.get(variant.compactKey) || [];
     for (const exactIndex of exactMatches) {
       exactIndexes.add(exactIndex);
     }
   }
 
   for (const token of candidate.titleTokens) {
-    const matchingIndexes = atlasIndex.lookup.tokenIndex.get(token) || [];
+    const matchingIndexes = catalogIndex.lookup.tokenIndex.get(token) || [];
     for (const matchIndex of matchingIndexes) {
       hitScores.set(matchIndex, (hitScores.get(matchIndex) || 0) + 4);
     }
   }
 
   for (const token of candidate.creatorTokens) {
-    const matchingIndexes = atlasIndex.lookup.creatorTokenIndex.get(token) || [];
+    const matchingIndexes = catalogIndex.lookup.creatorTokenIndex.get(token) || [];
     for (const matchIndex of matchingIndexes) {
       hitScores.set(matchIndex, (hitScores.get(matchIndex) || 0) + 1);
     }
@@ -297,9 +254,9 @@ function shortlistEntries(candidate, atlasIndex) {
       return right.score - left.score;
     })
     .slice(0, 180)
-    .map((entry) => atlasIndex.entries[entry.index]);
+    .map((entry) => catalogIndex.entries[entry.index]);
 
-  return rankedIndexes.length > 0 ? rankedIndexes : atlasIndex.entries.slice(0, 300);
+  return rankedIndexes.length > 0 ? rankedIndexes : catalogIndex.entries.slice(0, 300);
 }
 
 /**
@@ -538,7 +495,7 @@ function scoreEngineMatch(candidate, entry) {
  * @param {ReturnType<typeof buildCandidateFingerprint>} candidate
  * @param {ReturnType<typeof buildIndexedEntry>} entry
  */
-function scoreAtlasEntry(candidate, entry) {
+function scoreCatalogEntry(candidate, entry) {
   const title = scoreTitleMatch(candidate, entry);
   const creator = scoreCreatorMatch(candidate, entry);
   const version = scoreVersionMatch(candidate, entry);
@@ -552,7 +509,6 @@ function scoreAtlasEntry(candidate, entry) {
     .slice(0, 4);
 
   return {
-    atlasId: entry.atlasId,
     f95Id: entry.f95Id,
     siteUrl: entry.siteUrl,
     title: entry.title,
@@ -571,7 +527,7 @@ function scoreAtlasEntry(candidate, entry) {
 }
 
 /**
- * @param {ReturnType<typeof scoreAtlasEntry>[]} matches
+ * @param {ReturnType<typeof scoreCatalogEntry>[]} matches
  */
 function decideMatchOutcome(matches) {
   if (matches.length === 0) {
@@ -623,13 +579,23 @@ function decideMatchOutcome(matches) {
     bestMatch.score >= 165 &&
     margin >= 35 &&
     (bestMatch.creatorScore >= 16 || bestMatch.versionScore >= 8);
+  // Two catalog entries with the same exact title (a remake, a fan
+  // continuation): the version decides when it agrees with one entry and
+  // contradicts the runner-up.
+  const versionAnchoredSameTitleAutoMatch =
+    bestMatch.titleExact &&
+    bestMatch.versionScore >= 5 &&
+    bestMatch.engineScore >= 18 &&
+    margin >= 10 &&
+    (matches[1]?.versionScore ?? 0) < 0;
 
   if (
     strongAutoMatch ||
     clearNearExactAutoMatch ||
     creatorAnchoredAutoMatch ||
     preciseVersionAutoMatch ||
-    similarityAutoMatch
+    similarityAutoMatch ||
+    versionAnchoredSameTitleAutoMatch
   ) {
     return {
       status: "matched",
@@ -660,9 +626,9 @@ function decideMatchOutcome(matches) {
  *   versionHints?: string[],
  *   engine?: string
  * }} candidateInput
- * @param {{ entries: Array<ReturnType<typeof buildIndexedEntry>>, lookup: ReturnType<typeof buildLookupIndex> }} atlasIndex
+ * @param {{ entries: Array<ReturnType<typeof buildIndexedEntry>>, lookup: ReturnType<typeof buildLookupIndex> }} catalogIndex
  */
-function matchAtlasCandidate(candidateInput, atlasIndex) {
+function matchCatalogCandidate(candidateInput, catalogIndex) {
   const candidate = buildCandidateFingerprint(candidateInput);
 
   if (candidate.titleVariants.length === 0) {
@@ -676,9 +642,9 @@ function matchAtlasCandidate(candidateInput, atlasIndex) {
     };
   }
 
-  const shortlistedEntries = shortlistEntries(candidate, atlasIndex);
+  const shortlistedEntries = shortlistEntries(candidate, catalogIndex);
   const scoredMatches = shortlistedEntries
-    .map((entry) => scoreAtlasEntry(candidate, entry))
+    .map((entry) => scoreCatalogEntry(candidate, entry))
     .filter((match) => match.titleScore >= 72 || match.score >= 95)
     .sort((left, right) => right.score - left.score)
     .slice(0, 5);
@@ -698,6 +664,6 @@ function matchAtlasCandidate(candidateInput, atlasIndex) {
 }
 
 module.exports = {
-  createAtlasScanMatcher,
-  matchAtlasCandidate,
+  createCatalogScanMatcher,
+  matchCatalogCandidate,
 };

@@ -325,7 +325,6 @@ async function startSteamScan(db, params, event) {
         selectedValue: "steam",
         multipleVisible: "hidden",
         singleExecutable: "Launch via Steam",
-        atlasId: "",
         f95Id: "",
         steamId: parseInt(steamGame.appid),
         folderSize: steamGame.size,

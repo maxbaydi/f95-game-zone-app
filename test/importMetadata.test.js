@@ -7,7 +7,7 @@ const {
   mergeRefreshedGameMetadata,
 } = require("../src/main/importMetadata");
 
-test("mergeImportedGameMetadata prefers atlas title and creator when available", () => {
+test("mergeImportedGameMetadata prefers the catalog title and creator when available", () => {
   const merged = mergeImportedGameMetadata(
     {
       title: "raw folder title",
@@ -65,7 +65,7 @@ test("mergeRefreshedGameMetadata keeps the stored identity when the rescan is no
     title: "Beautiful Site Title",
     creator: "Trusted Dev",
     engine: "Ren'Py",
-    atlas_id: 100,
+    f95_id: 100,
     versions: [{ version: "0.8", game_path: "C:\\Games\\Beautiful" }],
   };
   const merged = mergeRefreshedGameMetadata(existingGame, {
@@ -73,7 +73,7 @@ test("mergeRefreshedGameMetadata keeps the stored identity when the rescan is no
     creator: "Unknown",
     engine: "Unknown",
     version: "0.9",
-    atlasId: "",
+    f95Id: "",
     autoMatched: false,
     folder: "C:\\Games\\Beautiful",
   });
@@ -98,7 +98,7 @@ test("mergeRefreshedGameMetadata takes the scanner values when it matched confid
       creator: "Proper Dev",
       engine: "unity",
       version: "1.2",
-      atlasId: "77",
+      f95Id: "77",
       autoMatched: true,
       folder: "C:\\Games\\X",
     },

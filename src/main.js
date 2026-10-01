@@ -149,7 +149,9 @@ const {
   markImportedCandidate,
 } = require("./main/scanCandidates");
 const { resetScanCache } = require("./main/scanCache");
-const { createAtlasScanMatcher } = require("./main/scanAtlasMatcher");
+const { createCatalogScanMatcher } = require("./main/scanCatalogMatcher");
+const { createF95CatalogSync } = require("./main/catalog/f95CatalogSync");
+const { getF95AuthState: readF95AuthState } = require("./main/f95/session");
 const {
   splitAutoImportableScanGames,
 } = require("./main/scanCandidateImportPolicy");
@@ -186,36 +188,30 @@ const {
   updateVersion,
   updateVersionLocation,
   updateVersionExecutable,
-  addAtlasMapping,
-  getF95ZoneDataByAtlasId,
   getGame,
   getGames,
-  checkDbUpdates,
   updateFolderSize,
-  getBannerUrl,
-  getScreensUrlList,
   getEmulatorConfig,
   removeEmulatorConfig,
   saveEmulatorConfig,
   getEmulatorByExtension,
-  GetAtlasIDbyRecord,
   getPreviews,
   getBanner,
   deleteBanner,
   deletePreviews,
-  searchAtlas,
   searchSiteCatalog,
-  searchAtlasByF95Id,
+  searchCatalog,
+  getCatalogEntry,
+  getF95IdForRecord,
+  getCatalogFilterOptions,
+  getCatalogSyncState,
   upsertF95ZoneMapping,
   updateBanners,
   updatePreviews,
-  getAtlasData,
   countVersions,
   deleteVersion,
   deleteVersionsForRecordPath,
   deleteGameCompletely,
-  getUniqueFilterOptions,
-  findF95Id,
   checkRecordExist,
   checkPathExist,
   getSteamIDbyRecord,
@@ -254,7 +250,6 @@ const appPaths = initializeAppPaths(app, {
   mainDir: __dirname,
 });
 const dataDir = appPaths.data;
-const updatesDir = appPaths.updates;
 const downloadsDir = appPaths.downloads;
 const imagesDir = appPaths.images;
 const configPath = appPaths.config;
@@ -409,6 +404,17 @@ const appUpdateRecheckJob = createPeriodicJob({
   name: "app-update",
   intervalMs: APP_UPDATE_RECHECK_INTERVAL_MS,
   run: (reason) => runAppUpdateCheck(reason, { background: true }),
+});
+
+// The game catalog (the app's own copy of the F95 list) is re-read every
+// few hours while the launcher runs and again after the PC wakes up. The
+// startup run is triggered by the renderer once the library is on screen.
+const CATALOG_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const catalogSyncJob = createPeriodicJob({
+  name: "catalog-sync",
+  intervalMs: CATALOG_SYNC_INTERVAL_MS,
+  run: (reason) => runLibraryUpdateRefresh(reason),
+  isEnabled: () => isCatalogAutoSyncEnabled(),
 });
 
 // The weekly library snapshot is checked once a day: the launcher can sit in
@@ -614,25 +620,94 @@ async function runAppUpdateCheck(reason = "manual", options = {}) {
   }
 }
 
+// The metadata catalog: the app's own copy of the F95 game list, refreshed
+// from the site (src/main/catalog). Built once the database is open.
+let f95CatalogSync = null;
+
+function getF95CatalogSync() {
+  if (f95CatalogSync || !databaseConnection) {
+    return f95CatalogSync;
+  }
+  f95CatalogSync = createF95CatalogSync({
+    db: databaseConnection,
+    fetchText: async (url, init = {}) => {
+      const headers = {
+        accept: init.json
+          ? "application/json, text/plain, */*"
+          : "text/html,application/xhtml+xml,*/*",
+        referer: "https://f95zone.to/sam/latest_alpha/",
+      };
+      if (init.json) {
+        headers["x-requested-with"] = "XMLHttpRequest";
+      }
+      const response = await getF95ResolverSession().fetch(url, {
+        headers,
+        redirect: "follow",
+      });
+      return { status: response.status, text: await response.text() };
+    },
+    hasSession: async () =>
+      (await readF95AuthState(getReadyF95Session())).isAuthenticated,
+    onProgress: (payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("db-update-progress", payload);
+      }
+    },
+    logger: console,
+  });
+  return f95CatalogSync;
+}
+
+const CATALOG_SYNC_MANUAL_REASONS = new Set(["manual", "tray-menu", "settings"]);
+
+function isCatalogAutoSyncEnabled() {
+  return (appConfig || defaultConfig)?.Library?.catalogAutoSync !== false;
+}
+
 async function runLibraryUpdateRefresh(reason = "manual") {
   if (libraryUpdateRefreshPromise) {
     return libraryUpdateRefreshPromise;
   }
 
   libraryUpdateRefreshPromise = (async () => {
-    const safeWindow =
-      mainWindow &&
-      typeof mainWindow.isDestroyed === "function" &&
-      !mainWindow.isDestroyed()
-        ? mainWindow
-        : null;
-    const result = await checkDbUpdates(updatesDir, safeWindow);
+    const sync = getF95CatalogSync();
+    if (!sync) {
+      return {
+        success: false,
+        error: "The library database is not open yet.",
+        total: 0,
+        processed: 0,
+      };
+    }
+    if (!CATALOG_SYNC_MANUAL_REASONS.has(reason) && !isCatalogAutoSyncEnabled()) {
+      return {
+        success: true,
+        total: 0,
+        processed: 0,
+        message: "Catalog updates are turned off in Settings.",
+        skippedReason: "disabled",
+      };
+    }
+    const summary = await sync.run({ reason });
+    const result = {
+      success: summary.success,
+      error: summary.error,
+      total: summary.changed,
+      processed: summary.entriesWritten,
+      added: summary.added,
+      versionChanged: summary.versionChanged,
+      pages: summary.pagesFetched,
+      fullDone: summary.fullDone,
+      entryCount: summary.entryCount,
+      message: summary.message,
+      skippedReason: summary.skippedReason,
+    };
 
-    if (result?.success) {
+    if (summary.success && summary.changed > 0) {
       try {
         const config = appConfig || defaultConfig;
         const allowNotify =
-          Number(result?.total || 0) > 0 &&
+          summary.versionChanged > 0 &&
           config?.Notifications?.libraryUpdates !== false;
         await libraryUpdateNotificationController.syncFromAllGames({
           getGames: () => loadLibraryGames(),
@@ -645,6 +720,7 @@ async function runLibraryUpdateRefresh(reason = "manual") {
           error,
         );
       }
+      broadcastGamesLibrarySynced({ reason: "catalog-sync" });
     }
 
     return result;
@@ -769,7 +845,6 @@ function getPreferredInstalledPath(game) {
 
 function getLibraryIdentityKey(game) {
   return buildLibraryIdentity({
-    atlasId: game?.atlas_id ? String(game.atlas_id) : "",
     f95Id: game?.f95_id ? String(game.f95_id) : "",
     siteUrl: String(game?.siteUrl || "").trim(),
     title: String(game?.displayTitle || game?.title || "").trim(),
@@ -784,7 +859,6 @@ function findMatchingLibraryGame(libraryGames, metadata, fallbackName = "") {
   );
   const normalizedCreator = normalizeLibraryMatchText(metadata?.creator || "");
   const requestedIdentityKey = buildLibraryIdentity({
-    atlasId: metadata?.atlasId,
     f95Id: metadata?.f95Id || normalizedF95Id,
     siteUrl: metadata?.threadUrl || metadata?.siteUrl || "",
     title: metadata?.title || fallbackName,
@@ -952,44 +1026,21 @@ async function moveDirectoryIntoPlace(sourceDirectory, targetDirectory) {
 }
 
 async function prepareDownloadedGameMetadata(metadata) {
-  const normalizedF95Id = extractF95IdFromUrl(metadata?.threadUrl || "");
-  if (!normalizedF95Id) {
-    return {
-      atlasId: null,
-      f95Id: "",
-    };
-  }
-
-  try {
-    const atlasMatches = await searchAtlasByF95Id(normalizedF95Id);
-    const atlasId = atlasMatches?.[0]?.atlas_id || null;
-
-    return {
-      atlasId,
-      f95Id: normalizedF95Id,
-    };
-  } catch (error) {
-    console.warn("[f95.download] Failed to resolve catalog mapping for thread:", {
-      threadUrl: metadata?.threadUrl || "",
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return {
-      atlasId: null,
-      f95Id: normalizedF95Id,
-    };
-  }
+  return {
+    f95Id: extractF95IdFromUrl(metadata?.threadUrl || "") || "",
+  };
 }
 
-async function resolveAtlasGameMetadata(atlasId) {
-  if (!atlasId) {
+async function resolveCatalogGameMetadata(f95Id) {
+  if (!f95Id) {
     return {};
   }
 
   try {
-    return (await getAtlasData(atlasId)) || {};
+    return (await getCatalogEntry(f95Id)) || {};
   } catch (error) {
     console.warn("[library.stub] Failed to load catalog metadata:", {
-      atlasId,
+      f95Id,
       error: error instanceof Error ? error.message : String(error),
     });
     return {};
@@ -1000,30 +1051,29 @@ async function buildF95ThreadLibraryMetadata(input) {
   const parsedTitle = parseF95ThreadTitle(
     input?.rawTitle || input?.title || "",
   );
-  const atlasMetadata = await prepareDownloadedGameMetadata({
+  const catalogMetadata = await prepareDownloadedGameMetadata({
     threadUrl: input?.threadUrl || "",
   });
-  const atlasData = await resolveAtlasGameMetadata(atlasMetadata.atlasId);
+  const catalogData = await resolveCatalogGameMetadata(catalogMetadata.f95Id);
 
   return {
     threadUrl: String(input?.threadUrl || "").trim(),
     rawTitle: String(input?.rawTitle || "").trim(),
     title: String(
-      input?.title || atlasData.title || parsedTitle.title || "Unknown",
+      input?.title || catalogData.title || parsedTitle.title || "Unknown",
     ).trim(),
     creator: String(
-      input?.creator || atlasData.creator || parsedTitle.creator || "Unknown",
+      input?.creator || catalogData.creator || parsedTitle.creator || "Unknown",
     ).trim(),
     version: String(
-      input?.version || parsedTitle.version || atlasData.version || "",
+      input?.version || parsedTitle.version || catalogData.version || "",
     ).trim(),
     engine: resolveEngineLabel(
       input?.engine,
       parsedTitle.engine,
-      atlasData.engine,
+      catalogData.engine,
     ),
-    atlasId: atlasMetadata.atlasId || null,
-    f95Id: atlasMetadata.f95Id || extractF95IdFromUrl(input?.threadUrl || ""),
+    f95Id: catalogMetadata.f95Id || extractF95IdFromUrl(input?.threadUrl || ""),
   };
 }
 
@@ -1062,18 +1112,6 @@ async function upsertLibraryGameFromMetadata(metadata, options = {}) {
     recordId = await addGame(gamePayload);
   }
 
-  if (metadata?.atlasId && existingGame?.atlas_id !== metadata.atlasId) {
-    try {
-      await addAtlasMapping(recordId, metadata.atlasId);
-    } catch (error) {
-      console.warn("[library.stub] Failed to attach catalog mapping:", {
-        recordId,
-        atlasId: metadata.atlasId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
   if (metadata?.f95Id || metadata?.threadUrl || metadata?.siteUrl) {
     const resolvedF95Id =
       metadata?.f95Id || extractF95IdFromUrl(metadata?.threadUrl || "");
@@ -1095,7 +1133,6 @@ async function upsertLibraryGameFromMetadata(metadata, options = {}) {
   localGame.title = gamePayload.title;
   localGame.creator = gamePayload.creator;
   localGame.engine = gamePayload.engine;
-  localGame.atlas_id = metadata?.atlasId || localGame.atlas_id || null;
   localGame.f95_id =
     metadata?.f95Id ||
     extractF95IdFromUrl(metadata?.threadUrl || "") ||
@@ -1103,10 +1140,10 @@ async function upsertLibraryGameFromMetadata(metadata, options = {}) {
     "";
   localGame.siteUrl =
     metadata?.siteUrl || metadata?.threadUrl || localGame.siteUrl || "";
-  localGame.displayTitle = localGame.atlas_id
+  localGame.displayTitle = localGame.f95_id
     ? localGame.displayTitle || gamePayload.title
     : gamePayload.title;
-  localGame.displayCreator = localGame.atlas_id
+  localGame.displayCreator = localGame.f95_id
     ? localGame.displayCreator || gamePayload.creator
     : gamePayload.creator;
 
@@ -2619,7 +2656,7 @@ async function importGameFolderAsF95Package(folderPath, metadata) {
     throw new Error("Pick the folder that contains the unpacked game.");
   }
   const contentRoot = await resolveArchiveContentRoot(folderPath);
-  const atlasMetadata = await prepareDownloadedGameMetadata(metadata);
+  const catalogMetadata = await prepareDownloadedGameMetadata(metadata);
   const fallbackName = path.basename(folderPath);
   const title = metadata?.title || fallbackName;
   const installTarget = await resolveF95InstallTarget(metadata, fallbackName);
@@ -2634,7 +2671,6 @@ async function importGameFolderAsF95Package(folderPath, metadata) {
   const saveVaultInput = {
     appPaths,
     threadUrl: metadata?.threadUrl || "",
-    atlasId: atlasMetadata.atlasId,
     title,
     creator: metadata?.creator || "",
     installDirectory,
@@ -2688,7 +2724,7 @@ async function importGameFolderAsF95Package(folderPath, metadata) {
     reusedExisting: installTarget.reusedExisting,
     staleInstallPaths: installTarget.staleInstallPaths,
     gameExtensions,
-    atlasMetadata,
+    catalogMetadata,
   });
   if (Array.isArray(results) && results[0] && executables.length === 0) {
     results[0].warning = "no_executable";
@@ -2985,8 +3021,8 @@ async function retireStaleVersionRows(recordId, staleInstallPaths) {
 }
 
 async function persistF95InstalledGame(payload) {
-  const atlasMetadata =
-    payload.atlasMetadata ||
+  const catalogMetadata =
+    payload.catalogMetadata ||
     (await prepareDownloadedGameMetadata(payload.metadata));
   const installedFolderSize =
     payload.installDirectory && fs.existsSync(payload.installDirectory)
@@ -3007,8 +3043,7 @@ async function persistF95InstalledGame(payload) {
     selectedValue: payload.selectedValue,
     executables: payload.executables,
     siteUrl: payload.metadata?.threadUrl || "",
-    f95Id: atlasMetadata.f95Id,
-    atlasId: atlasMetadata.atlasId,
+    f95Id: catalogMetadata.f95Id,
   };
 
   if (payload.existingGame?.record_id) {
@@ -3038,24 +3073,6 @@ async function persistF95InstalledGame(payload) {
         payload.existingGame.record_id,
         payload.staleInstallPaths,
       );
-    }
-
-    if (
-      gameRecord.atlasId &&
-      payload.existingGame.atlas_id !== gameRecord.atlasId
-    ) {
-      try {
-        await addAtlasMapping(
-          payload.existingGame.record_id,
-          gameRecord.atlasId,
-        );
-      } catch (error) {
-        console.warn("[f95.install] Failed to update catalog mapping:", {
-          recordId: payload.existingGame.record_id,
-          atlasId: gameRecord.atlasId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
     }
 
     if (gameRecord.f95Id || gameRecord.siteUrl) {
@@ -3095,7 +3112,6 @@ async function persistF95InstalledGame(payload) {
       {
         success: true,
         recordId: payload.existingGame.record_id,
-        atlasId: gameRecord.atlasId,
         title: payload.title,
         updatedExisting: true,
       },
@@ -3169,7 +3185,7 @@ async function importDownloadedF95Package(downloadPath, metadata, options = {}) 
     archiveExtensions,
     gameExtensions,
   });
-  const atlasMetadata = await prepareDownloadedGameMetadata(metadata);
+  const catalogMetadata = await prepareDownloadedGameMetadata(metadata);
 
   let installSourcePath = downloadPath;
   try {
@@ -3211,7 +3227,6 @@ async function importDownloadedF95Package(downloadPath, metadata, options = {}) 
   const saveVaultInput = {
     appPaths,
     threadUrl: metadata?.threadUrl || "",
-    atlasId: atlasMetadata.atlasId,
     title,
     creator: metadata?.creator || "",
     installDirectory,
@@ -3343,7 +3358,7 @@ async function importDownloadedF95Package(downloadPath, metadata, options = {}) 
       reusedExisting: installTarget.reusedExisting,
       staleInstallPaths: installTarget.staleInstallPaths,
       gameExtensions,
-      atlasMetadata,
+      catalogMetadata,
     });
     if (Array.isArray(results) && results[0] && executables.length === 0) {
       results[0].warning = "no_executable";
@@ -3384,7 +3399,7 @@ async function importDownloadedF95Package(downloadPath, metadata, options = {}) 
     reusedExisting: installTarget.reusedExisting,
     staleInstallPaths: installTarget.staleInstallPaths,
     gameExtensions,
-    atlasMetadata,
+    catalogMetadata,
   });
   }
 }
@@ -3622,6 +3637,7 @@ const defaultConfig = {
     gameFolder: "",
     autoScanOnStartup: true,
     autoBackup: true,
+    catalogAutoSync: true,
   },
   Metadata: {
     downloadPreviews: true,
@@ -3724,7 +3740,6 @@ ipcMain.handle("delete-game-completely", async (_, recordId) => {
       await backupGameSaves({
         appPaths,
         threadUrl: game?.siteUrl || "",
-        atlasId: game?.atlas_id || "",
         title: game?.displayTitle || game?.title || "",
         creator: game?.displayCreator || game?.creator || "",
         installDirectory,
@@ -3948,7 +3963,7 @@ ipcMain.handle("open-settings", () => {
   }
 });
 ipcMain.handle("get-unique-filter-options", async () => {
-  return await getUniqueFilterOptions();
+  return await getCatalogFilterOptions();
 });
 
 ipcMain.handle("get-settings", async () => {
@@ -4641,10 +4656,10 @@ ipcMain.handle("start-scan", async (event, params) => {
   }
 
   try {
-    let atlasMatcher = null;
+    let catalogMatcher = null;
     try {
       if (databaseConnection) {
-        atlasMatcher = await createAtlasScanMatcher(databaseConnection);
+        catalogMatcher = await createCatalogScanMatcher(databaseConnection);
       }
     } catch (matcherError) {
       console.error(
@@ -4656,7 +4671,7 @@ ipcMain.handle("start-scan", async (event, params) => {
     return await startScan(
       {
         ...params,
-        atlasMatcher,
+        catalogMatcher,
         scanSession: sessionResult.session,
       },
       window,
@@ -4706,8 +4721,15 @@ ipcMain.handle("get-steam-game-data", async (event, steamId) => {
   return await getSteamGameData(steamId);
 });
 
-ipcMain.handle("search-atlas", async (event, params) => {
-  return await searchAtlas(params.title, params.creator);
+ipcMain.handle("search-catalog", async (event, params) => {
+  try {
+    return await searchCatalog(params?.title, params?.creator, {
+      limit: params?.limit,
+    });
+  } catch (err) {
+    console.error("Error in search-catalog:", err);
+    return [];
+  }
 });
 
 ipcMain.handle("search-site-catalog", async (event, params) => {
@@ -4727,44 +4749,31 @@ ipcMain.handle("search-site-catalog", async (event, params) => {
   }
 });
 
-ipcMain.handle("search-atlas-by-f95-id", async (event, f95Id) => {
-  console.log(`IPC search-atlas-by-f95-id received f95Id: ${f95Id}`);
+ipcMain.handle("get-catalog-entry", async (event, f95Id) => {
   try {
-    const result = await searchAtlasByF95Id(f95Id);
-    console.log(
-      `IPC search-atlas-by-f95-id result for ${f95Id}: ${JSON.stringify(result)}`,
-    );
-    return result;
+    return await getCatalogEntry(f95Id);
   } catch (err) {
-    console.error(`Error in search-atlas-by-f95-id for ${f95Id}:`, err);
-    return [];
+    console.error("Error in get-catalog-entry:", err);
+    return null;
   }
 });
 
-ipcMain.handle("add-atlas-mapping", async (event, { recordId, atlasId }) => {
+ipcMain.handle("get-catalog-sync-state", async () => {
   try {
-    return await addAtlasMapping(recordId, atlasId);
+    const state = await getCatalogSyncState();
+    const sync = getF95CatalogSync();
+    return {
+      success: true,
+      state: {
+        ...state,
+        definitions: undefined,
+        running: Boolean(sync?.isRunning()),
+        lastSummary: sync?.getLastSummary() || null,
+      },
+    };
   } catch (err) {
-    console.error("Error in add-atlas-mapping:", err);
-    return [];
-  }
-});
-
-ipcMain.handle("find-f95-id", async (event, atlasId) => {
-  try {
-    return await findF95Id(atlasId);
-  } catch (err) {
-    console.error("Error in find-f95-id:", err);
-    return "";
-  }
-});
-
-ipcMain.handle("get-atlas-data", async (event, atlasId) => {
-  try {
-    return await getAtlasData(atlasId);
-  } catch (err) {
-    console.error("Error in get-atlas-data:", err);
-    return {};
+    console.error("Error in get-catalog-sync-state:", err);
+    return { success: false, error: err.message };
   }
 });
 
@@ -5008,8 +5017,8 @@ ipcMain.handle("get-previews", async (event, recordId) => {
 ipcMain.handle("update-banners", async (event, recordId) => {
   console.log("Handling update-banners for recordId:", recordId);
   try {
-    const atlas_id = await GetAtlasIDbyRecord(recordId);
-    await downloadImages(recordId, atlas_id, () => {}, true, false, 1, false);
+    const f95Id = await getF95IdForRecord(recordId);
+    await downloadImages(recordId, f95Id, () => {}, true, false, 1, false);
 
     const bannerPath = await getBanner(recordId, appPaths, "large");
     event.sender.send("game-updated", recordId);
@@ -5023,10 +5032,10 @@ ipcMain.handle("update-banners", async (event, recordId) => {
 ipcMain.handle("update-previews", async (event, recordId) => {
   console.log("Handling update-previews for recordId:", recordId);
   try {
-    const atlasId = await GetAtlasIDbyRecord(recordId);
+    const f95Id = await getF95IdForRecord(recordId);
     await downloadImages(
       recordId,
-      atlasId,
+      f95Id,
       () => {},
       false,
       true,
@@ -5418,13 +5427,13 @@ const importGamesInternal = async (params) => {
         total,
       });
 
-      if (resolvedGame.atlasId) {
+      if (resolvedGame.f95Id) {
         try {
-          const atlasData = await getAtlasData(resolvedGame.atlasId);
-          resolvedGame = mergeImportedGameMetadata(resolvedGame, atlasData);
+          const catalogData = await getCatalogEntry(resolvedGame.f95Id);
+          resolvedGame = mergeImportedGameMetadata(resolvedGame, catalogData);
         } catch (metadataError) {
           console.warn("Failed to enrich imported game metadata from the catalog:", {
-            atlasId: resolvedGame.atlasId,
+            f95Id: resolvedGame.f95Id,
             error:
               metadataError instanceof Error
                 ? metadataError.message
@@ -5672,7 +5681,6 @@ const importGamesInternal = async (params) => {
           title: add.title,
           creator: add.creator,
           engine: add.engine,
-          atlas_id: resolvedGame.atlasId || existingGame?.atlas_id || null,
           f95_id: resolvedGame.f95Id || existingGame?.f95_id || null,
           versions: [{ game_path: gamePath }],
         },
@@ -5689,20 +5697,6 @@ const importGamesInternal = async (params) => {
               : String(scanCandidateErr),
         });
       }
-      console.log("adding mapping");
-      console.log("recordId:", recordId, "atlasId:", resolvedGame.atlasId);
-      if (
-        resolvedGame.atlasId &&
-        existingGame?.atlas_id !== resolvedGame.atlasId
-      ) {
-        try {
-          await addAtlasMapping(recordId, resolvedGame.atlasId);
-          console.log("mapping added");
-        } catch (err) {
-          console.warn("Failed to add catalog mapping:", err);
-        }
-      }
-
       if (resolvedGame.f95Id || resolvedGame.siteUrl) {
         const resolvedF95Id =
           resolvedGame.f95Id || extractF95IdFromUrl(resolvedGame.siteUrl);
@@ -5732,7 +5726,7 @@ const importGamesInternal = async (params) => {
       results.push({
         success: true,
         recordId,
-        atlasId: resolvedGame.atlasId,
+        f95Id: resolvedGame.f95Id || "",
         title: resolvedGame.title,
       });
       mainWindow.webContents.send("game-imported", recordId);
@@ -5766,10 +5760,10 @@ const importGamesInternal = async (params) => {
   if (downloadBannerImages || downloadPreviewImages) {
     progress = 0;
     const gamesWithImages = results
-      .filter((r) => r.success && r.atlasId)
+      .filter((r) => r.success && r.f95Id)
       .map((r) => ({
         title: r.title || "Unknown Game",
-        atlasId: r.atlasId,
+        f95Id: r.f95Id,
         recordId: r.recordId,
       }));
     const imageTotal = gamesWithImages.length;
@@ -5782,8 +5776,9 @@ const importGamesInternal = async (params) => {
 
     for (const game of gamesWithImages) {
       try {
-        const bannerUrl = await getBannerUrl(game.atlasId);
-        const screenUrls = await getScreensUrlList(game.atlasId);
+        const catalogEntry = await getCatalogEntry(game.f95Id);
+        const bannerUrl = catalogEntry?.coverUrl || "";
+        const screenUrls = catalogEntry?.screens || [];
         const previewCount = downloadPreviewImages
           ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
           : 0;
@@ -5798,7 +5793,7 @@ const importGamesInternal = async (params) => {
 
         await downloadImages(
           game.recordId,
-          game.atlasId,
+          game.f95Id,
           (current, totalImages) => {
             mainWindow.webContents.send("import-progress", {
               text: `Downloading images for '${game.title}' ${progress + 1}/${imageTotal}, ${current}/${totalImages}`,
@@ -6280,9 +6275,7 @@ registerLibraryMaintenanceIpc({
   updateVersionLocation,
   updateVersionExecutable,
   catalogDeps: {
-    addAtlasMapping,
-    getAtlasData,
-    getF95ZoneDataByAtlasId,
+    getCatalogEntry,
     upsertF95ZoneMapping,
     updateGame,
   },
@@ -6542,7 +6535,7 @@ async function backfillMissingVersionFolderSizes(limit = 200) {
 
 async function downloadImages(
   recordId,
-  atlasId,
+  f95Id,
   onImageProgress,
   downloadBannerImages,
   downloadPreviewImages,
@@ -6553,10 +6546,12 @@ async function downloadImages(
   if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
 
   let imageProgress = 0;
-  const bannerUrl = downloadBannerImages ? await getBannerUrl(atlasId) : null;
-  const screenUrls = downloadPreviewImages
-    ? await getScreensUrlList(atlasId)
-    : [];
+  const catalogEntry =
+    downloadBannerImages || downloadPreviewImages
+      ? await getCatalogEntry(f95Id)
+      : null;
+  const bannerUrl = downloadBannerImages ? catalogEntry?.coverUrl || null : null;
+  const screenUrls = downloadPreviewImages ? catalogEntry?.screens || [] : [];
   const previewCount = downloadPreviewImages
     ? resolvePreviewDownloadCount(previewLimit, screenUrls.length)
     : 0;
@@ -6754,7 +6749,7 @@ async function refreshLibraryPreviewsInternal(sender) {
 
   for (const target of targets) {
     try {
-      const remoteScreens = await getScreensUrlList(target.atlasId);
+      const remoteScreens = (await getCatalogEntry(target.f95Id))?.screens || [];
       const cachedPreviewCount = await getCachedPreviewCount(target.recordId);
 
       if (
@@ -6781,7 +6776,7 @@ async function refreshLibraryPreviewsInternal(sender) {
 
       await downloadImages(
         target.recordId,
-        target.atlasId,
+        target.f95Id,
         (current, totalImages) => {
           sender.send("import-progress", {
             text: `Refreshing screenshots for '${target.title}' ${processed + 1}/${totalGames}, ${current}/${totalImages}`,
@@ -7147,10 +7142,12 @@ app.whenReady().then(async () => {
       appUpdateRecheckJob.start();
     });
   libraryAutoBackupJob.start({ initialDelayMs: AUTO_BACKUP_STARTUP_DELAY_MS });
+  catalogSyncJob.start();
   powerMonitor.on("resume", () => {
     // The network needs a moment after wake-up; then re-check everything the
     // launcher would have checked had it been running.
     appUpdateRecheckJob.kick("resume", RESUME_RECHECK_DELAY_MS);
+    catalogSyncJob.kick("resume", RESUME_RECHECK_DELAY_MS + 30 * 1000);
     setTimeout(() => {
       libraryLiveUpdateChecker?.runNow({ reason: "resume" }).catch((error) => {
         console.error("[library.live] Thread check after wake-up failed:", error);
@@ -7187,6 +7184,8 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   appUpdateRecheckJob.stop();
   libraryAutoBackupJob.stop();
+  catalogSyncJob.stop();
+  f95CatalogSync?.cancel();
   libraryLiveUpdateChecker?.stop();
   if (f95LoginLiveCheckTimer) {
     clearTimeout(f95LoginLiveCheckTimer);

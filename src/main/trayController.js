@@ -71,7 +71,7 @@ function createTrayController(input) {
 
     if (typeof input.onCheckForLibraryUpdates === "function") {
       template.push({
-        label: "Refresh Library Updates",
+        label: "Refresh Game Catalog",
         click: () => {
           void input.onCheckForLibraryUpdates();
         },

@@ -69,7 +69,7 @@ const CatalogLinkModal = (liveProps) => {
       setStatus("searching");
       setError("");
       try {
-        const rows = await window.electronAPI.searchAtlas(
+        const rows = await window.electronAPI.searchCatalog(
           trimmed,
           catalogLinkCreatorHint(game?.creator),
         );
@@ -78,7 +78,7 @@ const CatalogLinkModal = (liveProps) => {
         }
         setResults(
           (Array.isArray(rows) ? rows : [])
-            .filter((row) => row && row.atlas_id)
+            .filter((row) => row && row.f95Id)
             .slice(0, CATALOG_LINK_MAX_RESULTS),
         );
         setStatus("done");
@@ -116,12 +116,12 @@ const CatalogLinkModal = (liveProps) => {
     if (!recordId || linkingId) {
       return;
     }
-    setLinkingId(row.atlas_id);
+    setLinkingId(row.f95Id);
     setError("");
     try {
       const result = await window.electronAPI.linkGameToCatalog({
         recordId,
-        atlasId: Number(row.atlas_id),
+        f95Id: Number(row.f95Id),
       });
       if (!result?.success) {
         setError(
@@ -133,9 +133,7 @@ const CatalogLinkModal = (liveProps) => {
       }
 
       window.AppUI?.toast?.success(
-        result.f95Id
-          ? "Banner, screenshots and update checks will follow shortly."
-          : "This catalog entry has no F95 thread, so updates can't be checked.",
+        "Banner, screenshots and update checks will follow shortly.",
         { title: `Linked to ${row.title || "the catalog"}` },
       );
       setLinkingId(null);
@@ -248,10 +246,10 @@ const CatalogLinkModal = (liveProps) => {
           ) : (
             <ul className="space-y-2" aria-label="Catalog results">
               {results.map((row, index) => {
-                const isLinking = linkingId === row.atlas_id;
+                const isLinking = linkingId === row.f95Id;
                 return (
                   <li
-                    key={row.atlas_id}
+                    key={row.f95Id}
                     className="app-list-enter flex items-center gap-3 border border-border/70 bg-canvas/40 px-3 py-2.5 transition-colors hover:border-accent/40"
                     style={{ "--app-index": Math.min(index, 12) }}
                   >
@@ -260,10 +258,10 @@ const CatalogLinkModal = (liveProps) => {
                         {row.title || "Untitled"}
                       </div>
                       <div className="truncate text-xs text-text/60">
-                        {[row.creator, row.engine].filter(Boolean).join(" · ") ||
+                        {[row.creator, row.engine, row.version].filter(Boolean).join(" · ") ||
                           "Unknown creator"}
                         {" · "}
-                        {row.f95_id ? `Thread #${row.f95_id}` : "No F95 thread"}
+                        {`Thread #${row.f95Id}`}
                       </div>
                     </div>
                     <button
