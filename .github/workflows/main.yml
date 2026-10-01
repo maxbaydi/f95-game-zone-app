@@ -1,9 +1,13 @@
 name: Atlas Release
 
+# A release is built and published only for a version tag (v1.7.1 ...), never
+# for a plain push to main: main is the working branch and every push there
+# used to rebuild and overwrite the installers of the current release.
 on:
   push:
-    branches:
-      - main # Trigger on new tags like v1.0.0
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write

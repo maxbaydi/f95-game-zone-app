@@ -3,8 +3,8 @@ name: Atlas Checks
 on:
   pull_request:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - "**"
 
 jobs:
   check:

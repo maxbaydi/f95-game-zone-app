@@ -84,3 +84,12 @@ npm run ci:check
 Releases are published from this repository:
 
 - [GitHub Releases](https://github.com/maxbaydi/f95-game-zone-app/releases)
+
+A release is built by the *Atlas Release* workflow when a version tag is pushed (a plain push to `main` only runs the checks):
+
+```powershell
+npm version 1.7.1 --no-git-tag-version   # or edit package.json
+git commit -am "release: 1.7.1"
+git tag v1.7.1
+git push origin main v1.7.1
+```
