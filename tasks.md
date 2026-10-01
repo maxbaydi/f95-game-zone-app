@@ -4845,6 +4845,12 @@ Release path: pushing to `main` triggers `.github/workflows/main.yml`, which bui
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests on Linux).
 
+## 2026-10-01 — 1.8.2: обложки и скриншоты в полном размере
+
+Список «Latest Updates» отдаёт ссылки на картинки с хоста превью (`preview.f95zone.to`, уменьшенные копии); в теме те же файлы лежат на `attachments.f95zone.to` по тому же пути. Парсер каталога (`toFullSizeImageUrl`) сохраняет ссылки на полноразмерный хост, миграция 014 переписывает уже сохранённые записи, поэтому `downloadImages` качает обложки и скриншоты в том же качестве, что и из старого каталога. Уже скачанные картинки в кэше и таблицах `banners`/`previews` не затрагиваются.
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm test` 562 tests, 562 pass. Published as `v1.8.2`.
+
 ## 2026-10-01 — 1.8.1: обзор и детали игры из стартового поста темы
 
 Список «Latest Updates» не содержит описания и полей, которые были в старом каталоге. Инспектор темы уже читал текст стартового поста (для паролей архива); теперь `src/main/f95/threadDetails.js` разбирает его по меткам (Overview, Thread Updated, Release Date, Developer, Censored, Version, OS, Language; обзор до следующей метки или секции Genre/Installation/Changelog/Download, спойлеры и zero-width символы вырезаются, лимит 4000 символов). `main.js` (`rememberThreadDetails`) пишет результат в запись каталога (миграция 013: `release_date`, `censored`, `os`, `language`, `developer`, `details_at`) при открытии темы в F95‑браузере и при фоновой проверке версий; пустые значения не затирают сохранённые, синхронизация каталога их не трогает. Панель деталей снова показывает Language, Platform, Censored, Release; поиск по сайту получает те же поля. Фикстура `thread-311614.post.txt`, тесты `test/threadDetails.test.js`.
