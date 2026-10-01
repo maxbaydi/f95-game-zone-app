@@ -1,0 +1,135 @@
+{
+  "recordedAt": "2026-10-01T12:04:41.560Z",
+  "requests": [
+    {
+      "name": "latest_alpha",
+      "url": "https://f95zone.to/sam/latest_alpha/",
+      "status": 200,
+      "contentType": "text/html; charset=UTF-8",
+      "bytes": 30802,
+      "sha256": "570ffa57024bfabdc204f21fa210d4f0d104e42a76732cf26ff9c55f675829a7",
+      "file": "latest_alpha.html",
+      "note": ""
+    },
+    {
+      "name": "list-games-date-page-1",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&rows=90&sort=date",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 91489,
+      "sha256": "8b3a0ce955c2d37a0073e1da6b4f19f3eb491e3dce1031a0739d19470cdc8d80",
+      "file": "list-games-date-page-1.json",
+      "note": ""
+    },
+    {
+      "name": "list-games-date-page-2",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=2&rows=90&sort=date",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 90421,
+      "sha256": "33e20a1a63236b215111759576af7fa6de08c49c39911c450402b032a3970bda",
+      "file": "list-games-date-page-2.json",
+      "note": ""
+    },
+    {
+      "name": "list-games-likes-page-1",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&rows=90&sort=likes",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 127740,
+      "sha256": "bc0352073921429bdbbf3031453de5ef5ab9c7d482da03828256e90830463f2f",
+      "file": "list-games-likes-page-1.json",
+      "note": ""
+    },
+    {
+      "name": "list-games-title-page-1",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&rows=90&sort=title",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 84791,
+      "sha256": "ec5b3e5dfd6dcc7587c12a72ca88cd1b61badf249f3eae44f91066a74be5bd9c",
+      "file": "list-games-title-page-1.json",
+      "note": ""
+    },
+    {
+      "name": "list-games-date-page-beyond",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=100000&rows=90&sort=date",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 4486,
+      "sha256": "0a87fc1f3bae113f0a2a4fd20bc592c372a753e915fad88dddf6221b7fcccc05",
+      "file": "list-games-date-page-beyond.json",
+      "note": ""
+    },
+    {
+      "name": "list-games-search",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&rows=90&sort=date&search=the",
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 72853,
+      "sha256": "29ba835f8895a7b7cd2edf1a13f8bd79c593c7e9c89e48bc74f69d87cee072ea",
+      "file": "list-games-search.json",
+      "note": ""
+    },
+    {
+      "name": "meta-cat",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=cat",
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 43,
+      "sha256": "22f8b058a8cee6cb50c2f70d4c013016176cf368a69fce44eada6f9359adc735",
+      "file": "meta-cat.json",
+      "note": ""
+    },
+    {
+      "name": "meta-prefixes",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=prefixes",
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 43,
+      "sha256": "22f8b058a8cee6cb50c2f70d4c013016176cf368a69fce44eada6f9359adc735",
+      "file": "meta-prefixes.json",
+      "note": ""
+    },
+    {
+      "name": "meta-tags",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=tags",
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 43,
+      "sha256": "22f8b058a8cee6cb50c2f70d4c013016176cf368a69fce44eada6f9359adc735",
+      "file": "meta-tags.json",
+      "note": ""
+    },
+    {
+      "name": "meta-meta",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=meta",
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 43,
+      "sha256": "22f8b058a8cee6cb50c2f70d4c013016176cf368a69fce44eada6f9359adc735",
+      "file": "meta-meta.json",
+      "note": ""
+    },
+    {
+      "name": "meta-info",
+      "url": "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=info",
+      "status": 404,
+      "contentType": "application/json; charset=utf-8",
+      "bytes": 43,
+      "sha256": "22f8b058a8cee6cb50c2f70d4c013016176cf368a69fce44eada6f9359adc735",
+      "file": "meta-info.json",
+      "note": ""
+    },
+    {
+      "name": "thread-311614",
+      "url": "https://f95zone.to/threads/311614/",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 372074,
+      "sha256": "02865a959d61525607692a53426e8675d4340aac25a8f1754fe0095af57578ca",
+      "file": "thread-311614.html",
+      "note": ""
+    }
+  ]
+}
