@@ -485,8 +485,8 @@ const libraryBackupGamesText = (count) =>
     : "Game count unknown";
 
 const libraryBackupsConfirm = (options) =>
-  window.AtlasUI?.confirm
-    ? window.AtlasUI.confirm(options)
+  window.AppUI?.confirm
+    ? window.AppUI.confirm(options)
     : Promise.resolve(window.confirm(options.message));
 
 /**
@@ -568,7 +568,7 @@ const LibraryBackupsCard = () => {
       setNotice(
         `Library restored: ${restoredText}. Banners are downloaded again in the background.`,
       );
-      window.AtlasUI?.toast?.success(`${restoredText} restored to your library.`, {
+      window.AppUI?.toast?.success(`${restoredText} restored to your library.`, {
         title: "Library restored",
       });
       await loadBackups();

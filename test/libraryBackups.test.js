@@ -15,7 +15,7 @@ const {
 } = require("../src/main/libraryBackups");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-library-backups-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-library-backups-"));
 }
 
 function runAsync(db, sql, params = []) {
@@ -49,11 +49,11 @@ async function countRows(db, table) {
 
 async function seedLibrary(db) {
   const now = new Date().toISOString();
-  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Atlas Game', 'Atlas Dev', 'renpy', '0.9')`);
+  await runAsync(db, `INSERT INTO atlas_data (atlas_id, title, creator, engine, version) VALUES (100, 'Sample Game', 'Sample Dev', 'renpy', '0.9')`);
   await runAsync(db, `INSERT INTO scan_sources (path, is_enabled, created_at, updated_at) VALUES ('C:\\Games', 1, ?, ?)`, [now, now]);
-  const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime, is_favorite) VALUES ('Atlas Game', 'Atlas Dev', 'renpy', 0, 0, 1)`);
+  const game = await runAsync(db, `INSERT INTO games (title, creator, engine, last_played_r, total_playtime, is_favorite) VALUES ('Sample Game', 'Sample Dev', 'renpy', 0, 0, 1)`);
   const recordId = game.lastID;
-  await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Atlas', 'C:\\Games\\Atlas\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
+  await runAsync(db, `INSERT INTO versions (record_id, version, game_path, exec_path, in_place, date_added, last_played, version_playtime, folder_size) VALUES (?, '0.9', 'C:\\Games\\Sample', 'C:\\Games\\Sample\\game.exe', 1, 1, 0, 0, 0)`, [recordId]);
   await runAsync(db, `INSERT INTO atlas_mappings (record_id, atlas_id) VALUES (?, 100)`, [recordId]);
   await runAsync(db, `INSERT INTO banners (record_id, path, type) VALUES (?, 'cache/images/${recordId}/banner_mc.webp', 'small')`, [recordId]);
   await runAsync(db, `INSERT INTO save_sync_state (record_id, cloud_identity, sync_status, updated_at) VALUES (?, 'atlas-100', 'idle', ?)`, [recordId, now]);
@@ -118,7 +118,7 @@ test("restoreLibraryBackup brings the library back after a reset and keeps a saf
   assert.deepEqual(result.recordIds, [recordId]);
 
   const game = await getAsync(db, "SELECT title, is_favorite FROM games WHERE record_id = ?", [recordId]);
-  assert.deepEqual(game, { title: "Atlas Game", is_favorite: 1 });
+  assert.deepEqual(game, { title: "Sample Game", is_favorite: 1 });
   assert.equal(await countRows(db, "atlas_data"), 1, "catalog untouched");
   assert.equal(await countRows(db, "scan_sources"), 1, "scan folders untouched");
 

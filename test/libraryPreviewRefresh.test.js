@@ -16,7 +16,7 @@ test("buildLibraryPreviewRefreshTargets keeps only installed games with valid at
     {
       record_id: 102,
       atlas_id: null,
-      title: "No Atlas",
+      title: "No catalog",
     },
     {
       record_id: 0,

@@ -22,7 +22,7 @@ const { upsertSaveSyncState } = require("../src/main/db/saveSyncStateStore");
 const { GAME_REMOVAL_MODES } = require("../src/shared/gameRemoval");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-game-removal-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-game-removal-"));
 }
 
 function runAsync(db, sql, params = []) {
@@ -266,8 +266,8 @@ test("removeLibraryGame full cleanup deletes install folders, detected saves, an
   );
   const previousEnv = {
     APPDATA: process.env.APPDATA,
-    ATLAS_DOCUMENTS_DIR: process.env.ATLAS_DOCUMENTS_DIR,
-    ATLAS_SAVED_GAMES_DIR: process.env.ATLAS_SAVED_GAMES_DIR,
+    F95LAUNCHER_DOCUMENTS_DIR: process.env.F95LAUNCHER_DOCUMENTS_DIR,
+    F95LAUNCHER_SAVED_GAMES_DIR: process.env.F95LAUNCHER_SAVED_GAMES_DIR,
   };
   const appDataRoot = path.join(tempRoot, "AppData", "Roaming");
   const renpySaveRoot = path.join(appDataRoot, "RenPy", "Fresh Start");
@@ -290,8 +290,8 @@ test("removeLibraryGame full cleanup deletes install folders, detected saves, an
   fs.writeFileSync(renpySaveFile, "persistent-two", "utf8");
   fs.writeFileSync(path.join(documentsSaveRoot, "slot1.sav"), "documents-save", "utf8");
   process.env.APPDATA = appDataRoot;
-  process.env.ATLAS_DOCUMENTS_DIR = documentsRoot;
-  process.env.ATLAS_SAVED_GAMES_DIR = savedGamesRoot;
+  process.env.F95LAUNCHER_DOCUMENTS_DIR = documentsRoot;
+  process.env.F95LAUNCHER_SAVED_GAMES_DIR = savedGamesRoot;
 
   const db = await initializeDatabase(appPaths);
 

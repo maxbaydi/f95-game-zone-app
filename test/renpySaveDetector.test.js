@@ -10,7 +10,7 @@ const {
 } = require("../src/main/detectors/renpySaveDetector");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-renpy-saves-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-renpy-saves-"));
 }
 
 test("detectRenpySaveProfiles finds install-relative and AppData Ren'Py save roots", () => {

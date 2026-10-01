@@ -1,6 +1,6 @@
 const useLibraryResetModalLayer = (isOpen, props, options) =>
-  window.AtlasMotion?.useModalLayer
-    ? window.AtlasMotion.useModalLayer(isOpen, props, options)
+  window.AppMotion?.useModalLayer
+    ? window.AppMotion.useModalLayer(isOpen, props, options)
     : { isMounted: Boolean(isOpen), state: "open", props, dialogRef: null };
 
 const LibraryResetFact = ({ icon, tone = "neutral", children }) => (
@@ -47,7 +47,7 @@ const LibraryResetModal = (liveProps) => {
 
   return (
     <div
-      className="atlas-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
+      className="app-overlay fixed inset-0 z-[1700] flex items-center justify-center bg-black/65 px-6 py-10 backdrop-blur-md"
       data-state={layer.state}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !isRunning) {
@@ -61,7 +61,7 @@ const LibraryResetModal = (liveProps) => {
         role="dialog"
         aria-modal="true"
         aria-label="Rebuild library"
-        className="atlas-dialog flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        className="app-dialog flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
         data-state={layer.state}
       >
         <div className="border-b border-border px-6 py-5">
@@ -100,7 +100,7 @@ const LibraryResetModal = (liveProps) => {
           {error && (
             <div
               key={error}
-              className="atlas-shake rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100"
+              className="app-shake rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-sm text-red-100"
               role="alert"
             >
               {error}
@@ -138,7 +138,7 @@ const LibraryResetModal = (liveProps) => {
             className="inline-flex items-center gap-2 rounded-lg bg-red-500/85 px-5 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isRunning ? (
-              <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+              <span className="app-spinner app-keep-motion" aria-hidden />
             ) : (
               <span className="material-symbols-outlined text-[18px] leading-none" aria-hidden>
                 restart_alt

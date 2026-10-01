@@ -14,7 +14,7 @@ const {
 } = require("../src/main/db/scanSourcesStore");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-sources-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-sources-"));
 }
 
 function closeAsync(db) {

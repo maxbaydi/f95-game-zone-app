@@ -35,7 +35,6 @@ module.exports = {
         accent: '#66c0f4',
         accentBar: '#67c1f5',
         onAccent: '#0e141b',
-        atlasLogo: '#ffffff',
         text: '#c7d5e0',
         highlight: '#2a475e',
         glam: '#d5a51b',
@@ -63,23 +62,23 @@ module.exports = {
         spring: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
       },
       keyframes: {
-        'atlas-shimmer': {
+        'app-shimmer': {
           '0%': { backgroundPosition: '200% 0' },
           '100%': { backgroundPosition: '-200% 0' },
         },
-        'atlas-fade-up': {
+        'app-fade-up': {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
-        'atlas-pulse-soft': {
+        'app-pulse-soft': {
           '0%, 100%': { opacity: '0.45' },
           '50%': { opacity: '0.85' },
         },
       },
       animation: {
-        'atlas-shimmer': 'atlas-shimmer 2.4s ease-in-out infinite',
-        'atlas-fade-up': 'atlas-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
-        'atlas-pulse-soft': 'atlas-pulse-soft 2s ease-in-out infinite',
+        'app-shimmer': 'app-shimmer 2.4s ease-in-out infinite',
+        'app-fade-up': 'app-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
+        'app-pulse-soft': 'app-pulse-soft 2s ease-in-out infinite',
       },
     },
   },

@@ -122,7 +122,7 @@ function getKnownFolderRoot(baseFolder) {
       return "";
     }
 
-    return process.env.ATLAS_DOCUMENTS_DIR || path.join(userProfile, "Documents");
+    return process.env.F95LAUNCHER_DOCUMENTS_DIR || path.join(userProfile, "Documents");
   }
 
   if (baseFolder === "savedGames") {
@@ -130,7 +130,7 @@ function getKnownFolderRoot(baseFolder) {
       return "";
     }
 
-    return process.env.ATLAS_SAVED_GAMES_DIR || path.join(userProfile, "Saved Games");
+    return process.env.F95LAUNCHER_SAVED_GAMES_DIR || path.join(userProfile, "Saved Games");
   }
 
   return "";

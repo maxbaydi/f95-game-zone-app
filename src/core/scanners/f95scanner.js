@@ -236,11 +236,11 @@ function resolveAtlasMatch(params, input, candidatePath, diagnostics) {
       createScanDiagnostic(
         "SCAN_ATLAS_MATCH_FAILED",
         candidatePath,
-        `Atlas matching failed for ${candidatePath}`,
+        `Catalog matching failed for ${candidatePath}`,
         error && error.code ? error.code : undefined,
       ),
     );
-    console.error("[scan.matcher] failed to match atlas candidate", {
+    console.error("[scan.matcher] failed to match catalog candidate", {
       candidatePath,
       error: error instanceof Error ? error.message : String(error),
     });

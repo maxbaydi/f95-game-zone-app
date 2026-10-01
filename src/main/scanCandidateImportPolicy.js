@@ -48,7 +48,7 @@ function shouldAutoImportScanGame(game, options = {}) {
  * that wait for review.
  *
  * A folder the library already knows is always refreshed (marked with
- * `refreshExisting`), even when the Atlas match is not confident: the record
+ * `refreshExisting`), even when the catalog match is not confident: the record
  * exists, so a rescan must update its files and version instead of parking it
  * in the review queue. New folders without a confident match that are clearly
  * games are imported with `importUnmatched` so the summary can count them and

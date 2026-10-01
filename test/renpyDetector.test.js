@@ -7,7 +7,7 @@ const path = require("path");
 const { detectRenpyGame } = require("../src/main/detectors/renpyDetector");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-renpy-detector-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-renpy-detector-"));
 }
 
 test("detectRenpyGame returns strong confidence for a typical Ren'Py layout", () => {

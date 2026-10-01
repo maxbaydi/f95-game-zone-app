@@ -16,7 +16,7 @@ const {
 } = require("../src/main/assetPaths");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-db-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-db-"));
 }
 
 test("database path resolution always targets data/data.db", () => {

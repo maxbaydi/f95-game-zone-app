@@ -3,9 +3,9 @@ const { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue } =
 const { createRoot } = window.ReactDOM;
 const { AutoSizer, Grid } = window.ReactVirtualized;
 
-// Motion/toast runtime from core/ui/atlas-react.js and core/ui/atlas-ui.js.
+// Motion/toast runtime from core/ui/app-react.js and core/ui/app-ui.js.
 // The fallbacks keep the app usable if either script failed to load.
-const appMotion = window.AtlasMotion || {
+const appMotion = window.AppMotion || {
   usePresence: (isOpen) => ({
     isMounted: Boolean(isOpen),
     state: isOpen ? "open" : "closed",
@@ -13,7 +13,7 @@ const appMotion = window.AtlasMotion || {
   useSnapshot: (value) => value,
   useEscape: () => {},
 };
-const appToast = window.AtlasToast || {
+const appToast = window.AppToast || {
   show: (options) => console.info(options),
   update: () => {},
   dismiss: () => {},
@@ -24,7 +24,7 @@ const appToast = window.AtlasToast || {
   loading: (message) => console.info(message),
 };
 const AppSafe =
-  window.AtlasSafe || (({ children }) => (children === undefined ? null : children));
+  window.AppSafe || (({ children }) => (children === undefined ? null : children));
 const CARD_STAGGER_LIMIT = 18;
 const LIST_STAGGER_LIMIT = 24;
 
@@ -322,7 +322,7 @@ const LibraryRescanMenu = ({ isOpen, anchorRef, onSelect, onClose }) => {
       aria-label="Rescan library"
       data-state={presence.state}
       onKeyDown={handleKeyDown}
-      className="atlas-rise absolute bottom-full left-0 z-[70] mb-2 w-[320px] border border-border bg-primary/95 p-1 shadow-glass backdrop-blur-xl"
+      className="app-rise absolute bottom-full left-0 z-[70] mb-2 w-[320px] border border-border bg-primary/95 p-1 shadow-glass backdrop-blur-xl"
     >
       {LIBRARY_RESCAN_MENU_ITEMS.map((item) =>
         item.type === "separator" ? (
@@ -516,7 +516,7 @@ const StatusDockBar = ({ status, counterLabel }) => {
 
   return (
     <div
-      className="atlas-rise pointer-events-auto flex w-full items-center justify-center border border-border bg-primary/85 p-2 shadow-glass backdrop-blur-xl"
+      className="app-rise pointer-events-auto flex w-full items-center justify-center border border-border bg-primary/85 p-2 shadow-glass backdrop-blur-xl"
       data-state={presence.state}
       role="status"
     >
@@ -535,16 +535,16 @@ const StatusDockBar = ({ status, counterLabel }) => {
         <div className="relative w-[min(300px,40%)] shrink-0">
           <div
             className={`h-4 overflow-hidden bg-black/40 ring-1 ring-inset ring-border ${
-              isIndeterminate ? "atlas-progress-indeterminate atlas-keep-motion" : ""
+              isIndeterminate ? "app-progress-indeterminate app-keep-motion" : ""
             }`}
           >
             <div
-              className={`atlas-progress-fill h-full ${
+              className={`app-progress-fill h-full ${
                 isError
                   ? "bg-red-500/80"
                   : isFinished
                     ? "bg-emerald-500/80"
-                    : "atlas-progress-fill--active atlas-keep-motion bg-gradient-to-r from-accent to-accentBar shadow-glow-accent"
+                    : "app-progress-fill--active app-keep-motion bg-gradient-to-r from-accent to-accentBar shadow-glow-accent"
               }`}
               style={{ width: `${isIndeterminate ? 0 : percent}%` }}
             ></div>
@@ -560,19 +560,19 @@ const StatusDockBar = ({ status, counterLabel }) => {
 
 const LibrarySkeleton = () => (
   <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-4 px-3 pb-3">
-    <div className="atlas-skeleton h-4 w-40" />
+    <div className="app-skeleton h-4 w-40" />
     <div className="flex flex-wrap gap-4 px-1">
       {Array.from({ length: 12 }).map((_, index) => (
         <div
           key={index}
-          className="atlas-card-enter border border-border/60 bg-black/20"
-          style={{ width: 252, height: 208, "--atlas-index": index }}
+          className="app-card-enter border border-border/60 bg-black/20"
+          style={{ width: 252, height: 208, "--app-index": index }}
         >
-          <div className="atlas-skeleton h-[108px] w-full" />
+          <div className="app-skeleton h-[108px] w-full" />
           <div className="space-y-2 p-2.5">
-            <div className="atlas-skeleton h-3 w-24" />
-            <div className="atlas-skeleton h-4 w-44" />
-            <div className="atlas-skeleton mt-6 h-5 w-full" />
+            <div className="app-skeleton h-3 w-24" />
+            <div className="app-skeleton h-4 w-44" />
+            <div className="app-skeleton mt-6 h-5 w-full" />
           </div>
         </div>
       ))}
@@ -1372,8 +1372,8 @@ const App = () => {
       return { success: false };
     }
 
-    if (typeof window.launchAtlasGame === "function") {
-      return window.launchAtlasGame({
+    if (typeof window.launchLibraryGame === "function") {
+      return window.launchLibraryGame({
         execPath: version?.exec_path || "",
         recordId: game?.record_id || null,
         title: getDisplayTitle(game),
@@ -1646,7 +1646,7 @@ const App = () => {
         {
           label: "Details",
           onClick: () =>
-            window.AtlasUI?.alert?.({ title: "Reinstall summary", message: details }),
+            window.AppUI?.alert?.({ title: "Reinstall summary", message: details }),
         },
         ...(summary.failed.length + summary.needsAction.length > 0
           ? [{ label: "Open downloads", onClick: () => setDownloadsPanelOpen(true) }]
@@ -1781,8 +1781,8 @@ const App = () => {
       return;
     }
 
-    const confirmed = window.AtlasUI?.confirm
-      ? await window.AtlasUI.confirm({
+    const confirmed = window.AppUI?.confirm
+      ? await window.AppUI.confirm({
           title: `Reinstall ${reinstallable.length} game${reinstallable.length === 1 ? "" : "s"}?`,
           message:
             "They are downloaded again one at a time from their F95 threads and installed into your library folder." +
@@ -1821,8 +1821,8 @@ const App = () => {
     }
 
     const count = missingGames.length;
-    const confirmed = window.AtlasUI?.confirm
-      ? await window.AtlasUI.confirm({
+    const confirmed = window.AppUI?.confirm
+      ? await window.AppUI.confirm({
           title: `Remove ${count} game${count === 1 ? "" : "s"} from the library?`,
           message:
             "Only the library entries are removed. Nothing on this PC is deleted and saves stay where they are. If you use cloud saves, the games also leave your account library.",
@@ -3171,7 +3171,7 @@ const App = () => {
               {
                 label: "Details",
                 onClick: () =>
-                  window.AtlasUI?.alert?.({
+                  window.AppUI?.alert?.({
                     title: "Duplicates merged",
                     message: mergeDetails,
                   }),
@@ -3730,14 +3730,14 @@ const App = () => {
     return (
       <div
         key={game.record_id}
-        className="atlas-card-enter"
+        className="app-card-enter"
         style={{
           ...style,
           display: "flex",
           justifyContent: "center",
           padding: "8px 4px",
           maxWidth: "100%",
-          "--atlas-index": Math.min(columnIndex, CARD_STAGGER_LIMIT),
+          "--app-index": Math.min(columnIndex, CARD_STAGGER_LIMIT),
         }}
       >
         <window.GameBanner
@@ -3755,8 +3755,8 @@ const App = () => {
       {gamesList.map((game, index) => (
         <div
           key={`${sectionKey}-${game.record_id}`}
-          className="atlas-card-enter flex justify-start px-1"
-          style={{ "--atlas-index": Math.min(index, CARD_STAGGER_LIMIT) }}
+          className="app-card-enter flex justify-start px-1"
+          style={{ "--app-index": Math.min(index, CARD_STAGGER_LIMIT) }}
         >
           <window.GameBanner
             game={game}
@@ -3846,7 +3846,7 @@ const App = () => {
             title="Read the latest versions straight from the F95 threads of your installed games"
           >
             {isCheckingThreads ? (
-              <span className="atlas-spinner atlas-keep-motion text-[12px]" aria-hidden />
+              <span className="app-spinner app-keep-motion text-[12px]" aria-hidden />
             ) : (
               <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
                 manage_search
@@ -3866,7 +3866,7 @@ const App = () => {
       >
         <span
           className={`material-symbols-outlined text-[16px] leading-none ${
-            isRecheckingLibrary ? "animate-spin atlas-keep-motion" : ""
+            isRecheckingLibrary ? "animate-spin app-keep-motion" : ""
           }`}
           aria-hidden
         >
@@ -3885,7 +3885,7 @@ const App = () => {
       </button>
       <div
         key={resultsCount}
-        className="atlas-fade-enter border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] tabular-nums text-text/90 backdrop-blur-sm"
+        className="app-fade-enter border border-border bg-black/25 px-2 py-1 text-[11px] uppercase tracking-[0.14em] tabular-nums text-text/90 backdrop-blur-sm"
       >
         {`${resultsCount} results`}
       </div>
@@ -3896,7 +3896,7 @@ const App = () => {
     const isBusy = Boolean(reinstallRun) || isRemovingMissingGames;
     return (
       <div
-        className="atlas-rise-enter mx-2 flex flex-wrap items-center gap-3 border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-50 shadow-glass-sm"
+        className="app-rise-enter mx-2 flex flex-wrap items-center gap-3 border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-50 shadow-glass-sm"
         role="region"
         aria-label="Games with missing files"
       >
@@ -3946,7 +3946,7 @@ const App = () => {
               className="flex items-center gap-1.5 border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRemovingMissingGames ? (
-                <span className="atlas-spinner atlas-keep-motion text-[11px]" aria-hidden />
+                <span className="app-spinner app-keep-motion text-[11px]" aria-hidden />
               ) : (
                 <span className="material-symbols-outlined text-[15px] leading-none" aria-hidden>
                   playlist_remove
@@ -4004,9 +4004,9 @@ const App = () => {
 
   const renderEmptyState = () => (
     <div className="flex h-full flex-col items-center justify-center px-6 text-center text-text">
-      <div className="atlas-glass-panel max-w-lg animate-atlas-fade-up px-10 py-12 shadow-glow-accent motion-reduce:animate-none">
+      <div className="app-glass-panel max-w-lg animate-app-fade-up px-10 py-12 shadow-glow-accent motion-reduce:animate-none">
         <span
-          className="material-symbols-outlined atlas-pop text-[44px] text-accent/80"
+          className="material-symbols-outlined app-pop text-[44px] text-accent/80"
           aria-hidden
         >
           {sectionMeta.icon}
@@ -4139,7 +4139,7 @@ const App = () => {
             missingGameCount > 0 &&
             renderMissingGamesBar()}
           {favoriteLibraryGames.length > 0 && (
-            <section className="atlas-rise-enter space-y-3 px-2">
+            <section className="app-rise-enter space-y-3 px-2">
               <div className="flex items-center gap-3 px-1">
                 <span
                   className="material-symbols-outlined text-[16px] text-amber-300"
@@ -4226,13 +4226,13 @@ const App = () => {
   const previewList = previewSnapshot.previews || [];
 
   return (
-    <div className="atlas-app flex h-screen min-h-0 flex-col font-sans text-[13px] antialiased">
+    <div className="app-shell flex h-screen min-h-0 flex-col font-sans text-[13px] antialiased">
       <div className="flex h-[70px] shrink-0 select-none items-center [-webkit-app-region:drag] fixed top-0 z-50 w-full border-b border-border bg-primary shadow-glass-sm">
         <div className="z-50 flex h-[70px] w-[60px] shrink-0 items-center justify-center border-r border-border bg-gradient-to-b from-tertiary to-primary">
           <img
             src="./assets/images/logo.png"
             alt="F95Launcher"
-            className="atlas-fade-enter h-[48px] w-[48px] object-contain"
+            className="app-fade-enter h-[48px] w-[48px] object-contain"
             draggable={false}
           />
         </div>
@@ -4242,7 +4242,7 @@ const App = () => {
             <div className="ml-5 flex min-w-[72px] shrink-0 items-center">
               <div
                 key={sectionTitle}
-                className="atlas-list-enter cursor-default font-semibold text-text [-webkit-app-region:no-drag]"
+                className="app-list-enter cursor-default font-semibold text-text [-webkit-app-region:no-drag]"
               >
                 {sectionTitle}
               </div>
@@ -4284,8 +4284,8 @@ const App = () => {
             >
               <span
                 key={saveStorageButtonIcon}
-                className={`material-symbols-outlined atlas-pop text-[20px] leading-none ${
-                  saveStorageHeaderState?.busy ? "animate-pulse atlas-keep-motion" : ""
+                className={`material-symbols-outlined app-pop text-[20px] leading-none ${
+                  saveStorageHeaderState?.busy ? "animate-pulse app-keep-motion" : ""
                 }`}
               >
                 {saveStorageButtonIcon}
@@ -4309,7 +4309,7 @@ const App = () => {
             >
               <i
                 key={isMaximized ? "restore" : "maximize"}
-                className={`atlas-pop ${
+                className={`app-pop ${
                   isMaximized
                     ? "fas fa-window-restore fa-sm"
                     : "fas fa-window-maximize fa-sm"
@@ -4340,7 +4340,7 @@ const App = () => {
             activeSection !== SECTION_SETTINGS &&
             showGameList &&
             !(!isGamesLoading && games.length === 0) && (
-            <div className="atlas-glass-subtle atlas-list-enter w-[220px] shrink-0 overflow-y-auto border-r border-border">
+            <div className="app-glass-subtle app-list-enter w-[220px] shrink-0 overflow-y-auto border-r border-border">
               <div className="sticky top-0 z-10 flex min-h-[5rem] items-center justify-between gap-2 border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
                 <span>
                   {activeSection === SECTION_UPDATES
@@ -4349,7 +4349,7 @@ const App = () => {
                 </span>
                 <span
                   key={visibleLibraryGames.length}
-                  className="atlas-fade-enter tabular-nums tracking-normal text-text/40"
+                  className="app-fade-enter tabular-nums tracking-normal text-text/40"
                 >
                   {visibleLibraryGames.length}
                 </span>
@@ -4358,13 +4358,13 @@ const App = () => {
                 <div className="space-y-2 p-3">
                   {Array.from({ length: 8 }).map((_, index) => (
                     <div key={index} className="space-y-1.5 py-1">
-                      <div className="atlas-skeleton h-3 w-4/5" />
-                      <div className="atlas-skeleton h-2.5 w-1/2" />
+                      <div className="app-skeleton h-3 w-4/5" />
+                      <div className="app-skeleton h-2.5 w-1/2" />
                     </div>
                   ))}
                 </div>
               ) : visibleLibraryGames.length === 0 ? (
-                <div className="atlas-fade-enter p-4 text-center text-sm text-text/65">
+                <div className="app-fade-enter p-4 text-center text-sm text-text/65">
                   No games found
                 </div>
               ) : (
@@ -4378,13 +4378,13 @@ const App = () => {
                         ? "true"
                         : undefined
                     }
-                    className={`atlas-list-enter cursor-pointer border-b border-white/14 p-3 outline-none transition-[background-color,border-color,box-shadow,padding] duration-500 hover:bg-white/5 hover:pl-4 focus-visible:bg-white/10 ${
+                    className={`app-list-enter cursor-pointer border-b border-white/14 p-3 outline-none transition-[background-color,border-color,box-shadow,padding] duration-500 hover:bg-white/5 hover:pl-4 focus-visible:bg-white/10 ${
                       selectedGame?.record_id === game.record_id
                         ? "border-l-2 border-l-accent bg-selected pl-4 shadow-glow-accent"
                         : "border-l-2 border-l-transparent"
                     }`}
                     style={{
-                      "--atlas-index": Math.min(index, LIST_STAGGER_LIMIT),
+                      "--app-index": Math.min(index, LIST_STAGGER_LIMIT),
                     }}
                     onClick={() => selectGame(game)}
                     onKeyDown={(event) => {
@@ -4434,8 +4434,8 @@ const App = () => {
                   key={activeSection}
                   className={`h-full ${
                     activeSection === SECTION_SEARCH
-                      ? "atlas-fade-enter"
-                      : "atlas-view-enter"
+                      ? "app-fade-enter"
+                      : "app-view-enter"
                   }`}
                 >
                   {renderSectionContent()}
@@ -4520,19 +4520,19 @@ const App = () => {
           <button
             type="button"
             data-no-ripple
-            className="atlas-overlay absolute inset-0 block h-full w-full cursor-default border-0 bg-black/90 p-0 backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
+            className="app-overlay absolute inset-0 block h-full w-full cursor-default border-0 bg-black/90 p-0 backdrop-blur-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
             data-state={previewPresence.state}
             onClick={closePreviewModal}
             aria-label="Close screenshot viewer"
           />
           <div
-            className="atlas-dialog pointer-events-none absolute inset-0 flex min-h-0 flex-col"
+            className="app-dialog pointer-events-none absolute inset-0 flex min-h-0 flex-col"
             data-state={previewPresence.state}
           >
             <div className="relative flex min-h-0 min-w-0 flex-1 items-stretch justify-center px-3 pb-20 pt-14 sm:px-5 sm:pb-24 sm:pt-16">
               <div
                 key={`counter-${previewIndex}`}
-                className="atlas-fade-enter pointer-events-auto absolute left-3 top-3 z-20 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-xs tabular-nums text-white/90 shadow-lg backdrop-blur-md sm:left-4 sm:top-4"
+                className="app-fade-enter pointer-events-auto absolute left-3 top-3 z-20 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-xs tabular-nums text-white/90 shadow-lg backdrop-blur-md sm:left-4 sm:top-4"
               >
                 {previewIndex + 1} / {previewList.length}
               </div>
@@ -4580,7 +4580,7 @@ const App = () => {
                     key={previewList[previewIndex]}
                     src={previewList[previewIndex]}
                     alt={`Screenshot ${previewIndex + 1} of ${previewList.length}`}
-                    className="atlas-rise-enter max-h-full max-w-full object-contain shadow-2xl ring-1 ring-white/10"
+                    className="app-rise-enter max-h-full max-w-full object-contain shadow-2xl ring-1 ring-white/10"
                     draggable={false}
                   />
                 </div>
@@ -4731,7 +4731,7 @@ const App = () => {
               <i
                 className={`fas fa-sync-alt mr-2 text-accent ${
                   isLibraryScanRunning
-                    ? "animate-spin atlas-keep-motion"
+                    ? "animate-spin app-keep-motion"
                     : "transition-transform duration-700 group-hover:rotate-180"
                 }`}
               ></i>
@@ -4752,7 +4752,7 @@ const App = () => {
               type="button"
               onClick={cancelLibraryScan}
               data-state={cancelScanPresence.state}
-              className="atlas-rise flex h-8 items-center px-2 text-xs text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
+              className="app-rise flex h-8 items-center px-2 text-xs text-red-300 transition hover:bg-red-950/40 hover:text-red-100"
             >
               <i className="fas fa-ban mr-2"></i>
               Cancel Scan
@@ -4771,7 +4771,7 @@ const App = () => {
           {appUpdateSummary && (
             <span
               key={appUpdateSummary}
-              className="atlas-fade-enter max-w-[min(280px,40vw)] truncate text-[11px] text-text/65"
+              className="app-fade-enter max-w-[min(280px,40vw)] truncate text-[11px] text-text/65"
               title={appUpdateSummary}
             >
               {appUpdateSummary}
@@ -4783,17 +4783,17 @@ const App = () => {
             disabled={appUpdateBusy}
             className={`relative flex items-center gap-1.5 overflow-hidden px-2 py-1 text-[11px] font-medium shadow-glass-sm transition ${
               appUpdateState.status === "downloaded"
-                ? "atlas-attention bg-emerald-800/90 text-white hover:bg-emerald-700"
+                ? "app-attention bg-emerald-800/90 text-white hover:bg-emerald-700"
                 : appUpdateState.status === "available"
-                  ? "atlas-attention border border-accent/40 bg-accent/90 text-onAccent hover:bg-accent"
+                  ? "app-attention border border-accent/40 bg-accent/90 text-onAccent hover:bg-accent"
                   : "border border-border bg-white/5 text-text hover:bg-white/10"
             } ${appUpdateBusy ? "cursor-wait opacity-80" : ""}`}
           >
-            {appUpdateBusy && <span className="atlas-spinner atlas-keep-motion text-[10px]" aria-hidden />}
+            {appUpdateBusy && <span className="app-spinner app-keep-motion text-[10px]" aria-hidden />}
             {appUpdateActionLabel}
             {appUpdateState.status === "downloading" && (
               <span
-                className="atlas-progress-fill absolute bottom-0 left-0 h-[2px] bg-accent"
+                className="app-progress-fill absolute bottom-0 left-0 h-[2px] bg-accent"
                 style={{ width: `${clampPercent(appUpdateState.percent)}%` }}
                 aria-hidden
               />
@@ -4809,14 +4809,14 @@ const App = () => {
           >
             <i
               className={`fas fa-download mr-2 text-accent transition-transform duration-500 group-hover:translate-y-0.5 ${
-                f95Downloads.activeCount > 0 ? "animate-pulse atlas-keep-motion" : ""
+                f95Downloads.activeCount > 0 ? "animate-pulse app-keep-motion" : ""
               }`}
             ></i>
             Downloads
             {f95Downloads.activeCount > 0 && (
               <span
                 key={f95Downloads.activeCount}
-                className="atlas-badge-enter ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-onAccent"
+                className="app-badge-enter ml-2 bg-accent px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-onAccent"
               >
                 {f95Downloads.activeCount}
               </span>
@@ -4829,7 +4829,7 @@ const App = () => {
 };
 
 const root = createRoot(document.getElementById("root"));
-const RootBoundary = window.AtlasErrorBoundary;
+const RootBoundary = window.AppErrorBoundary;
 root.render(
   RootBoundary ? (
     <RootBoundary name="app" variant="screen">

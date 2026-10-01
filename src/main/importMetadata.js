@@ -106,7 +106,7 @@ function mergeRefreshedGameMetadata(existingGame, scannedGame) {
     return { ...scanned };
   }
 
-  // A catalog id means the metadata was enriched from Atlas, either by a
+  // A catalog id means the metadata was enriched from the catalog, either by a
   // confident automatic match or by the user picking the entry in the importer.
   const confident = Boolean(scanned.atlasId) || Boolean(scanned.autoMatched);
 

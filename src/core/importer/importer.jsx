@@ -1,13 +1,13 @@
 const { useState, useEffect } = window.React;
 
-// Non-blocking replacements for window.alert/confirm (core/ui/atlas-ui.js).
+// Non-blocking replacements for window.alert/confirm (core/ui/app-ui.js).
 const importerNotice = (message, type = "warning") =>
-  window.AtlasToast
-    ? window.AtlasToast.show({ type, title: "Importer", message })
+  window.AppToast
+    ? window.AppToast.show({ type, title: "Importer", message })
     : window.alert(message);
 const importerConfirm = (options) =>
-  window.AtlasUI
-    ? window.AtlasUI.confirm(options)
+  window.AppUI
+    ? window.AppUI.confirm(options)
     : Promise.resolve(window.confirm(options.message));
 const ReactDOM = window.ReactDOM || {};
 const { createRoot } = window.ReactDOM;
@@ -528,11 +528,11 @@ const Importer = () => {
             };
           } catch (atlasErr) {
             console.error(
-              `Failed to fetch atlas data for game ${i + 1} (atlas ${parts[0]}):`,
+              `Failed to fetch catalog data for game ${i + 1} (catalog id ${parts[0]}):`,
               atlasErr,
             );
             window.electronAPI.log(
-              `Failed to fetch atlas data for game ${i + 1}: ${atlasErr.message}`,
+              `Failed to fetch catalog data for game ${i + 1}: ${atlasErr.message}`,
             );
             // Continue without engine update
           }
@@ -693,7 +693,7 @@ const Importer = () => {
       <div className="flex-1 p-4 bg-secondary overflow-y-auto">
         {view === "source" && (
           <div className="flex items-center justify-center h-full">
-            <div className="atlas-view-enter flex flex-col space-y-4 max-w-3xl w-full">
+            <div className="app-view-enter flex flex-col space-y-4 max-w-3xl w-full">
               <h2 className="text-2xl text-center font-semibold">
                 Choose How To Add Games
               </h2>
@@ -709,8 +709,8 @@ const Importer = () => {
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                   }
-                  style={{ "--atlas-index": 0 }}
-                  className={`atlas-card-enter text-left rounded border border-border p-4 transition-[background-color,border-color,box-shadow,transform] duration-500 ${
+                  style={{ "--app-index": 0 }}
+                  className={`app-card-enter text-left rounded border border-border p-4 transition-[background-color,border-color,box-shadow,transform] duration-500 ${
                     configuredSources.filter((source) => source.isEnabled)
                       .length === 0
                       ? "bg-primary/40 opacity-50 cursor-not-allowed"
@@ -735,8 +735,8 @@ const Importer = () => {
 
                 <button
                   onClick={openFolderImportSettings}
-                  style={{ "--atlas-index": 1 }}
-                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
+                  style={{ "--app-index": 1 }}
+                  className="app-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import From Folder
@@ -752,14 +752,14 @@ const Importer = () => {
 
                 <button
                   onClick={startSteamImport}
-                  style={{ "--atlas-index": 2 }}
-                  className="atlas-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
+                  style={{ "--app-index": 2 }}
+                  className="app-card-enter text-left rounded border border-border p-4 bg-primary transition-[background-color,border-color,box-shadow,transform] duration-500 hover:-translate-y-1 hover:border-accent/50 hover:bg-selected hover:shadow-glow-accent"
                 >
                   <div className="text-lg font-semibold mb-2">
                     Import Steam Games
                   </div>
                   <div className="text-sm opacity-70">
-                    Scan Steam libraries and convert detected games into Atlas
+                    Scan Steam libraries and convert detected games into library
                     records.
                   </div>
                   <div className="text-xs opacity-60 mt-3">
@@ -1059,7 +1059,7 @@ const Importer = () => {
                 <thead>
                   <tr className="bg-secondary sticky top-0">
                     <th className="border border-border p-1 min-w-[80px]">
-                      Atlas ID
+                      Catalog ID
                     </th>
                     <th className="border border-border p-1 min-w-[80px]">
                       F95 ID
@@ -1348,7 +1348,7 @@ const root = createRoot(document.getElementById("root")) || {
   render: (component) =>
     ReactDOM.render(component, document.getElementById("root")),
 };
-const WindowRootBoundary = window.AtlasErrorBoundary;
+const WindowRootBoundary = window.AppErrorBoundary;
 root.render(
   WindowRootBoundary ? (
     <WindowRootBoundary name="importer-window" variant="screen">

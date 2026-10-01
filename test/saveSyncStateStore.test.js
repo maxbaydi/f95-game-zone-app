@@ -12,7 +12,7 @@ const {
 } = require("../src/main/db/saveSyncStateStore");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-sync-state-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-sync-state-"));
 }
 
 function runAsync(db, sql, params = []) {

@@ -25,7 +25,7 @@ const DIRECT_SESSION_DOWNLOAD_HOSTS = new Set([
 ]);
 
 const DIRECT_DOWNLOAD_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Atlas/1.0 Chrome/125.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) F95Launcher/1.0 Chrome/125.0.0.0 Safari/537.36";
 
 const DEFAULT_STALL_TIMEOUT_MS = 45000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 30000;

@@ -69,7 +69,7 @@ const SearchSidebar = ({
         newVals = newVals.filter((v) => v !== value);
       } else {
         if (group === "tags" && newVals.length >= 10) {
-          window.AtlasToast?.warning("You can filter by up to 10 tags at once.", { title: "Tag filter" });
+          window.AppToast?.warning("You can filter by up to 10 tags at once.", { title: "Tag filter" });
           return prev;
         }
         newVals.push(value);
@@ -102,7 +102,7 @@ const SearchSidebar = ({
     <div
       className={`overflow-hidden [-webkit-app-region:no-drag] ${
         isDocked
-          ? "atlas-glass-subtle w-[320px] shrink-0 border-r border-border"
+          ? "app-glass-subtle w-[320px] shrink-0 border-r border-border"
           : "fixed bottom-[48px] right-0 top-[70px] w-[320px] border border-accent/40 shadow-glass backdrop-blur-xl"
       }`}
       style={

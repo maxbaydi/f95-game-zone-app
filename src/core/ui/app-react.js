@@ -6,8 +6,8 @@
   "use strict";
 
   var React = window.React;
-  var AtlasUI = window.AtlasUI;
-  if (!React || !AtlasUI || window.AtlasMotion) {
+  var AppUI = window.AppUI;
+  if (!React || !AppUI || window.AppMotion) {
     return;
   }
 
@@ -38,7 +38,7 @@
         });
         var timer = setTimeout(function () {
           setPhase("unmounted");
-        }, AtlasUI.motion.exitDuration());
+        }, AppUI.motion.exitDuration());
         return function () {
           clearTimeout(timer);
         };
@@ -78,7 +78,7 @@
         if (!active) {
           return undefined;
         }
-        return AtlasUI.pushEscape(function (event) {
+        return AppUI.pushEscape(function (event) {
           if (typeof handlerRef.current === "function") {
             handlerRef.current(event);
           }
@@ -110,7 +110,7 @@
         var onKeyDown = function (event) {
           var container = containerRef.current;
           if (container && container.contains(event.target)) {
-            AtlasUI.trapFocus(container, event);
+            AppUI.trapFocus(container, event);
           }
         };
         document.addEventListener("keydown", onKeyDown);
@@ -179,11 +179,11 @@
         .catch(function (error) {
           var opts = optionsRef.current;
           if (opts.silent !== true) {
-            AtlasUI.toast.error(AtlasUI.errorMessage(error, opts.errorMessage), {
+            AppUI.toast.error(AppUI.errorMessage(error, opts.errorMessage), {
               title: opts.errorTitle || "Action failed",
             });
           }
-          console.error("[atlas] action failed:", error);
+          console.error("[app] action failed:", error);
           return undefined;
         })
         .finally(function () {
@@ -226,11 +226,11 @@
   function CrashFallback(props) {
     var error = props.error;
     var isScreen = props.variant === "screen";
-    var message = AtlasUI.errorMessage(error, "Unknown rendering error.");
+    var message = AppUI.errorMessage(error, "Unknown rendering error.");
     return h(
       "div",
       {
-        className: "atlas-crash" + (isScreen ? " atlas-crash--screen" : ""),
+        className: "app-crash" + (isScreen ? " app-crash--screen" : ""),
         role: "alert",
       },
       h(
@@ -244,14 +244,14 @@
       ),
       h(
         "div",
-        { className: "atlas-crash__title" },
+        { className: "app-crash__title" },
         props.title ||
           (isScreen ? "F95Launcher hit an unexpected error" : "This section failed to load"),
       ),
-      h("div", { className: "atlas-crash__message" }, message),
+      h("div", { className: "app-crash__message" }, message),
       h(
         "div",
-        { className: "atlas-crash__actions" },
+        { className: "app-crash__actions" },
         h(
           "button",
           { type: "button", "data-primary": "", onClick: props.onRetry },
@@ -273,7 +273,7 @@
               {
                 type: "button",
                 onClick: function () {
-                  AtlasUI.api("closeWindow").catch(function () {
+                  AppUI.api("closeWindow").catch(function () {
                     window.close();
                   });
                 },
@@ -285,7 +285,7 @@
     );
   }
 
-  class AtlasErrorBoundary extends React.Component {
+  class AppErrorBoundary extends React.Component {
     constructor(props) {
       super(props);
       this.state = { error: null };
@@ -298,12 +298,12 @@
 
     componentDidCatch(error, info) {
       var name = this.props.name || "component";
-      console.error("[atlas] render error in " + name + ":", error, info);
-      AtlasUI.log(
+      console.error("[app] render error in " + name + ":", error, info);
+      AppUI.log(
         "[ui-error][boundary:" +
           name +
           "] " +
-          AtlasUI.errorMessage(error, "Unknown rendering error") +
+          AppUI.errorMessage(error, "Unknown rendering error") +
           (info && info.componentStack ? "\n" + info.componentStack : ""),
       );
     }
@@ -337,14 +337,14 @@
     }
   }
 
-  // Convenience wrapper: <AtlasSafe name="Downloads">...</AtlasSafe>
-  function AtlasSafe(props) {
-    return h(AtlasErrorBoundary, props, props.children);
+  // Convenience wrapper: <AppSafe name="Downloads">...</AppSafe>
+  function AppSafe(props) {
+    return h(AppErrorBoundary, props, props.children);
   }
 
   // Sets `data-loaded` once an <img> finishes loading so CSS can fade it in,
   // and swaps to a fallback node when the image cannot be loaded.
-  function AtlasImage(props) {
+  function AppImage(props) {
     var src = props.src;
     var pair = useState({ src: src, status: src ? "loading" : "error" });
     var current = pair[0];
@@ -369,7 +369,7 @@
         rest[key] = props[key];
       }
     }
-    rest.className = (props.className || "") + " atlas-img-fade";
+    rest.className = (props.className || "") + " app-img-fade";
     rest["data-loaded"] = status === "loaded" ? "true" : "false";
     rest.decoding = props.decoding || "async";
     rest.onLoad = function (event) {
@@ -387,7 +387,7 @@
     return h("img", rest);
   }
 
-  window.AtlasMotion = {
+  window.AppMotion = {
     usePresence: usePresence,
     useSnapshot: useSnapshot,
     useLatest: useLatest,
@@ -397,7 +397,7 @@
     useBusyAction: useBusyAction,
     useFlashClass: useFlashClass,
   };
-  window.AtlasErrorBoundary = AtlasErrorBoundary;
-  window.AtlasSafe = AtlasSafe;
-  window.AtlasImage = AtlasImage;
+  window.AppErrorBoundary = AppErrorBoundary;
+  window.AppSafe = AppSafe;
+  window.AppImage = AppImage;
 })();

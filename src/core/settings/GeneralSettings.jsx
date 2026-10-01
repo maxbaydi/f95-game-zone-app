@@ -281,7 +281,7 @@ const AppearanceSettings = ({ settings }) => {
   };
 
   const chooseMotion = (value) => {
-    window.AtlasUI?.motion.apply(value);
+    window.AppUI?.motion.apply(value);
     settings.update("Interface", { motion: value });
   };
 

@@ -6,7 +6,6 @@
   const WEB_PREVIEW_CONFIG = {
     Interface: {
       language: "English",
-      atlasStartup: "Do Nothing",
       gameStartup: "Do Nothing",
       showDebugConsole: false,
       minimizeToTray: false,

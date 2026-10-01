@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  if (window.AtlasUI) {
+  if (window.AppUI) {
     return;
   }
 
@@ -84,7 +84,10 @@
   // ----------------------------------------------------------------- motion
 
   var MOTION_VALUES = ["auto", "full", "reduced", "off"];
-  var MOTION_STORAGE_KEY = "atlas-motion";
+  var MOTION_STORAGE_KEY = "app-motion";
+  // Key used by builds before the UI layer was renamed; read once as a
+  // fallback so the chosen animation level survives the update.
+  var LEGACY_MOTION_STORAGE_KEY = "atlas-motion";
   var reducedMotionQuery =
     typeof window.matchMedia === "function"
       ? window.matchMedia("(prefers-reduced-motion: reduce)")
@@ -97,7 +100,10 @@
 
   function readStoredMotion() {
     try {
-      return window.localStorage.getItem(MOTION_STORAGE_KEY);
+      return (
+        window.localStorage.getItem(MOTION_STORAGE_KEY) ||
+        window.localStorage.getItem(LEGACY_MOTION_STORAGE_KEY)
+      );
     } catch (_) {
       return null;
     }
@@ -127,7 +133,7 @@
     return "full";
   }
 
-  // Keep in sync with --atlas-dur-exit in main.css (plus a small buffer).
+  // Keep in sync with --app-dur-exit in main.css (plus a small buffer).
   function exitDuration() {
     var level = motionLevel();
     if (level === "off") {
@@ -272,10 +278,10 @@
     var size = Math.ceil(radius * 2);
 
     var host = doc.createElement("span");
-    host.className = "atlas-ripple-host";
+    host.className = "app-ripple-host";
     host.setAttribute("aria-hidden", "true");
     var dot = doc.createElement("span");
-    dot.className = "atlas-ripple-dot";
+    dot.className = "app-ripple-dot";
     dot.style.left = x + "px";
     dot.style.top = y + "px";
     dot.style.width = size + "px";
@@ -335,7 +341,7 @@
       pressFeedback(element);
     } catch (error) {
       // Visual feedback must never break the click itself.
-      console.warn("[atlas-ui] feedback failed:", error);
+      console.warn("[app-ui] feedback failed:", error);
     }
   }
 
@@ -393,7 +399,7 @@
       return viewport;
     }
     viewport = doc.createElement("section");
-    viewport.className = "atlas-toast-viewport";
+    viewport.className = "app-toast-viewport";
     viewport.setAttribute("aria-live", "polite");
     viewport.setAttribute("aria-label", "Notifications");
     (doc.body || root).appendChild(viewport);
@@ -430,29 +436,29 @@
 
     var icon = doc.createElement("span");
     if (options.type === "loading") {
-      icon.className = "atlas-toast__icon atlas-spinner atlas-keep-motion";
+      icon.className = "app-toast__icon app-spinner app-keep-motion";
       icon.style.width = "16px";
       icon.style.height = "16px";
       icon.style.marginTop = "2px";
       icon.style.color = "#66c0f4";
     } else {
-      icon.className = "atlas-toast__icon material-symbols-outlined";
+      icon.className = "app-toast__icon material-symbols-outlined";
       icon.textContent = TOAST_ICONS[options.type];
     }
     icon.setAttribute("aria-hidden", "true");
     element.appendChild(icon);
 
     var body = doc.createElement("div");
-    body.className = "atlas-toast__body";
+    body.className = "app-toast__body";
     if (options.title) {
       var title = doc.createElement("div");
-      title.className = "atlas-toast__title";
+      title.className = "app-toast__title";
       title.textContent = options.title;
       body.appendChild(title);
     }
     if (options.message) {
       var message = doc.createElement("div");
-      message.className = "atlas-toast__message";
+      message.className = "app-toast__message";
       message.textContent = options.message;
       body.appendChild(message);
     }
@@ -463,14 +469,14 @@
         : [];
     if (actions.length > 0) {
       var actionRow = doc.createElement("div");
-      actionRow.className = "atlas-toast__actions";
+      actionRow.className = "app-toast__actions";
       actions.forEach(function (action) {
         if (!action || !action.label) {
           return;
         }
         var button = doc.createElement("button");
         button.type = "button";
-        button.className = "atlas-toast__action";
+        button.className = "app-toast__action";
         button.textContent = action.label;
         button.addEventListener("click", function () {
           try {
@@ -493,7 +499,7 @@
     if (options.dismissible !== false) {
       var close = doc.createElement("button");
       close.type = "button";
-      close.className = "atlas-toast__close";
+      close.className = "app-toast__close";
       close.setAttribute("aria-label", "Dismiss notification");
       close.setAttribute("data-no-ripple", "");
       close.innerHTML =
@@ -506,7 +512,7 @@
 
     if (options.duration > 0) {
       var timer = doc.createElement("div");
-      timer.className = "atlas-toast__timer atlas-keep-motion";
+      timer.className = "app-toast__timer app-keep-motion";
       timer.style.animationDuration = options.duration + "ms";
       element.appendChild(timer);
     }
@@ -533,9 +539,9 @@
 
   function bumpToast(record) {
     var element = record.element;
-    element.classList.remove("atlas-toast--bump");
+    element.classList.remove("app-toast--bump");
     void element.offsetWidth;
-    element.classList.add("atlas-toast--bump");
+    element.classList.add("app-toast--bump");
     scheduleToastTimer(record, record.options.duration);
   }
 
@@ -563,9 +569,9 @@
       return duplicate.id;
     }
 
-    var id = options.id || "atlas-toast-" + ++toastSequence;
+    var id = options.id || "app-toast-" + ++toastSequence;
     var element = doc.createElement("div");
-    element.className = "atlas-toast";
+    element.className = "app-toast";
     var record = {
       id: id,
       element: element,
@@ -769,45 +775,45 @@
     return new Promise(function (resolve) {
       var previousFocus = doc.activeElement;
       var overlay = doc.createElement("div");
-      overlay.className = "atlas-confirm-overlay atlas-overlay";
+      overlay.className = "app-confirm-overlay app-overlay";
       overlay.setAttribute("data-state", "open");
 
       var dialog = doc.createElement("div");
-      dialog.className = "atlas-confirm atlas-dialog";
+      dialog.className = "app-confirm app-dialog";
       dialog.setAttribute("data-state", "open");
       dialog.setAttribute("role", withCancel ? "alertdialog" : "dialog");
       dialog.setAttribute("aria-modal", "true");
       dialog.tabIndex = -1;
 
       var header = doc.createElement("div");
-      header.className = "atlas-confirm__header";
+      header.className = "app-confirm__header";
       header.textContent = options.title || (withCancel ? "Are you sure?" : "Notice");
-      header.id = "atlas-confirm-title-" + ++toastSequence;
+      header.id = "app-confirm-title-" + ++toastSequence;
       dialog.setAttribute("aria-labelledby", header.id);
       dialog.appendChild(header);
 
       if (options.message) {
         var message = doc.createElement("div");
-        message.className = "atlas-confirm__message";
+        message.className = "app-confirm__message";
         message.textContent = options.message;
         dialog.appendChild(message);
       }
 
       var footer = doc.createElement("div");
-      footer.className = "atlas-confirm__footer";
+      footer.className = "app-confirm__footer";
       var cancelButton = null;
       if (withCancel) {
         cancelButton = doc.createElement("button");
         cancelButton.type = "button";
-        cancelButton.className = "atlas-confirm__btn";
+        cancelButton.className = "app-confirm__btn";
         cancelButton.textContent = options.cancelLabel || "Cancel";
         footer.appendChild(cancelButton);
       }
       var confirmButton = doc.createElement("button");
       confirmButton.type = "button";
       confirmButton.className =
-        "atlas-confirm__btn " +
-        (options.tone === "danger" ? "atlas-confirm__btn--danger" : "atlas-confirm__btn--primary");
+        "app-confirm__btn " +
+        (options.tone === "danger" ? "app-confirm__btn--danger" : "app-confirm__btn--primary");
       confirmButton.textContent = options.confirmLabel || (withCancel ? "Confirm" : "OK");
       footer.appendChild(confirmButton);
       dialog.appendChild(footer);
@@ -877,7 +883,7 @@
   var boot = { ready: false, failed: false, errors: [], timer: 0 };
 
   function bootElement() {
-    return doc.getElementById("atlas-boot");
+    return doc.getElementById("app-boot");
   }
 
   function setBootText(selector, value) {
@@ -928,7 +934,7 @@
   }
 
   function setBootStatus(text) {
-    setBootText(".atlas-boot__status", text);
+    setBootText(".app-boot__status", text);
   }
 
   function wireBootScreen() {
@@ -1065,7 +1071,7 @@
 
   window.addEventListener("offline", function () {
     showToast({
-      id: "atlas-network",
+      id: "app-network",
       type: "warning",
       title: "You're offline",
       message:
@@ -1075,8 +1081,8 @@
   });
 
   window.addEventListener("online", function () {
-    if (toasts.has("atlas-network")) {
-      updateToast("atlas-network", {
+    if (toasts.has("app-network")) {
+      updateToast("app-network", {
         type: "success",
         title: "Back online",
         message: "Connection restored.",
@@ -1087,7 +1093,7 @@
 
   // ---------------------------------------------------------------- export
 
-  window.AtlasUI = {
+  window.AppUI = {
     api: api,
     withTimeout: withTimeout,
     errorMessage: errorMessage,
@@ -1118,5 +1124,5 @@
       },
     },
   };
-  window.AtlasToast = toast;
+  window.AppToast = toast;
 })();

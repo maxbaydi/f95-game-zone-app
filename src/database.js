@@ -691,7 +691,7 @@ const checkDbUpdates = async (updatesDir, mainWindow) => {
       const data = JSON.parse(decompressedData.toString("utf8"));
       // Process atlas_data
       sendDbUpdateProgress({
-        text: `Processing Atlas Metadata ${processed + 1}/${total}`,
+        text: `Processing catalog metadata ${processed + 1}/${total}`,
         progress: processed,
         total,
       });
@@ -1051,7 +1051,7 @@ const checkPathExist = (gamePath, title) => {
 
 const addAtlasMapping = (recordId, atlasId) => {
   return new Promise((resolve, reject) => {
-    console.log("Updating Atlas Mapping");
+    console.log("Updating catalog mapping");
     // Validate inputs
     if (!recordId || !atlasId) {
       const error = new Error(
@@ -1340,7 +1340,7 @@ const getAtlasData = (atlasId) => {
 };
 
 /**
- * Bulk INSERT OR REPLACE of remote metadata rows (Atlas / F95 dumps).
+ * Bulk INSERT OR REPLACE of remote metadata rows (catalog / F95 dumps).
  *
  * The remote schema moves faster than the local one: fields the local table
  * does not have (e.g. `external_ids`) are dropped instead of failing the

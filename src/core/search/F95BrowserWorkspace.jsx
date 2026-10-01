@@ -202,41 +202,41 @@ const WorkspaceNotice = ({ notice, onDismiss }) => {
 
   return (
     <div
-      className="atlas-toast pointer-events-auto"
+      className="app-toast pointer-events-auto"
       data-type={notice.type}
       role={notice.type === "error" ? "alert" : "status"}
       data-notice={notice.key}
     >
       {notice.type === "loading" ? (
         <span
-          className="atlas-toast__icon atlas-spinner atlas-keep-motion"
+          className="app-toast__icon app-spinner app-keep-motion"
           style={{ width: 16, height: 16, marginTop: 2, color: "#66c0f4" }}
           aria-hidden
         />
       ) : (
         <span
-          className="atlas-toast__icon material-symbols-outlined"
+          className="app-toast__icon material-symbols-outlined"
           aria-hidden
         >
           {iconName}
         </span>
       )}
-      <div className="atlas-toast__body">
+      <div className="app-toast__body">
         {notice.title && (
-          <div className="atlas-toast__title">{notice.title}</div>
+          <div className="app-toast__title">{notice.title}</div>
         )}
         {notice.message && (
-          <div className="atlas-toast__message">{notice.message}</div>
+          <div className="app-toast__message">{notice.message}</div>
         )}
         {Array.isArray(notice.actions) && notice.actions.length > 0 && (
-          <div className="atlas-toast__actions">
+          <div className="app-toast__actions">
             {notice.actions.map((action) => (
               <button
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
                 disabled={action.disabled}
-                className="atlas-toast__action disabled:cursor-not-allowed disabled:opacity-60"
+                className="app-toast__action disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {action.label}
               </button>
@@ -248,7 +248,7 @@ const WorkspaceNotice = ({ notice, onDismiss }) => {
         <button
           type="button"
           onClick={onDismiss}
-          className="atlas-toast__close"
+          className="app-toast__close"
           aria-label="Dismiss"
           data-no-ripple=""
         >
@@ -263,7 +263,7 @@ const WorkspaceNotice = ({ notice, onDismiss }) => {
       )}
       {notice.duration > 0 && (
         <div
-          className="atlas-toast__timer atlas-keep-motion"
+          className="app-toast__timer app-keep-motion"
           style={{ animationDuration: `${notice.duration}ms` }}
         />
       )}
@@ -299,7 +299,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
   const [installError, setInstallError] = useState("");
   const [isInspectingThread, setIsInspectingThread] = useState(false);
   const [isStartingInstall, setIsStartingInstall] = useState(false);
-  const useWorkspaceEscape = window.AtlasMotion?.useEscape || (() => {});
+  const useWorkspaceEscape = window.AppMotion?.useEscape || (() => {});
   useWorkspaceEscape(Boolean(threadInfo) && !isStartingInstall, () =>
     setThreadInfo(null),
   );
@@ -1193,7 +1193,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
           {statusNotice && (
             <div className="mt-4 flex items-center gap-2 border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-text">
               <span
-                className="atlas-spinner atlas-keep-motion text-accent"
+                className="app-spinner app-keep-motion text-accent"
                 aria-hidden
               />
               {statusNotice.text}
@@ -1311,13 +1311,13 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
             type="button"
             onClick={() => onOpenDownloads?.()}
             title={transferChip.detail || "Open downloads"}
-            className={`atlas-rise-enter relative flex h-8 max-w-[220px] flex-none items-center gap-2 overflow-hidden border px-3 text-xs font-medium transition ${
+            className={`app-rise-enter relative flex h-8 max-w-[220px] flex-none items-center gap-2 overflow-hidden border px-3 text-xs font-medium transition ${
               CHIP_TONES[transferChip.tone]
             }`}
           >
             {transferChip.busy ? (
               <span
-                className="atlas-spinner atlas-keep-motion text-[12px] text-accent"
+                className="app-spinner app-keep-motion text-[12px] text-accent"
                 aria-hidden
               />
             ) : (
@@ -1333,8 +1333,8 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
               <span
                 className={`absolute bottom-0 left-0 h-[2px] bg-accent ${
                   transferChip.percent === null
-                    ? "atlas-progress-indeterminate atlas-keep-motion w-full"
-                    : "atlas-progress-fill"
+                    ? "app-progress-indeterminate app-keep-motion w-full"
+                    : "app-progress-fill"
                 }`}
                 style={
                   transferChip.percent === null
@@ -1359,7 +1359,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
           className="ml-1 flex h-8 flex-none items-center gap-1.5 bg-accent px-3 text-xs font-semibold text-onAccent transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isInspectingThread || isStartingInstall ? (
-            <span className="atlas-spinner atlas-keep-motion" aria-hidden />
+            <span className="app-spinner app-keep-motion" aria-hidden />
           ) : (
             <span
               className="material-symbols-outlined text-[18px] leading-none"
@@ -1410,7 +1410,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
         <div
           className={`absolute inset-x-0 bottom-[-1px] h-[2px] ${
             browserState.loading
-              ? "atlas-progress-indeterminate atlas-keep-motion"
+              ? "app-progress-indeterminate app-keep-motion"
               : ""
           }`}
           aria-hidden
@@ -1437,10 +1437,10 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
         )}
 
         {!browserError && browserState.loading && !browserState.title && (
-          <div className="atlas-fade-enter pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
+          <div className="app-fade-enter pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/15">
             <div className="flex items-center gap-2 border border-accent/30 bg-primary/85 px-4 py-3 text-sm text-text shadow-glow-accent">
               <span
-                className="atlas-spinner atlas-keep-motion text-accent"
+                className="app-spinner app-keep-motion text-accent"
                 aria-hidden
               />
               Loading F95…
@@ -1450,7 +1450,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
 
         {threadInfo && (
           <div
-            className="atlas-overlay absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 py-6 backdrop-blur-sm"
+            className="app-overlay absolute inset-0 z-20 flex items-center justify-center bg-black/55 px-6 py-6 backdrop-blur-sm"
             data-state="open"
             onMouseDown={(event) => {
               if (event.target === event.currentTarget && !isStartingInstall) {
@@ -1460,7 +1460,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
             }}
           >
             <div
-              className="atlas-dialog flex max-h-full w-full max-w-5xl flex-col overflow-hidden border border-border bg-primary shadow-2xl"
+              className="app-dialog flex max-h-full w-full max-w-5xl flex-col overflow-hidden border border-border bg-primary shadow-2xl"
               data-state="open"
               role="dialog"
               aria-modal="true"
@@ -1505,7 +1505,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
                   <div
                     key={installError}
                     role="alert"
-                    className="atlas-shake flex items-start gap-2 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+                    className="app-shake flex items-start gap-2 border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
                   >
                     <span
                       className="material-symbols-outlined text-[18px]"
@@ -1539,9 +1539,9 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
 
               <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
                 {isStartingInstall && (
-                  <div className="atlas-fade-enter mr-auto flex items-center gap-2 text-sm text-text/70">
+                  <div className="app-fade-enter mr-auto flex items-center gap-2 text-sm text-text/70">
                     <span
-                      className="atlas-spinner atlas-keep-motion text-accent"
+                      className="app-spinner app-keep-motion text-accent"
                       aria-hidden
                     />
                     Connecting to the selected mirror…
@@ -1570,7 +1570,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
                 >
                   {isStartingInstall ? (
                     <span
-                      className="atlas-spinner atlas-keep-motion"
+                      className="app-spinner app-keep-motion"
                       aria-hidden
                     />
                   ) : (

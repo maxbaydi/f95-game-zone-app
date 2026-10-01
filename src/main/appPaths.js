@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 /**
- * @typedef {Object} AtlasAppPaths
+ * @typedef {Object} AppPaths
  * @property {string} root
  * @property {string} data
  * @property {string} cache
@@ -23,7 +23,7 @@ const path = require("path");
  */
 
 /**
- * @typedef {Object} LegacyAtlasPaths
+ * @typedef {Object} LegacyAppPaths
  * @property {string} root
  * @property {string} data
  * @property {string} launchers
@@ -38,7 +38,7 @@ const path = require("path");
 
 /**
  * @param {string} userDataRoot
- * @returns {AtlasAppPaths}
+ * @returns {AppPaths}
  */
 function buildAppPaths(userDataRoot) {
   const root = path.resolve(userDataRoot);
@@ -68,7 +68,7 @@ function buildAppPaths(userDataRoot) {
 }
 
 /**
- * @param {AtlasAppPaths} appPaths
+ * @param {AppPaths} appPaths
  */
 function ensureAppDirs(appPaths) {
   [
@@ -138,7 +138,7 @@ function createScopedLogger(logFilePath, scope) {
 
 /**
  * @param {{ appPath: string, isPackaged: boolean, mainDir: string }} options
- * @returns {LegacyAtlasPaths}
+ * @returns {LegacyAppPaths}
  */
 function resolveLegacyPaths(options) {
   if (options.isPackaged) {
@@ -210,8 +210,8 @@ function copyMissing(sourcePath, targetPath, logger) {
 }
 
 /**
- * @param {AtlasAppPaths} appPaths
- * @param {LegacyAtlasPaths} legacyPaths
+ * @param {AppPaths} appPaths
+ * @param {LegacyAppPaths} legacyPaths
  * @param {ScopedLogger} logger
  */
 function migrateLegacyData(appPaths, legacyPaths, logger) {
@@ -267,7 +267,7 @@ function migrateLegacyData(appPaths, legacyPaths, logger) {
 /**
  * @param {{ getPath: (name: string) => string, getAppPath: () => string, isPackaged: boolean }} app
  * @param {{ mainDir: string }} options
- * @returns {AtlasAppPaths}
+ * @returns {AppPaths}
  */
 function initializeAppPaths(app, options) {
   const appPaths = buildAppPaths(app.getPath("userData"));

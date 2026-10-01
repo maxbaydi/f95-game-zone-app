@@ -9,7 +9,7 @@ const {
 } = require("../src/main/detectors/saveProfileDetector");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-profile-detector-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-profile-detector-"));
 }
 
 test("detectSaveProfiles finds RPG Maker root save files", () => {
@@ -200,8 +200,8 @@ test("detectSaveProfiles finds Documents/My Games, Saved Games and GameMaker fol
   const previous = {
     USERPROFILE: process.env.USERPROFILE,
     LOCALAPPDATA: process.env.LOCALAPPDATA,
-    ATLAS_DOCUMENTS_DIR: process.env.ATLAS_DOCUMENTS_DIR,
-    ATLAS_SAVED_GAMES_DIR: process.env.ATLAS_SAVED_GAMES_DIR,
+    F95LAUNCHER_DOCUMENTS_DIR: process.env.F95LAUNCHER_DOCUMENTS_DIR,
+    F95LAUNCHER_SAVED_GAMES_DIR: process.env.F95LAUNCHER_SAVED_GAMES_DIR,
   };
   const installRoot = path.join(tempRoot, "Crimson High");
   const documents = path.join(tempRoot, "Documents");
@@ -220,8 +220,8 @@ test("detectSaveProfiles finds Documents/My Games, Saved Games and GameMaker fol
 
   process.env.USERPROFILE = tempRoot;
   process.env.LOCALAPPDATA = localAppData;
-  process.env.ATLAS_DOCUMENTS_DIR = documents;
-  process.env.ATLAS_SAVED_GAMES_DIR = savedGames;
+  process.env.F95LAUNCHER_DOCUMENTS_DIR = documents;
+  process.env.F95LAUNCHER_SAVED_GAMES_DIR = savedGames;
   try {
     const profiles = detectSaveProfiles({
       title: "Crimson High",

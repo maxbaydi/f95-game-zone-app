@@ -44,8 +44,8 @@ const ONLY = new Set(
 // this key at start-up and turns every animation into a 1 ms no-op.
 const INIT_SCRIPT = `
   try {
-    localStorage.setItem("atlas-motion", "off");
-    localStorage.setItem("atlas-library-details-panel-width", "520");
+    localStorage.setItem("app-motion", "off");
+    localStorage.setItem("app-library-details-panel-width", "520");
   } catch (_) {}
 `;
 const HIDE_CURSOR_CSS = `
@@ -217,8 +217,8 @@ async function openApp(context, query) {
   await page.goto(`${BASE_URL}?${query}`, { waitUntil: "load" });
   await page.addStyleTag({ content: HIDE_CURSOR_CSS });
   // The boot overlay is removed once the React tree has rendered.
-  await page.waitForSelector("#atlas-boot", { state: "detached", timeout: 60000 });
-  await page.waitForSelector(".atlas-app", { timeout: 60000 });
+  await page.waitForSelector("#app-boot", { state: "detached", timeout: 60000 });
+  await page.waitForSelector(".app-shell", { timeout: 60000 });
   return page;
 }
 

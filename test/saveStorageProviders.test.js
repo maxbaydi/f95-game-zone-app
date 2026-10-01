@@ -26,7 +26,7 @@ const {
 const codeOf = (error) => /** @type {any} */ (error)?.code;
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-storage-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-storage-"));
 }
 
 test("storage paths are normalised and traversal is refused", () => {

@@ -1,4 +1,4 @@
-name: Atlas Release
+name: Release
 
 # A release is built and published only for a version tag (v1.7.1 ...), never
 # for a plain push to main: main is the working branch and every push there

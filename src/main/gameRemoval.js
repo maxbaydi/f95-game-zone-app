@@ -433,7 +433,7 @@ async function removeLibraryGame(request, dependencies) {
         success: false,
         code: "UNSAFE_SAVE_PATH",
         error:
-          "Atlas found save folders that it cannot wipe safely. Use the keep-saves option or clean them manually.",
+          "F95Launcher found save folders that it cannot wipe safely. Use the keep-saves option or clean them manually.",
       };
     }
 

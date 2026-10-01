@@ -32,7 +32,7 @@ const codeOf = (error) => /** @type {any} */ (error)?.code;
 const messageOf = (error) => String(/** @type {any} */ (error)?.message || "");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-archive-test-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-archive-test-"));
 }
 
 function bundled7zAvailable() {

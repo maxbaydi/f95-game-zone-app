@@ -12,7 +12,7 @@ const {
 } = require("../src/main/db/saveProfilesStore");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-save-profiles-store-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-profiles-store-"));
 }
 
 function runAsync(db, sql, params = []) {

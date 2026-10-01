@@ -13,7 +13,7 @@ const {
 } = require("../src/main/db/scanCandidatesStore");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-stage0-candidates-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-stage0-candidates-"));
 }
 
 function closeAsync(db) {
@@ -51,7 +51,7 @@ test("scan candidate store upserts and marks imported candidates", async () => {
       detectionReasons: ["found game directory", "matched renpy runtime signature"],
       matchStatus: "matched",
       matchScore: 182,
-      matchReasons: ["exact Ren'Py metadata matches Atlas title", "creator matches Atlas creator"],
+      matchReasons: ["exact Ren'Py metadata matches catalog title", "creator matches catalog creator"],
       matchCount: 1,
       status: "detected",
     },
@@ -77,7 +77,7 @@ test("scan candidate store upserts and marks imported candidates", async () => {
       detectionReasons: ["found typical Ren'Py files inside game directory"],
       matchStatus: "ambiguous",
       matchScore: 121,
-      matchReasons: ["title is close to Atlas title"],
+      matchReasons: ["title is close to catalog title"],
       matchCount: 2,
       status: "detected",
     },

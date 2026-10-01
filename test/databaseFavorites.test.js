@@ -14,7 +14,7 @@ const {
 } = require("../src/database");
 
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "atlas-db-favorites-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "app-db-favorites-"));
 }
 
 function closeAsync(db) {
@@ -37,7 +37,7 @@ test("setGameFavorite persists favorite flag in getGame and getGames", async () 
 
   const recordId = await addGame({
     title: "Favorite Test",
-    creator: "Atlas QA",
+    creator: "Sample QA",
     engine: "Ren'Py",
   });
 

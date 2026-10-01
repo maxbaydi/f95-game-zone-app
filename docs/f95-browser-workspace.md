@@ -1,7 +1,7 @@
 # F95‑браузер: компактный тулбар, бейджи в адресной строке, плавающие уведомления
 
 **Статус:** active
-**Модули:** src/core/search/F95BrowserWorkspace.jsx (`ToolbarIconButton`, `WorkspaceNotice`, `TRANSFER_PHASE_META`, `CHIP_TONES`), src/App.jsx (пропсы `onOpenDownloads`, `onOpenLibraryRecord`), src/web-preview-api.js (`?demo=1&f95=thread`, `__f95LauncherDemo.f95Page`), scripts/screenshots.js (`09-f95-browser`), src/assets/css/main.css (классы `atlas-toast*` переиспользуются)
+**Модули:** src/core/search/F95BrowserWorkspace.jsx (`ToolbarIconButton`, `WorkspaceNotice`, `TRANSFER_PHASE_META`, `CHIP_TONES`), src/App.jsx (пропсы `onOpenDownloads`, `onOpenLibraryRecord`), src/web-preview-api.js (`?demo=1&f95=thread`, `__f95LauncherDemo.f95Page`), scripts/screenshots.js (`09-f95-browser`), src/assets/css/main.css (классы `app-toast*` переиспользуются)
 **Тесты:** `npm run check:jsx`; визуально — `SCREENSHOT_ONLY=09-f95-browser npm run screenshots`
 
 ## Назначение
@@ -17,7 +17,7 @@
 
 ## Как это работает
 1. Полосы заменены массивом `notices`, вычисляемым из прежних состояний (`browserError`, `pendingCaptchaAction`, `installError`, `statusNotice`); закрытие карточки сбрасывает соответствующее состояние. `statusNotice = { text, tone, sticky, nonce }`; `sticky` → без таймера и со спиннером.
-2. `WorkspaceNotice` рендерит разметку с классами `atlas-toast`, `atlas-toast__*` (анимация появления и полоска таймера — из общего CSS), но живёт внутри контейнера страницы, а не в глобальном `atlas-toast-viewport`.
+2. `WorkspaceNotice` рендерит разметку с классами `app-toast`, `app-toast__*` (анимация появления и полоска таймера — из общего CSS), но живёт внутри контейнера страницы, а не в глобальном `app-toast-viewport`.
 3. Капча: сообщение в `statusMessage` больше не дублируется — инструкции только в карточке капчи.
 4. `installError` очищается при смене `currentUrl`.
 5. `threadInstallState.installState` теперь сохраняется (раньше терялось, и бейдж «Files missing» никогда не показывался).
