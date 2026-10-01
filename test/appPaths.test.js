@@ -55,21 +55,24 @@ test("ensureAppDirs creates all required writable directories", () => {
 });
 
 test("resolveLegacyPaths uses src-root in development and resources root when packaged", () => {
+  // Absolute on every platform: a literal `C:\...` is a relative path on Linux.
+  const projectRoot = path.resolve(os.tmpdir(), "projects", "atlas");
+  const installRoot = path.resolve(os.tmpdir(), "Program Files", "Atlas");
   const development = resolveLegacyPaths({
-    appPath: "C:\\projects\\atlas",
+    appPath: projectRoot,
     isPackaged: false,
-    mainDir: "C:\\projects\\atlas\\src",
+    mainDir: path.join(projectRoot, "src"),
   });
   const packaged = resolveLegacyPaths({
-    appPath: "C:\\Program Files\\Atlas\\resources\\app.asar",
+    appPath: path.join(installRoot, "resources", "app.asar"),
     isPackaged: true,
-    mainDir: "C:\\ignored",
+    mainDir: path.resolve(os.tmpdir(), "ignored"),
   });
 
-  assert.equal(development.data, path.join("C:\\projects\\atlas\\src", "data"));
-  assert.equal(development.launchers, path.join("C:\\projects\\atlas\\src", "launchers"));
-  assert.equal(packaged.data, path.join("C:\\Program Files\\Atlas", "data"));
-  assert.equal(packaged.launchers, path.join("C:\\Program Files\\Atlas", "launchers"));
+  assert.equal(development.data, path.join(projectRoot, "src", "data"));
+  assert.equal(development.launchers, path.join(projectRoot, "src", "launchers"));
+  assert.equal(packaged.data, path.join(installRoot, "data"));
+  assert.equal(packaged.launchers, path.join(installRoot, "launchers"));
 });
 
 test("migrateLegacyData copies legacy data into the new layout once without overwriting user data", () => {

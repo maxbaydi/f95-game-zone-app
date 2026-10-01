@@ -113,7 +113,11 @@ function inspectLibraryNoiseRecord(game) {
   }
 
   for (const version of versions) {
-    const execBaseName = path.basename(String(version?.exec_path || ""));
+    // Library rows may hold Windows paths; path.basename only splits on the
+    // host separator, so both kinds are handled explicitly.
+    const execBaseName = path.basename(
+      String(version?.exec_path || "").replace(/\\/g, "/"),
+    );
     const execKey = execBaseName.toLowerCase();
 
     if (execKey && NOISE_EXECUTABLE_KEYS.has(execKey)) {

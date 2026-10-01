@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("os");
 const path = require("path");
 
 const {
@@ -9,7 +10,15 @@ const {
   setGameExecutable,
 } = require("../src/main/libraryVersionRepair");
 
-const GAME_DIR = path.join("C:", "Games", "Sample");
+// Absolute on every platform (a literal `C:\...` is relative on Linux). The
+// file system is never touched: `pathExists` is always injected.
+const ROOT = path.resolve(os.tmpdir(), "f95launcher-version-repair");
+const GAME_DIR = path.join(ROOT, "Games", "Sample");
+const OTHER_GAME_DIR = path.join(ROOT, "Games", "Other");
+const MOVED_DIR = path.join(ROOT, "Moved");
+const OUTSIDE_EXE = path.join(ROOT, "Windows", "cmd.exe");
+// Folder comparisons ignore case on Windows only.
+const respelled = (value) => (process.platform === "win32" ? value.toUpperCase() : value);
 
 /**
  * @param {string[]} existing
@@ -32,7 +41,7 @@ test("resolveExecutableWithinFolder accepts relative and absolute paths inside t
 
 test("resolveExecutableWithinFolder rejects traversal, outside paths and empty input", () => {
   assert.equal(resolveExecutableWithinFolder(GAME_DIR, "..\\Other\\x.exe").ok, false);
-  assert.equal(resolveExecutableWithinFolder(GAME_DIR, path.join("C:", "Windows", "cmd.exe")).ok, false);
+  assert.equal(resolveExecutableWithinFolder(GAME_DIR, OUTSIDE_EXE).ok, false);
   assert.equal(resolveExecutableWithinFolder(GAME_DIR, "").ok, false);
   assert.equal(resolveExecutableWithinFolder("", "game.exe").ok, false);
   assert.equal(resolveExecutableWithinFolder(GAME_DIR, GAME_DIR).ok, false, "the folder itself is not an executable");
@@ -68,7 +77,7 @@ test("listGameExecutables returns relative candidates or a clear error for a mis
 
 test("relocateGameVersion moves the version to the new folder and picks the preferred executable", async () => {
   const calls = [];
-  const newPath = path.join("D:", "Moved", "Sample");
+  const newPath = path.join(MOVED_DIR, "Sample");
   const result = await relocateGameVersion({
     recordId: 7,
     version: "0.5",
@@ -99,7 +108,7 @@ test("relocateGameVersion moves the version to the new folder and picks the pref
 });
 
 test("relocateGameVersion refuses missing folders and folders that belong to another game", async () => {
-  const other = path.join("C:", "Games", "Other");
+  const other = OTHER_GAME_DIR;
   const base = {
     recordId: 7,
     version: "0.5",
@@ -118,7 +127,7 @@ test("relocateGameVersion refuses missing folders and folders that belong to ano
     ...base,
     newPath: other,
     pathExists: existsIn([other]),
-    otherGamePaths: [other.toUpperCase()],
+    otherGamePaths: [respelled(other)],
   });
   assert.equal(inUse.success, false);
   assert.equal(inUse.code, "FOLDER_IN_USE");
@@ -129,7 +138,7 @@ test("relocateGameVersion refuses missing folders and folders that belong to ano
 });
 
 test("relocateGameVersion keeps the version without an executable when none is found", async () => {
-  const newPath = path.join("D:", "Moved", "NoExe");
+  const newPath = path.join(MOVED_DIR, "NoExe");
   let stored = null;
   const result = await relocateGameVersion({
     recordId: 3,
@@ -154,7 +163,7 @@ test("relocateGameVersion keeps the version without an executable when none is f
 });
 
 test("relocateGameVersion reports a failed database update instead of throwing", async () => {
-  const newPath = path.join("D:", "Moved", "Sample");
+  const newPath = path.join(MOVED_DIR, "Sample");
   const result = await relocateGameVersion({
     recordId: 7,
     version: "0.5",
@@ -200,8 +209,8 @@ test("setGameExecutable rejects files outside the folder or missing on disk", as
     recordId: 9,
     version: "2.0",
     gamePath: GAME_DIR,
-    executable: path.join("C:", "Windows", "cmd.exe"),
-    pathExists: existsIn([GAME_DIR, path.join("C:", "Windows", "cmd.exe")]),
+    executable: OUTSIDE_EXE,
+    pathExists: existsIn([GAME_DIR, OUTSIDE_EXE]),
     updateVersionExecutable: async () => 1,
   });
   assert.equal(outside.success, false);

@@ -55,24 +55,28 @@ test("choosePreferredDuplicateRecord penalizes detached version tails in titles"
 });
 
 test("findPreferredGameByPath resolves duplicates by exact install path", () => {
+  // Paths are compared case-insensitively on Windows only; elsewhere the
+  // file system is case-sensitive, so the same spelling is used.
+  const gamePath = "C:\\Games\\ADebtPaid";
+  const spelled = (variant) => (process.platform === "win32" ? variant : gamePath);
   const games = [
     {
       record_id: 1,
       title: "adebtpaid-v03-pc",
       creator: "Unknown",
-      versions: [{ game_path: "C:\\Games\\ADebtPaid" }],
+      versions: [{ game_path: gamePath }],
     },
     {
       record_id: 48,
       title: "A Debt Paid",
       creator: "HarleyQ",
       atlas_id: 4001,
-      versions: [{ game_path: "c:\\games\\adebtpaid" }],
+      versions: [{ game_path: spelled("c:\\games\\adebtpaid") }],
     },
   ];
 
   const index = buildLibraryPathIndex(games);
-  const winner = findPreferredGameByPath(index, "C:\\GAMES\\ADEBTPAID");
+  const winner = findPreferredGameByPath(index, spelled("C:\\GAMES\\ADEBTPAID"));
 
   assert.equal(winner?.record_id, 48);
 });
