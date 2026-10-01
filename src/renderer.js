@@ -329,8 +329,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("scan-cache-reset", listener);
     return () => ipcRenderer.removeListener("scan-cache-reset", listener);
   },
-  onF95AuthChanged: (callback) =>
-    ipcRenderer.on("f95-auth-changed", (event, payload) => callback(payload)),
+  onF95AuthChanged: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("f95-auth-changed", listener);
+    return () => ipcRenderer.removeListener("f95-auth-changed", listener);
+  },
   onF95DownloadsChanged: (callback) =>
     ipcRenderer.on("f95-downloads-changed", (event, payload) =>
       callback(payload),
@@ -340,10 +343,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("games-library-synced", listener);
     return () => ipcRenderer.removeListener("games-library-synced", listener);
   },
-  onF95DownloadProgress: (callback) =>
-    ipcRenderer.on("f95-download-progress", (event, payload) =>
-      callback(payload),
-    ),
+  onF95DownloadProgress: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on("f95-download-progress", listener);
+    return () => ipcRenderer.removeListener("f95-download-progress", listener);
+  },
   onF95InstallAttempt: (callback) => {
     const listener = (event, payload) => callback(payload);
     ipcRenderer.on("f95-install-attempt", listener);

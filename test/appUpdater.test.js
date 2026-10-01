@@ -95,3 +95,68 @@ test("app updater downloads a found update by itself when auto-download is on", 
   assert.equal(autoUpdaterInstance.autoInstallOnAppQuit, false);
   assert.equal(downloads, 1, "no automatic download once the setting is off");
 });
+
+test("a background re-check leaves a running or finished download alone", async () => {
+  const handlers = {};
+  let checks = 0;
+  const autoUpdaterInstance = {
+    autoDownload: true,
+    autoInstallOnAppQuit: false,
+    on(event, handler) {
+      handlers[event] = handler;
+      return this;
+    },
+    async checkForUpdates() {
+      checks += 1;
+      handlers["update-available"]({ version: "2.0.0" });
+    },
+    async downloadUpdate() {},
+  };
+  const controller = createAppUpdaterController({
+    app: { getVersion: () => "1.0.0", isPackaged: true },
+    autoUpdaterInstance,
+  });
+
+  await controller.checkForUpdates({ background: true });
+  assert.equal(checks, 1);
+
+  handlers["download-progress"]({ percent: 40 });
+  assert.equal(controller.getState().status, "downloading");
+  await controller.checkForUpdates({ background: true });
+  assert.equal(checks, 1, "no re-check while the package is downloading");
+
+  handlers["update-downloaded"]({ version: "2.0.0" });
+  assert.equal(controller.getState().status, "downloaded");
+  await controller.checkForUpdates({ background: true });
+  assert.equal(checks, 1, "no re-check once the package waits to be installed");
+  assert.equal(controller.getState().status, "downloaded");
+  assert.equal(controller.getState().supportsInstall, true);
+
+  await controller.checkForUpdates();
+  assert.equal(checks, 2, "a manual check still goes through");
+});
+
+test("applySettings re-syncs install-on-quit when the setting changes", () => {
+  const autoUpdaterInstance = {
+    autoDownload: true,
+    autoInstallOnAppQuit: false,
+    on() {
+      return this;
+    },
+    async checkForUpdates() {},
+    async downloadUpdate() {},
+  };
+  let autoDownload = true;
+  const controller = createAppUpdaterController({
+    app: { getVersion: () => "1.0.0", isPackaged: true },
+    autoUpdaterInstance,
+    getAutoDownload: () => autoDownload,
+  });
+
+  controller.applySettings();
+  assert.equal(autoUpdaterInstance.autoInstallOnAppQuit, true);
+
+  autoDownload = false;
+  controller.applySettings();
+  assert.equal(autoUpdaterInstance.autoInstallOnAppQuit, false);
+});

@@ -408,7 +408,17 @@ const APP_UPDATE_RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const appUpdateRecheckJob = createPeriodicJob({
   name: "app-update",
   intervalMs: APP_UPDATE_RECHECK_INTERVAL_MS,
-  run: (reason) => runAppUpdateCheck(reason),
+  run: (reason) => runAppUpdateCheck(reason, { background: true }),
+});
+
+// The weekly library snapshot is checked once a day: the launcher can sit in
+// the tray for weeks, so "at startup" alone would never come around.
+const AUTO_BACKUP_STARTUP_DELAY_MS = 45 * 1000;
+const AUTO_BACKUP_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const libraryAutoBackupJob = createPeriodicJob({
+  name: "library-backup",
+  intervalMs: AUTO_BACKUP_RECHECK_INTERVAL_MS,
+  run: () => runScheduledLibraryBackupIfEnabled(),
 });
 
 const appUpdater = createAppUpdaterController({
@@ -592,9 +602,9 @@ function createImporterWindow() {
   });
 }
 
-async function runAppUpdateCheck(reason = "manual") {
+async function runAppUpdateCheck(reason = "manual", options = {}) {
   try {
-    return await appUpdater.checkForUpdates();
+    return await appUpdater.checkForUpdates(options);
   } catch (error) {
     console.error(
       `[app.updater] Failed to check for updates (${reason}):`,
@@ -3964,6 +3974,7 @@ ipcMain.handle("update-settings", async (event, payload) => {
     saveConfig();
     trayController.refresh();
     applyLoginItemSettings();
+    appUpdater.applySettings();
     broadcastSettingsChanged();
     return { success: true, config: appConfig };
   } catch (error) {
@@ -7136,11 +7147,7 @@ app.whenReady().then(async () => {
     .finally(() => {
       appUpdateRecheckJob.start();
     });
-  setTimeout(() => {
-    runStartupLibraryBackup().catch((error) => {
-      console.warn("[library.backups] Automatic backup failed:", error);
-    });
-  }, AUTO_BACKUP_STARTUP_DELAY_MS);
+  libraryAutoBackupJob.start({ initialDelayMs: AUTO_BACKUP_STARTUP_DELAY_MS });
   powerMonitor.on("resume", () => {
     // The network needs a moment after wake-up; then re-check everything the
     // launcher would have checked had it been running.
@@ -7154,10 +7161,9 @@ app.whenReady().then(async () => {
   });
 });
 
-const AUTO_BACKUP_STARTUP_DELAY_MS = 45 * 1000;
 const RESUME_RECHECK_DELAY_MS = 60 * 1000;
 
-async function runStartupLibraryBackup() {
+async function runScheduledLibraryBackupIfEnabled() {
   const config = appConfig || defaultConfig;
   if (config?.Library?.autoBackup === false || !databaseConnection) {
     return null;
@@ -7181,6 +7187,7 @@ app.on("before-quit", () => {
 
 app.on("will-quit", () => {
   appUpdateRecheckJob.stop();
+  libraryAutoBackupJob.stop();
   libraryLiveUpdateChecker?.stop();
   if (f95LoginLiveCheckTimer) {
     clearTimeout(f95LoginLiveCheckTimer);
