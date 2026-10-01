@@ -369,11 +369,14 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
         console.error("Failed to load F95 auth state:", error);
       });
 
-    window.electronAPI.onF95AuthChanged((nextState) => {
+    // Only this workspace's listeners are removed on unmount: the app shell
+    // subscribes to the same channels (sign-in resumes the install dialog),
+    // so removing every listener would silently break those.
+    const unsubscribeAuth = window.electronAPI.onF95AuthChanged((nextState) => {
       applyAuthState(nextState);
     });
 
-    window.electronAPI.onF95DownloadProgress((progressState) => {
+    const unsubscribeProgress = window.electronAPI.onF95DownloadProgress((progressState) => {
       if (!mounted) {
         return;
       }
@@ -397,8 +400,16 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
 
     return () => {
       mounted = false;
-      window.electronAPI.removeAllListeners("f95-auth-changed");
-      window.electronAPI.removeAllListeners("f95-download-progress");
+      if (typeof unsubscribeAuth === "function") {
+        unsubscribeAuth();
+      } else {
+        window.electronAPI.removeAllListeners?.("f95-auth-changed");
+      }
+      if (typeof unsubscribeProgress === "function") {
+        unsubscribeProgress();
+      } else {
+        window.electronAPI.removeAllListeners?.("f95-download-progress");
+      }
     };
   }, []);
 

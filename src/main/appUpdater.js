@@ -262,8 +262,24 @@ function createAppUpdaterController(input) {
     }
   }
 
-  async function checkForUpdates() {
+  /**
+   * @param {{ background?: boolean }=} options `background` marks the
+   * periodic re-check: while a download is in progress or a package is
+   * already waiting to be installed it does nothing, otherwise the updater
+   * would restart the download and drop the "ready to install" state.
+   */
+  async function checkForUpdates(options = {}) {
     bindListeners();
+
+    if (
+      options.background &&
+      input.app.isPackaged &&
+      [APP_UPDATE_STATUS.DOWNLOADING, APP_UPDATE_STATUS.DOWNLOADED].includes(
+        state.status,
+      )
+    ) {
+      return state;
+    }
 
     if (!input.app.isPackaged) {
       updateState({
@@ -359,7 +375,18 @@ function createAppUpdaterController(input) {
     return state;
   }
 
+  /**
+   * Re-reads the auto-download setting. Called when settings change so a
+   * package that is already downloaded is no longer installed on quit once
+   * the user turned automatic updates off (and vice versa).
+   */
+  function applySettings() {
+    bindListeners();
+    syncAutoInstallFlag();
+  }
+
   return {
+    applySettings,
     attachWindow,
     checkForUpdates,
     downloadUpdate,

@@ -247,7 +247,9 @@ test("connection cards round-trip, sealed cards need the passphrase", () => {
   const connection = {
     type: "s3",
     settings: { endpoint: "https://s3.example", bucket: "b", accessKeyId: "AK", region: "auto", prefix: "p" },
-    secrets: { secretAccessKey: "SK" },
+    // The secret carries characters outside the base64 alphabet so it can
+    // never appear by chance inside the sealed card's random ciphertext.
+    secrets: { secretAccessKey: "secret-access-key" },
     encryption: { enabled: true, passphrase: "saves-phrase" },
     connectedAt: "",
     deviceName: "",
@@ -256,12 +258,13 @@ test("connection cards round-trip, sealed cards need the passphrase", () => {
   assert.equal(plainCard.sealed, false);
   const restored = readConnectionCard(plainCard);
   assert.equal(restored.type, "s3");
-  assert.equal(restored.secrets.secretAccessKey, "SK");
+  assert.equal(restored.secrets.secretAccessKey, "secret-access-key");
   assert.equal(restored.encryption.passphrase, "saves-phrase");
 
   const sealed = buildConnectionCard(connection, { passphrase: "card-pass" });
   assert.equal(sealed.sealed, true);
-  assert.equal(JSON.stringify(sealed).includes("SK"), false);
+  assert.equal(JSON.stringify(sealed).includes("secret-access-key"), false);
+  assert.equal(JSON.stringify(sealed).includes("saves-phrase"), false);
   assert.throws(() => readConnectionCard(sealed), (error) => codeOf(error) === "card_passphrase_required");
   assert.throws(() => readConnectionCard(sealed, { passphrase: "nope" }), (error) => codeOf(error) === "card_wrong_passphrase");
   assert.equal(readConnectionCard(sealed, { passphrase: "card-pass" }).settings.bucket, "b");
