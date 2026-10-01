@@ -192,3 +192,45 @@ test("sync state round-trips with defaults", async () => {
   assert.equal(cleared.fullNextPage, 12, "untouched keys stay");
   db.close();
 });
+
+test("setCatalogThreadDetails stores the starter post fields and never erases with empty values", async () => {
+  const db = await openMigrated();
+  await store.upsertCatalogEntries(db, loadPageEntries("list-games-date-page-1.json"));
+  const now = () => new Date("2026-10-02T09:00:00Z");
+
+  assert.equal(
+    await store.setCatalogThreadDetails(db, 311614, {
+      overview: "Story",
+      releaseDate: "2026-09-30",
+      censored: "No",
+      os: "Windows, Linux",
+      language: "English",
+      developer: "Lounatick",
+    }, { now }),
+    true,
+  );
+  let entry = await store.getCatalogEntry(db, 311614);
+  assert.equal(entry.overview, "Story");
+  assert.equal(entry.releaseDate, "2026-09-30");
+  assert.equal(entry.censored, "No");
+  assert.equal(entry.os, "Windows, Linux");
+  assert.equal(entry.language, "English");
+  assert.equal(entry.developer, "Lounatick");
+  assert.equal(entry.detailsAt, "2026-10-02T09:00:00.000Z");
+
+  await store.setCatalogThreadDetails(db, 311614, { overview: "", language: "Russian" }, { now: () => new Date("2026-10-03T00:00:00Z") });
+  entry = await store.getCatalogEntry(db, 311614);
+  assert.equal(entry.overview, "Story", "an empty overview keeps the stored one");
+  assert.equal(entry.language, "Russian");
+  assert.equal(entry.detailsAt, "2026-10-03T00:00:00.000Z");
+
+  // A later catalog sync must not wipe the details.
+  await store.upsertCatalogEntries(db, loadPageEntries("list-games-date-page-1.json").map((row) => ({ ...row, views: row.views + 1 })));
+  entry = await store.getCatalogEntry(db, 311614);
+  assert.equal(entry.overview, "Story");
+  assert.equal(entry.releaseDate, "2026-09-30");
+
+  assert.equal(await store.setCatalogThreadDetails(db, 1, { overview: "x" }), false);
+  assert.equal(await store.setCatalogThreadDetails(db, 311614, null), false);
+  db.close();
+});

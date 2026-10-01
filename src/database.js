@@ -89,6 +89,11 @@ const GAME_METADATA_SELECT = `
   catalog.category,
   catalog.prefixes as catalog_prefixes,
   catalog.overview,
+  catalog.release_date,
+  catalog.censored,
+  catalog.os,
+  catalog.language,
+  catalog.developer as catalog_developer,
   catalog.updated_ts as catalog_updated_ts,
   live.version AS live_version,
   live.checked_at AS live_checked_at,
@@ -1004,6 +1009,9 @@ const getCatalogFilterOptions = () => catalogStore.getCatalogFilterOptions(db);
 
 const getCatalogSyncState = () => catalogStore.getCatalogSyncState(db);
 
+const saveCatalogThreadDetails = (f95Id, details) =>
+  catalogStore.setCatalogThreadDetails(db, f95Id, details);
+
 /**
  * One catalog entry in the shape the site search and its result cards use.
  * @param {import("./main/db/f95CatalogStore").StoredCatalogEntry} entry
@@ -1020,7 +1028,11 @@ const toSiteCatalogResult = (entry, libraryRecordId) => ({
   prefixes: entry.prefixes,
   overview: entry.overview,
   updatedTs: entry.updatedTs,
-  releaseDate: entry.updatedTs,
+  releaseDate: entry.releaseDate || entry.updatedTs,
+  censored: entry.censored,
+  os: entry.os,
+  language: entry.language,
+  developer: entry.developer,
   bannerUrl: entry.coverUrl || null,
   screens: entry.screens,
   siteUrl: entry.siteUrl || null,
@@ -1079,6 +1091,7 @@ module.exports = {
   getF95IdForRecord,
   getCatalogFilterOptions,
   getCatalogSyncState,
+  saveCatalogThreadDetails,
   checkRecordExist,
   checkPathExist,
   upsertF95ZoneMapping,

@@ -1254,6 +1254,10 @@ const LibraryDetailsPanel = ({
                   </div>
                   <DetailRow label="Site engine" value={game.catalog_engine} />
                   <DetailRow label="Prefixes" value={game.catalog_prefixes} />
+                  <DetailRow label="Language" value={game.language} />
+                  <DetailRow label="Platform" value={game.os} />
+                  <DetailRow label="Censored" value={game.censored} />
+                  <DetailRow label="Release" value={game.release_date} />
                   <DetailRow label="Rating" value={game.rating ? String(game.rating) : ""} />
                   <DetailRow
                     label="Updated on site"
@@ -1290,7 +1294,7 @@ const LibraryDetailsPanel = ({
                       Overview
                     </div>
                     <div className="max-h-[220px] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-text/90">
-                      {game.overview || "No site overview cached yet."}
+                      {game.overview || "No overview yet. It is read from the thread when you open it or when updates are checked."}
                     </div>
                   </div>
                 </section>

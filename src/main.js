@@ -152,6 +152,7 @@ const { resetScanCache } = require("./main/scanCache");
 const { createCatalogScanMatcher } = require("./main/scanCatalogMatcher");
 const { createF95CatalogSync } = require("./main/catalog/f95CatalogSync");
 const { getF95AuthState: readF95AuthState } = require("./main/f95/session");
+const { hasThreadDetails } = require("./main/f95/threadDetails");
 const {
   splitAutoImportableScanGames,
 } = require("./main/scanCandidateImportPolicy");
@@ -205,6 +206,7 @@ const {
   getF95IdForRecord,
   getCatalogFilterOptions,
   getCatalogSyncState,
+  saveCatalogThreadDetails,
   upsertF95ZoneMapping,
   updateBanners,
   updatePreviews,
@@ -279,6 +281,25 @@ function rememberThreadArchivePassword(threadUrl, password) {
     const oldest = f95ThreadArchivePasswords.keys().next().value;
     f95ThreadArchivePasswords.delete(oldest);
   }
+}
+
+/**
+ * What the thread's starter post says (overview, release date, censorship,
+ * platforms, languages) goes into the catalog entry of that thread, so the
+ * details panel and the site search show it without another request.
+ */
+function rememberThreadDetails(threadUrl, payload) {
+  const f95Id = extractF95IdFromUrl(threadUrl || payload?.threadUrl || "");
+  const details = payload?.threadDetails;
+  if (!f95Id || !hasThreadDetails(details) || !databaseConnection) {
+    return;
+  }
+  saveCatalogThreadDetails(f95Id, details).catch((error) => {
+    console.warn("[catalog] Thread details were not stored:", {
+      f95Id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }
 
 function getThreadArchivePassword(threadUrl) {
@@ -1201,6 +1222,7 @@ async function inspectF95ThreadPayload(threadUrl) {
   }
 
   rememberThreadArchivePassword(threadUrl, payload.archivePassword);
+  rememberThreadDetails(threadUrl, payload);
   const rememberedLink = pickPreferredThreadLink(
     threadUrl,
     payload.links || [],
@@ -1360,7 +1382,13 @@ async function handleLiveUpdateRunFinished(summary) {
 function createLibraryLiveUpdateChecker() {
   return createLiveUpdateChecker({
     listGames: () => loadLibraryGames(),
-    inspectThread: (threadUrl) => inspectF95Thread({ BrowserWindow, threadUrl }),
+    inspectThread: async (threadUrl) => {
+      const payload = await inspectF95Thread({ BrowserWindow, threadUrl });
+      if (payload?.success) {
+        rememberThreadDetails(threadUrl, payload);
+      }
+      return payload;
+    },
     saveResult: (result) => {
       if (!databaseConnection) {
         throw new Error("The library database is not ready.");

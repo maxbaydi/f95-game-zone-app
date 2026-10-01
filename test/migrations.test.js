@@ -67,6 +67,7 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 10, name: "unescape_sql_quotes" },
     { version: 11, name: "library_live_versions" },
     { version: 12, name: "f95_catalog" },
+    { version: 13, name: "f95_catalog_thread_details" },
   ]);
   const favoriteColumn = gameColumns.find((column) => column.name === "is_favorite");
   assert.ok(favoriteColumn);
@@ -103,6 +104,7 @@ test("initializeDatabase applies schema migrations once and creates expected tab
     { version: 10, name: "unescape_sql_quotes" },
     { version: 11, name: "library_live_versions" },
     { version: 12, name: "f95_catalog" },
+    { version: 13, name: "f95_catalog_thread_details" },
   ]);
 
   await closeAsync(reopened);
