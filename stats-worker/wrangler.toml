@@ -9,11 +9,11 @@ crons = ["17 3 * * *"]
 [vars]
 GITHUB_REPO = "maxbaydi/f95-game-zone-app"
 
-# `npx wrangler d1 create f95launcher-stats` prints the database_id to put here.
 [[d1_databases]]
 binding = "DB"
 database_name = "f95launcher-stats"
-database_id = "REPLACE_WITH_DATABASE_ID"
+database_id = "ed7f5f26-d092-423e-8552-5e109e59235f"
 
-# The dashboard and /v1/stats need a secret token:
+# The dashboard and /v1/stats need a secret token. The "Stats worker"
+# workflow uploads it from the STATS_TOKEN repository secret; by hand:
 #   npx wrangler secret put STATS_TOKEN

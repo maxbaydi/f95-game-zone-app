@@ -1,7 +1,7 @@
 # Статистика: сколько скачали и сколько пользуются
 
 **Статус:** active (счётчик пользователей включается после развёртывания `stats-worker/` и заполнения `usageStats.endpoint`)
-**Модули:** src/main/usageStats.js, src/main.js (`usageStatsReporter`, `usageStatsJob`, секция `UsageStats` в `defaultConfig`), src/main/settingsPatch.js (`UsageStats.enabled`), src/core/settings/GeneralSettings.jsx (`UsageStatsSettingsCard`), src/core/onboarding/OnboardingWizard.jsx (переключатель на шаге «You're all set»), stats-worker/ (Cloudflare Worker + D1: `src/index.js`, `src/stats.js`, `src/dashboard.js`, `schema.sql`, `wrangler.toml`), scripts/usage-stats.js (`npm run stats`), package.json (`usageStats.endpoint`)
+**Модули:** src/main/usageStats.js, src/main.js (`usageStatsReporter`, `usageStatsJob`, секция `UsageStats` в `defaultConfig`), src/main/settingsPatch.js (`UsageStats.enabled`), src/core/settings/GeneralSettings.jsx (`UsageStatsSettingsCard`), src/core/onboarding/OnboardingWizard.jsx (переключатель на шаге «You're all set»), stats-worker/ (Cloudflare Worker + D1: `src/index.js`, `src/stats.js`, `src/dashboard.js`, `schema.sql`, `wrangler.toml`), .github/workflows/stats-worker.yml (деплой), scripts/usage-stats.js (`npm run stats`), package.json (`usageStats.endpoint`)
 **Тесты:** test/usageStats.test.js, test/usageStatsWorker.test.js, test/usageStatsReport.test.js; `node --test test/usageStats.test.js test/usageStatsWorker.test.js test/usageStatsReport.test.js`
 
 ## Назначение
@@ -28,7 +28,7 @@
 Как читать скачивания GitHub: «Установщики» — сумма скачиваний `.exe`, `.AppImage`, `.deb` (сюда же попадают полные загрузки при автообновлении); «Проверки обновлений» — запросы `latest.yml`/`latest-linux.yml`, их делает каждое запущенное приложение при проверке, поэтому это счётчик запусков, а не людей. `.blockmap` не считается.
 
 ## Развёртывание счётчика
-Пошагово — в `stats-worker/README.md`. Коротко: `wrangler d1 create`, `npm run db:init`, `wrangler secret put STATS_TOKEN`, `npm run deploy`, затем адрес worker'а в `package.json` → `usageStats.endpoint` и новый релиз. Пока поле пустое, приложение ничего не отправляет.
+Пошагово — в `stats-worker/README.md`. База D1 уже создана; worker разворачивает workflow `.github/workflows/stats-worker.yml` (при изменениях `stats-worker/` в `main` и вручную), ему нужны секреты репозитория `CLOUDFLARE_API_TOKEN` и `STATS_TOKEN`. После первого деплоя адрес worker'а вписывается в `package.json` → `usageStats.endpoint`, и выходит новый релиз. Пока поле пустое, приложение ничего не отправляет.
 
 ## Как это работает
 1. `createUsageStatsReporter` (main) читает `usage-stats.json` (`installId`, `lastReportDay`). Если сегодняшний UTC‑день уже отмечен — ничего не делает. Иначе создаёт id (сразу пишет его на диск, чтобы сбой посреди запроса не породил второй), шлёт `POST <endpoint>/v1/ping` с четырьмя полями, таймаут 10 с; при ответе 2xx отмечает день. Ошибка сети или не‑2xx → день не отмечен, следующий прогон повторит с тем же id.

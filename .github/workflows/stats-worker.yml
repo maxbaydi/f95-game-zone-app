@@ -1,0 +1,80 @@
+name: Stats worker
+
+# Deploys stats-worker/ (Cloudflare Worker + D1) whenever it changes on main,
+# or by hand from the Actions tab. Needs the repository secrets
+# CLOUDFLARE_API_TOKEN and STATS_TOKEN (CLOUDFLARE_ACCOUNT_ID is optional);
+# without the API token the job only prints a notice. See
+# stats-worker/README.md.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "stats-worker/**"
+      - ".github/workflows/stats-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stats-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: stats-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STATS_TOKEN: ${{ secrets.STATS_TOKEN }}
+      WRANGLER_SEND_METRICS: "false"
+
+    steps:
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set, nothing to deploy (stats-worker/README.md)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: .
+
+      - name: Checkout code
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: stats-worker/package-lock.json
+
+      - name: Install wrangler
+        if: steps.secrets.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Apply the database schema
+        if: steps.secrets.outputs.ready == 'true'
+        run: npx wrangler d1 execute f95launcher-stats --remote --file=schema.sql --yes
+
+      - name: Deploy
+        if: steps.secrets.outputs.ready == 'true'
+        run: npx wrangler deploy
+
+      - name: Upload STATS_TOKEN
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          if [ -z "$STATS_TOKEN" ]; then
+            echo "::warning::STATS_TOKEN is not set: pings are accepted, but the dashboard and /v1/stats stay locked."
+            exit 0
+          fi
+          printf '%s' "$STATS_TOKEN" | npx wrangler secret put STATS_TOKEN

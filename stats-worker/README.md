@@ -2,26 +2,34 @@
 
 Анонимный счётчик установок и активных пользователей F95Launcher: Cloudflare Worker + база D1. Укладывается в бесплатный тариф Cloudflare (Workers Free: 100 000 запросов в сутки; D1 Free: 5 ГБ и 5 млн чтений строк в сутки), сам не «засыпает». Что именно собирается и как устроено — `docs/usage-stats.md`.
 
-## Развёртывание (один раз, ~10 минут)
+## Развёртывание через GitHub Actions (основной путь)
 
-Нужны Node.js 18+ и бесплатный аккаунт Cloudflare.
+База D1 `f95launcher-stats` уже создана в аккаунте Cloudflare (id в `wrangler.toml`), таблицы на месте. Worker разворачивает workflow **Stats worker** (`.github/workflows/stats-worker.yml`): сам при каждом изменении `stats-worker/` в `main` и по кнопке Run workflow. Каждый прогон заново применяет `schema.sql` (безопасно: только `CREATE ... IF NOT EXISTS`), деплоит worker и загружает `STATS_TOKEN`.
+
+Один раз:
+
+1. Cloudflare → My Profile → API Tokens → Create Token → шаблон **Edit Cloudflare Workers** → в Permissions добавить строку **Account · D1 · Edit** → Continue to summary → Create Token. Скопировать токен.
+2. Если в аккаунте ещё не было ни одного worker'а: открыть в панели Cloudflare раздел Workers & Pages и выбрать поддомен `workers.dev`. Без этого первый деплой остановится с просьбой зарегистрировать поддомен.
+3. GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret:
+   - `CLOUDFLARE_API_TOKEN` — токен из шага 1;
+   - `STATS_TOKEN` — длинный пароль от статистики, его же вводить на дашборде. Сгенерировать: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`;
+   - `CLOUDFLARE_ACCOUNT_ID` — не обязательно; нужен, только если у токена доступ к нескольким аккаунтам (Account ID виден справа на странице Workers & Pages).
+4. Actions → Stats worker → Run workflow. В логе шага Deploy будет адрес `https://f95launcher-stats.<поддомен>.workers.dev`.
+
+## Развёртывание вручную
+
+Нужны Node.js 18+ и вход в тот же аккаунт Cloudflare.
 
 ```powershell
 cd stats-worker
 npm install
 npx wrangler login                          # откроется браузер, войти в Cloudflare
-npx wrangler d1 create f95launcher-stats    # скопировать database_id из ответа
+npm run db:init                             # таблицы в D1 (повторный запуск ничего не ломает)
+npm run deploy                              # выведет адрес https://f95launcher-stats.<поддомен>.workers.dev
+npx wrangler secret put STATS_TOKEN         # ввести пароль от статистики
 ```
 
-Вставить `database_id` в `wrangler.toml` вместо `REPLACE_WITH_DATABASE_ID`, затем:
-
-```powershell
-npm run db:init                             # создать таблицы в D1
-npx wrangler secret put STATS_TOKEN         # ввести длинную случайную строку — пароль от статистики
-npm run deploy                              # выведет адрес https://f95launcher-stats.<аккаунт>.workers.dev
-```
-
-Случайную строку для токена можно получить так: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`.
+Для другого аккаунта Cloudflare сначала `npx wrangler d1 create f95launcher-stats` и новый `database_id` в `wrangler.toml`.
 
 ## Подключение приложения
 
