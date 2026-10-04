@@ -1,6 +1,63 @@
 // The stats page served at "/". It holds no data or secrets: download counts
 // come straight from the public GitHub API in the browser, usage numbers from
-// /v1/stats with the token the viewer types in (kept in this browser only).
+// /v1/stats with the token the viewer types in or opens the page with as
+// "/#key=<token>" (kept in this browser only; the fragment never reaches the
+// server). The two exported helpers run inside the page as they are.
+
+import { FEATURE_GROUPS, FEATURE_LABELS } from "./features.js";
+
+/**
+ * @param {unknown} hash location.hash, e.g. "#key=abc"
+ * @returns {string} the token from the link, or ""
+ */
+export function readKeyFromHash(hash) {
+  var parts = String(hash || "").replace(/^#/, "").split("&");
+  for (var index = 0; index < parts.length; index += 1) {
+    if (parts[index].indexOf("key=") !== 0) {
+      continue;
+    }
+    try {
+      return decodeURIComponent(parts[index].slice(4)).trim();
+    } catch (error) {
+      return "";
+    }
+  }
+  return "";
+}
+
+/**
+ * Rows for the "what people use" table, most users first, plus the known
+ * features nobody used in the window.
+ *
+ * @param {{ reporting: number, items: Array<{ name: string, users: number, uses: number }> } | undefined} features
+ * @param {Record<string, string>} labels
+ * @param {Record<string, string>} groups
+ */
+export function buildFeatureRows(features, labels, groups) {
+  var items = (features && features.items) || [];
+  var reporting = (features && features.reporting) || 0;
+  var seen = {};
+  var groupOf = function (name) {
+    var prefix = name.split(".")[0];
+    return groups[prefix] || prefix;
+  };
+  var used = items.map(function (item) {
+    seen[item.name] = true;
+    return {
+      name: item.name,
+      label: labels[item.name] || item.name,
+      group: groupOf(item.name),
+      users: item.users,
+      share: reporting ? Math.round((item.users / reporting) * 100) : 0,
+      uses: item.uses,
+      perUser: item.users ? Math.round((item.uses / item.users) * 10) / 10 : 0,
+    };
+  });
+  var unused = Object.keys(labels)
+    .filter(function (name) { return !seen[name]; })
+    .map(function (name) { return { name: name, label: labels[name], group: groupOf(name) }; });
+  return { used: used, unused: unused };
+}
 
 const PAGE = `<!doctype html>
 <html lang="ru">
@@ -86,8 +143,10 @@ details summary { cursor: pointer; color: var(--ink-2); margin-top: 8px; font-si
 .scroll { overflow-x: auto; }
 .loading { opacity: 0.55; transition: opacity 0.2s; }
 footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
+.unused { color: var(--ink-2); font-size: 13px; margin: 12px 0 0; }
+.unused strong { color: var(--ink); font-weight: 600; }
 @media (max-width: 560px) {
-  #releases .meter-cell { display: none; }
+  #releases .meter-cell, #features .meter-cell, #features .wide-cell { display: none; }
 }
 </style>
 </head>
@@ -103,6 +162,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
       <button type="button" data-days="365">Год</button>
     </div>
     <button type="button" class="link" id="refresh">Обновить</button>
+    <button type="button" class="link" id="copy-link" hidden>Скопировать ссылку для входа</button>
     <button type="button" class="link" id="logout" hidden>Выйти</button>
   </div>
 
@@ -110,7 +170,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
 
   <section class="card" id="login" hidden>
     <h2>Пользователи приложения</h2>
-    <p class="sub">Введите STATS_TOKEN, заданный командой <code>wrangler secret put STATS_TOKEN</code>. Токен хранится только в этом браузере.</p>
+    <p class="sub">Откройте страницу по своей ссылке вида <code>…/#key=&lt;STATS_TOKEN&gt;</code> или введите STATS_TOKEN здесь. Токен хранится только в этом браузере.</p>
     <form class="login" id="login-form">
       <input type="password" id="token" autocomplete="current-password" placeholder="STATS_TOKEN" required>
       <button type="submit">Показать</button>
@@ -133,6 +193,12 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
         <div class="scroll"><table id="daily-table"></table></div>
       </details>
     </section>
+    <section class="card">
+      <h2>Что используют</h2>
+      <p class="sub" id="features-sub"></p>
+      <div class="scroll"><table id="features"></table></div>
+      <p class="unused" id="features-unused" hidden></p>
+    </section>
     <div class="grid3">
       <section class="card"><h2>Версии</h2><p class="sub">Активные за 30 дней</p><table id="versions"></table></section>
       <section class="card"><h2>Системы</h2><p class="sub">Активные за 30 дней</p><table id="platforms"></table></section>
@@ -154,6 +220,10 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
 (function () {
   "use strict";
   var REPO = __REPO_JSON__;
+  var FEATURE_LABELS = __FEATURE_LABELS_JSON__;
+  var FEATURE_GROUPS = __FEATURE_GROUPS_JSON__;
+  ${readKeyFromHash}
+  ${buildFeatureRows}
   var TOKEN_KEY = "f95launcher-stats.token";
   var DAYS_KEY = "f95launcher-stats.days";
   var numberFormat = new Intl.NumberFormat("ru-RU");
@@ -171,6 +241,16 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
     try { return localStorage.getItem(key); } catch (error) { return null; }
   }
   var token = load(TOKEN_KEY) || "";
+  // A personal link "/#key=<token>" signs in without typing; the key is then
+  // kept in this browser and removed from the address bar.
+  var linkKey = readKeyFromHash(location.hash);
+  if (linkKey) {
+    token = linkKey;
+    store(TOKEN_KEY, token);
+  }
+  if (/(^#|&)key=/.test(location.hash)) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   var savedDays = Number(load(DAYS_KEY));
   if ([7, 30, 90, 365].indexOf(savedDays) !== -1) { state.days = savedDays; }
 
@@ -314,8 +394,11 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
       table.appendChild(emptyRow);
       return;
     }
+    var cellClass = function (header) {
+      return [header.num ? "num" : header.meter ? "meter-cell" : "", header.className || ""].join(" ").trim();
+    };
     var head = el("tr");
-    headers.forEach(function (header) { head.appendChild(el("th", header.num ? "num" : header.meter ? "meter-cell" : "", header.label)); });
+    headers.forEach(function (header) { head.appendChild(el("th", cellClass(header), header.label)); });
     table.appendChild(head);
     var max = meterColumn === undefined ? 0 : rows.reduce(function (m, row) { return Math.max(m, row[meterColumn]); }, 0);
     rows.forEach(function (row) {
@@ -332,7 +415,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
           return;
         }
         var value = row[index];
-        tr.appendChild(el("td", header.num ? "num" : "", header.num ? fmt(value) : String(value)));
+        var text = header.format ? header.format(value) : header.num ? fmt(value) : String(value);
+        tr.appendChild(el("td", cellClass(header), text));
       });
       table.appendChild(tr);
     });
@@ -343,6 +427,7 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
     $("usage").hidden = !usage;
     $("login").hidden = Boolean(usage);
     $("logout").hidden = !token;
+    $("copy-link").hidden = !usage;
     if (!usage) { return; }
     barChart($("chart-active"), usage.daily, "active", "var(--series-1)", "Активные пользователи по дням");
     barChart($("chart-new"), usage.daily, "new", "var(--series-2)", "Новые установки по дням");
@@ -353,7 +438,38 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
     fillTable($("versions"), breakdownHeaders("Версия"), toRows(usage.versions), 2);
     fillTable($("platforms"), breakdownHeaders("Система"), toRows(usage.platforms), 2);
     fillTable($("countries"), breakdownHeaders("Страна"), toRows(usage.countries), 2);
+    renderFeatures(usage.features);
     $("footer").textContent = "Данные пользователей обновлены " + new Date(usage.generatedAt).toLocaleString("ru-RU") + ".";
+  }
+
+  var decimalFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
+  function renderFeatures(features) {
+    var reporting = (features && features.reporting) || 0;
+    var rows = buildFeatureRows(features, FEATURE_LABELS, FEATURE_GROUPS);
+    $("features-sub").textContent = reporting
+      ? "За выбранный период. Доля — от " + fmt(reporting) + " пользователей, приславших данные о функциях (версия 1.8.3 и новее). Сначала самое востребованное."
+      : "Учёт функций есть в приложении с версии 1.8.3; цифры появятся, когда пользователи обновятся.";
+    fillTable(
+      $("features"),
+      [
+        { label: "Функция" },
+        { label: "Раздел", className: "wide-cell" },
+        { label: "", meter: true },
+        { label: "Польз.", num: true },
+        { label: "Доля", num: true, format: function (value) { return value + " %"; } },
+        { label: "Раз", num: true },
+        { label: "На польз.", num: true, className: "wide-cell", format: function (value) { return decimalFormat.format(value); } },
+      ],
+      rows.used.map(function (r) { return [r.label, r.group, null, r.users, r.share, r.uses, r.perUser]; }),
+      3
+    );
+    var unused = $("features-unused");
+    unused.textContent = "";
+    unused.hidden = !reporting || !rows.unused.length;
+    if (!unused.hidden) {
+      unused.appendChild(el("strong", "", "Не использовали за период: "));
+      unused.appendChild(document.createTextNode(rows.unused.map(function (r) { return r.label; }).join(", ") + "."));
+    }
   }
 
   function summarizeReleases(releases) {
@@ -462,6 +578,16 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
     loadUsage();
   });
   $("refresh").addEventListener("click", function () { loadUsage(); loadDownloads(); });
+  $("copy-link").addEventListener("click", function () {
+    var link = location.origin + location.pathname + "#key=" + encodeURIComponent(token);
+    var done = function () { $("copy-link").textContent = "Ссылка скопирована"; };
+    var fallback = function () { window.prompt("Ссылка для входа (держите её в секрете):", link); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(done, fallback);
+    } else {
+      fallback();
+    }
+  });
   $("logout").addEventListener("click", function () {
     token = "";
     store(TOKEN_KEY, null);
@@ -497,5 +623,8 @@ footer { color: var(--muted); font-size: 12px; margin-top: 24px; }
  */
 export function renderDashboard(options) {
   const repo = /^[\w.-]+\/[\w.-]+$/.test(options.repo || "") ? options.repo : "";
-  return PAGE.replace("__REPO_JSON__", JSON.stringify(repo));
+  const toScript = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
+  return PAGE.replace("__REPO_JSON__", () => toScript(repo))
+    .replace("__FEATURE_LABELS_JSON__", () => toScript(FEATURE_LABELS))
+    .replace("__FEATURE_GROUPS_JSON__", () => toScript(FEATURE_GROUPS));
 }

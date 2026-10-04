@@ -23,3 +23,13 @@ CREATE TABLE IF NOT EXISTS daily_active (
   platform TEXT NOT NULL,
   PRIMARY KEY (day, id)
 ) WITHOUT ROWID;
+
+-- How many times each install used each app feature on a UTC day (counts
+-- sent with the ping, see src/features.js). Pruned with daily_active.
+CREATE TABLE IF NOT EXISTS feature_daily (
+  day TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  id TEXT NOT NULL,
+  uses INTEGER NOT NULL,
+  PRIMARY KEY (day, feature, id)
+) WITHOUT ROWID;

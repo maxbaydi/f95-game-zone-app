@@ -676,6 +676,16 @@ const App = () => {
   const [isSiteSearchLoading, setIsSiteSearchLoading] = useState(false);
   const [siteSearchError, setSiteSearchError] = useState("");
   const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
+  // Anonymous feature counter: which parts of the app get opened
+  // (docs/feature-usage-stats.md).
+  useEffect(() => {
+    window.electronAPI?.trackFeature?.(`section.${activeSection}`);
+  }, [activeSection]);
+  useEffect(() => {
+    if (downloadsPanelOpen) {
+      window.electronAPI?.trackFeature?.("downloads.open-panel");
+    }
+  }, [downloadsPanelOpen]);
   const [f95Downloads, setF95Downloads] = useState({
     items: [],
     activeCount: 0,

@@ -50,7 +50,9 @@ npx wrangler secret put STATS_TOKEN         # ввести пароль от с�
 
 ## Где смотреть
 
-- Открыть адрес worker'а в браузере и ввести `STATS_TOKEN` (хранится только в этом браузере).
+- Личная ссылка без ввода токена: `https://f95launcher-stats.maxbayqoor.workers.dev/#key=<STATS_TOKEN>`. Ключ во фрагменте `#` не уходит на сервер; страница сохраняет его в этом браузере и убирает из адреса, дальше хватает обычного адреса. Ссылку для другого устройства даёт кнопка «Скопировать ссылку для входа». Ссылка равна паролю — не публиковать.
+- Или открыть адрес worker'а и ввести `STATS_TOKEN` вручную.
+- Блок «Что используют» — какие функции приложения используют (с версии 1.8.3), см. `docs/feature-usage-stats.md`.
 - Или в корне репозитория:
   ```powershell
   $env:F95LAUNCHER_STATS_URL = "https://f95launcher-stats.maxbayqoor.workers.dev"
@@ -78,6 +80,6 @@ npm run dev
 ## Обслуживание
 
 - Старые записи по дням (старше 400 дней) удаляются cron'ом раз в сутки; таблица установок хранит по одной строке на установку.
-- Сменить токен: `npx wrangler secret put STATS_TOKEN` ещё раз.
+- Сменить токен: `npx wrangler secret put STATS_TOKEN` ещё раз. Старая ссылка `#key=` перестанет работать, страница попросит новый токен.
 - Выгрузить всё: `npx wrangler d1 export f95launcher-stats --remote --output=stats.sql`.
 - Защита от накрутки (необязательно): в панели Cloudflare → Security → WAF → Rate limiting rules ограничить `POST /v1/ping`, например 20 запросов в минуту с одного IP.

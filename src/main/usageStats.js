@@ -6,8 +6,9 @@ const { writeFileAtomicSync } = require("./atomicFile");
 
 // Anonymous usage counter: once a UTC day the app tells the stats endpoint
 // that this install is alive. The payload is a random install id created on
-// this PC, the app version, the OS and the CPU architecture; nothing about
-// games, the library or accounts. See docs/usage-stats.md.
+// this PC, the app version, the OS, the CPU architecture and how many times
+// each app feature was used (featureUsage.js); nothing about games, the
+// library or accounts. See docs/usage-stats.md.
 
 const USAGE_STATS_FILE_NAME = "usage-stats.json";
 const USAGE_STATS_ENV_VAR = "F95LAUNCHER_USAGE_STATS_URL";
@@ -79,6 +80,10 @@ function resolveUsageStatsEndpoint(input) {
  *   randomUUID?: () => string,
  *   fs?: typeof fs,
  *   timeoutMs?: number,
+ *   features?: {
+ *     pending: () => Record<string, number>,
+ *     acknowledge: (sent: Record<string, number>) => void,
+ *   },
  * }} options
  */
 function createUsageStatsReporter(options) {
@@ -155,6 +160,8 @@ function createUsageStatsReporter(options) {
       writeState({ installId, lastReportDay: state.lastReportDay });
     }
 
+    // Feature counts since the last successful ping (docs/feature-usage-stats.md).
+    const features = options.features ? options.features.pending() : undefined;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -166,6 +173,7 @@ function createUsageStatsReporter(options) {
           version: String(options.appVersion || "").replace(/^v/i, ""),
           platform,
           arch,
+          ...(features ? { features } : {}),
         }),
         signal: controller.signal,
       });
@@ -177,6 +185,9 @@ function createUsageStatsReporter(options) {
     }
 
     writeState({ installId, lastReportDay: today });
+    if (features) {
+      options.features?.acknowledge(features);
+    }
     return { sent: true, reason: "sent", day: today };
   }
 

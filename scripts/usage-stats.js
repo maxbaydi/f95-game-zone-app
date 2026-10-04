@@ -157,6 +157,20 @@ function formatReport(report) {
         lines.push(`  ${padEnd(point.day, 12)}${padStart(point.active, 10)}${padStart(point.new, 8)}`);
       }
     }
+
+    // What people use (docs/feature-usage-stats.md), most users first.
+    const features = usage.features || { reporting: 0, items: [] };
+    lines.push("");
+    if (!features.reporting) {
+      lines.push("  Функции: пока нет данных (учёт с версии 1.8.3).");
+    } else {
+      lines.push(`  Функции за ${usage.days} дн. (данные от ${features.reporting} польз.)`);
+      lines.push(`  ${padEnd("Функция", 30)}${padStart("Польз.", 8)}${padStart("Доля", 8)}${padStart("Раз", 9)}`);
+      for (const item of features.items || []) {
+        const share = `${Math.round((item.users / features.reporting) * 100)} %`;
+        lines.push(`  ${padEnd(item.name, 30)}${padStart(item.users, 8)}${padStart(share, 8)}${padStart(item.uses, 9)}`);
+      }
+    }
   }
   return lines.join("\n");
 }

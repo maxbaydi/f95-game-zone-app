@@ -138,6 +138,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("check-record-exist", params),
   importGames: (params) => ipcRenderer.invoke("import-games", params),
   log: (message) => ipcRenderer.invoke("log", message),
+  // Anonymous "which part of the app was opened" counter (fire and forget).
+  trackFeature: (feature) =>
+    ipcRenderer.invoke("track-feature", String(feature)).catch(() => {}),
   sendUpdateProgress: (progress) =>
     ipcRenderer.invoke("update-progress", progress),
   getAvailableBannerTemplates: () =>

@@ -155,7 +155,7 @@ const AutomationSettingsCard = ({ settings }) => {
 
 // Lists exactly what the daily ping carries (fields in docs/usage-stats.md).
 const USAGE_STATS_DESCRIPTION =
-  "Once a day F95Launcher tells the developer it is in use, so they can see how many people run it. It sends a random ID created on this PC, the app version, the OS and the processor type. Nothing about your games, library, files or F95 account is sent, and your IP address is not stored.";
+  "Once a day F95Launcher tells the developer it is in use, so they can see how many people run it and which parts of the app matter most. It sends a random ID created on this PC, the app version, the OS, the processor type and how many times each feature was used (for example: games launched, downloads started, saves synced). Nothing about your games, library, files or F95 account is sent, and your IP address is not stored.";
 
 const UsageStatsSettingsCard = ({ settings }) => {
   const usageStats = settings.config?.UsageStats || {};

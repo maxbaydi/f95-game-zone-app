@@ -216,6 +216,7 @@
     checkRecordExist: p({ exists: false }),
     importGames: p({ success: false }),
     log: pn,
+    trackFeature: pn,
     sendUpdateProgress: pn,
     getAvailableBannerTemplates: () => Promise.resolve([]),
     getSelectedBannerTemplate: () => Promise.resolve("Default"),

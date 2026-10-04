@@ -80,11 +80,11 @@ npm run ci:check
 
 ## Usage statistics
 
-Once a day the app sends an anonymous ping (a random install ID made on the PC, the app version, the OS and the CPU architecture) so the maintainer can see how many people use it. Nothing about games, the library, files or accounts is sent, and the IP address is not stored. It can be turned off in Settings → General → Usage statistics or on the last step of the setup assistant. Only packaged builds report, and only once `usageStats.endpoint` in `package.json` points at a deployed counter.
+Once a day the app sends an anonymous ping (a random install ID made on the PC, the app version, the OS, the CPU architecture and how many times each app feature from a fixed list was used) so the maintainer can see how many people use it and which features matter. Nothing about games, the library, files or accounts is sent, and the IP address is not stored. It can be turned off in Settings → General → Usage statistics or on the last step of the setup assistant. Only packaged builds report, and only once `usageStats.endpoint` in `package.json` points at a deployed counter.
 
-- the counter is a Cloudflare Worker with a D1 database in `stats-worker/` (deploy steps in `stats-worker/README.md`); opening its URL shows a dashboard with installs, daily/weekly/monthly users, versions, systems, countries and GitHub downloads per release
+- the counter is a Cloudflare Worker with a D1 database in `stats-worker/` (deploy steps in `stats-worker/README.md`); opening its URL shows a dashboard with installs, daily/weekly/monthly users, versions, systems, countries, the most and least used features and GitHub downloads per release; a personal link `<worker URL>/#key=<STATS_TOKEN>` opens it without typing the token
 - `npm run stats` prints GitHub downloads per release and, with `F95LAUNCHER_STATS_URL` and `F95LAUNCHER_STATS_TOKEN` set, the user numbers
-- details: `docs/usage-stats.md`
+- details: `docs/usage-stats.md`, `docs/feature-usage-stats.md`
 
 ## Releases
 

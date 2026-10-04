@@ -448,7 +448,7 @@ const OnboardingDoneStep = ({
         </window.SettingRow>
         <window.SettingRow
           title="Send anonymous usage statistics"
-          description="Once a day: a random ID, the app version, the OS and the processor type, so the developer knows how many people use the app. Nothing about your games, files or accounts."
+          description="Once a day: a random ID, the app version, the OS, the processor type and how often each part of the app was used, so the developer knows how many people use it and what to improve. Nothing about your games, files or accounts."
         >
           <window.ToggleSwitch
             label="Send anonymous usage statistics"

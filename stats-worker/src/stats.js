@@ -1,12 +1,16 @@
 import { renderDashboard } from "./dashboard.js";
+import { parseFeatures } from "./features.js";
+
+export { MAX_FEATURES_PER_PING } from "./features.js";
 
 // Per-day rows older than this are deleted by the daily cron. The installs
 // table keeps one row per install for the all-time count.
 export const RETENTION_DAYS = 400;
 export const DEFAULT_STATS_DAYS = 30;
 export const MAX_STATS_DAYS = 366;
-const MAX_PING_BYTES = 2048;
+const MAX_PING_BYTES = 4096;
 const BREAKDOWN_LIMIT = 20;
+const FEATURE_LIMIT = 100;
 
 const INSTALL_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -33,8 +37,9 @@ export function shiftDay(day, delta) {
 }
 
 /**
- * Validates a ping body. Only the four known fields are read; anything else
- * in the body is ignored and never stored.
+ * Validates a ping body. Only the known fields are read; anything else in
+ * the body is ignored and never stored. Feature counts are optional (older
+ * app versions do not send them) and a bad entry is dropped, not fatal.
  *
  * @param {string} text
  */
@@ -64,7 +69,10 @@ export function parsePing(text) {
   if (!ARCHES.has(arch)) {
     return { ok: false, error: "Invalid arch." };
   }
-  return { ok: true, value: { id, version, platform, arch } };
+  return {
+    ok: true,
+    value: { id, version, platform, arch, features: parseFeatures(body.features) },
+  };
 }
 
 /**
@@ -77,11 +85,20 @@ export function normalizeCountry(value) {
 
 /**
  * @param {any} db D1 binding
- * @param {{ id: string, version: string, platform: string, arch: string }} ping
+ * @param {{ id: string, version: string, platform: string, arch: string, features?: Record<string, number> }} ping
  * @param {string} day
  * @param {string} country
  */
 export async function recordPing(db, ping, day, country) {
+  const featureRows = Object.entries(ping.features || {}).map(([feature, uses]) =>
+    db
+      .prepare(
+        `INSERT INTO feature_daily (day, feature, id, uses)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (day, feature, id) DO UPDATE SET uses = feature_daily.uses + excluded.uses`,
+      )
+      .bind(day, feature, ping.id, uses),
+  );
   await db.batch([
     db
       .prepare(
@@ -102,6 +119,7 @@ export async function recordPing(db, ping, day, country) {
          ON CONFLICT (day, id) DO UPDATE SET version = excluded.version`,
       )
       .bind(day, ping.id, ping.version, ping.platform),
+    ...featureRows,
   ]);
 }
 
@@ -159,6 +177,21 @@ export async function buildStats(db, today, days) {
   const platforms = await breakdown("platform || ' ' || arch");
   const countries = await breakdown("CASE WHEN country = '' THEN '??' ELSE country END");
 
+  // Features cover the selected window. "reporting" is how many installs sent
+  // any feature counts in it, the base for "what share of users".
+  const featureRows = await selectAll(
+    db,
+    `SELECT feature AS name, COUNT(DISTINCT id) AS users, SUM(uses) AS uses
+     FROM feature_daily WHERE day >= ?1
+     GROUP BY feature ORDER BY users DESC, uses DESC, name ASC LIMIT ${FEATURE_LIMIT}`,
+    [from],
+  );
+  const [reportingRow] = await selectAll(
+    db,
+    `SELECT COUNT(DISTINCT id) AS reporting FROM feature_daily WHERE day >= ?1`,
+    [from],
+  );
+
   const activeByDay = new Map(activeRows.map((row) => [row.day, Number(row.count)]));
   const newByDay = new Map(newRows.map((row) => [row.day, Number(row.count)]));
   const daily = [];
@@ -188,6 +221,14 @@ export async function buildStats(db, today, days) {
     versions: toList(versions),
     platforms: toList(platforms),
     countries: toList(countries),
+    features: {
+      reporting: Number(reportingRow?.reporting) || 0,
+      items: featureRows.map((row) => ({
+        name: String(row.name),
+        users: Number(row.users),
+        uses: Number(row.uses),
+      })),
+    },
   };
 }
 
@@ -196,10 +237,11 @@ export async function buildStats(db, today, days) {
  * @param {string} today
  */
 export async function pruneOldDays(db, today) {
-  await db
-    .prepare(`DELETE FROM daily_active WHERE day < ?1`)
-    .bind(shiftDay(today, -RETENTION_DAYS))
-    .run();
+  const cutoff = shiftDay(today, -RETENTION_DAYS);
+  await db.batch([
+    db.prepare(`DELETE FROM daily_active WHERE day < ?1`).bind(cutoff),
+    db.prepare(`DELETE FROM feature_daily WHERE day < ?1`).bind(cutoff),
+  ]);
 }
 
 /**

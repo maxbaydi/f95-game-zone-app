@@ -72,6 +72,11 @@ const SettingsPanel = ({
   const navRef = React.useRef(null);
   const [indicator, setIndicator] = React.useState({ top: 0, height: 0 });
 
+  // Anonymous feature counter: which settings pages get opened.
+  React.useEffect(() => {
+    window.electronAPI?.trackFeature?.(`settings.page-${selected}`);
+  }, [selected]);
+
   React.useEffect(() => {
     // Older callers still ask for the "cloud" page.
     const requested = initialPage === "cloud" ? "saves" : initialPage;

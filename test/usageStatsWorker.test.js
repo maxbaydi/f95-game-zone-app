@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
-const sqlite3 = require("sqlite3");
+const { createD1 } = require("./helpers/fakeD1");
 
 const SCHEMA = fs.readFileSync(
   path.join(__dirname, "..", "stats-worker", "schema.sql"),
@@ -17,61 +17,6 @@ const NOW = Date.parse("2026-10-04T12:00:00Z");
 
 function loadWorker() {
   return import("../stats-worker/src/stats.js");
-}
-
-// The subset of the D1 binding the worker uses, backed by an in-memory
-// SQLite database so the real SQL runs.
-function createD1() {
-  const db = new sqlite3.Database(":memory:");
-  const run = (sql, params) =>
-    new Promise((resolve, reject) => {
-      db.run(sql, params, function onRun(error) {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve({ success: true, meta: { changes: this.changes } });
-      });
-    });
-  const all = (sql, params) =>
-    new Promise((resolve, reject) => {
-      db.all(sql, params, (error, rows) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve({ success: true, results: rows });
-      });
-    });
-  const statement = (sql, params) => ({
-    bind: (...next) => statement(sql, next),
-    run: () => run(sql, params),
-    all: () => all(sql, params),
-    first: async () => (await all(sql, params)).results[0] ?? null,
-  });
-  return {
-    prepare: (sql) => statement(sql, []),
-    async batch(statements) {
-      await run("BEGIN", []);
-      try {
-        const results = [];
-        for (const item of statements) {
-          results.push(await item.run());
-        }
-        await run("COMMIT", []);
-        return results;
-      } catch (error) {
-        await run("ROLLBACK", []);
-        throw error;
-      }
-    },
-    exec: (sql) =>
-      new Promise((resolve, reject) => {
-        db.exec(sql, (error) => (error ? reject(error) : resolve()));
-      }),
-    rows: (sql, params = []) => all(sql, params).then((result) => result.results),
-    close: () => new Promise((resolve) => db.close(() => resolve())),
-  };
 }
 
 async function createEnv() {
@@ -153,7 +98,7 @@ test("pings with a wrong shape are refused and nothing is stored", async () => {
   }
 
   const tooLarge = await handleRequest(
-    ping({ ...goodPing(ID_A), padding: "x".repeat(4000) }),
+    ping({ ...goodPing(ID_A), padding: "x".repeat(4100) }),
     env,
     NOW,
   );
@@ -170,7 +115,7 @@ test("pings with a wrong shape are refused and nothing is stored", async () => {
   await env.DB.close();
 });
 
-test("fields beyond the four known ones are never stored", async () => {
+test("fields beyond the known ones are never stored", async () => {
   const { handleRequest } = await loadWorker();
   const env = await createEnv();
   const response = await handleRequest(
@@ -268,6 +213,30 @@ test("the daily cleanup drops per-day rows past the retention window", async () 
   assert.deepEqual(await env.DB.rows("SELECT id FROM daily_active"), [{ id: ID_B }]);
   assert.deepEqual(await env.DB.rows("SELECT COUNT(*) AS n FROM installs"), [{ n: 2 }]);
   await env.DB.close();
+});
+
+test("a #key= link signs the dashboard in without typing the token", async () => {
+  const { readKeyFromHash, renderDashboard } = await import("../stats-worker/src/dashboard.js");
+  assert.equal(readKeyFromHash("#key=abc_DEF-123"), "abc_DEF-123");
+  assert.equal(readKeyFromHash("#key=a%2Bb"), "a+b");
+  assert.equal(readKeyFromHash("#days=30&key=xyz"), "xyz");
+  assert.equal(readKeyFromHash("#key=%20padded%20"), "padded");
+  assert.equal(readKeyFromHash(""), "");
+  assert.equal(readKeyFromHash("#other=1"), "");
+  assert.equal(readKeyFromHash("#key="), "");
+  assert.equal(readKeyFromHash("#key=%E0%A4%A"), "", "a malformed escape is ignored");
+  assert.equal(readKeyFromHash(undefined), "");
+
+  // The page runs this very function, then drops the key from the address bar.
+  const html = renderDashboard({ repo: "" });
+  assert.ok(html.includes(readKeyFromHash.toString()));
+  assert.ok(html.includes("history.replaceState"));
+
+  // The page helpers are copied into the page with toString(), so the bundle
+  // must not wrap functions in esbuild's __name() helper, which the page
+  // does not have.
+  const wranglerToml = fs.readFileSync(path.join(__dirname, "..", "stats-worker", "wrangler.toml"), "utf8");
+  assert.match(wranglerToml, /^keep_names = false$/m);
 });
 
 test("the dashboard is served without data and with a locked-down policy", async () => {

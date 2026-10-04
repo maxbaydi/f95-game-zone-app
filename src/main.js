@@ -139,6 +139,11 @@ const {
   createUsageStatsReporter,
   resolveUsageStatsEndpoint,
 } = require("./main/usageStats");
+const {
+  FEATURE_USAGE_FILE_NAME,
+  createFeatureUsageCounter,
+  instrumentIpcHandlers,
+} = require("./main/featureUsage");
 const { runScheduledLibraryBackup } = require("./main/libraryAutoBackup");
 const { listLibraryBackups } = require("./main/libraryBackups");
 const { backupDatabaseFile } = require("./main/libraryReset");
@@ -459,6 +464,14 @@ const libraryAutoBackupJob = createPeriodicJob({
 // still counted every day it runs.
 const USAGE_STATS_STARTUP_DELAY_MS = 90 * 1000;
 const USAGE_STATS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
+// Which features are used, counted only while the ping is active and sent
+// with it (docs/feature-usage-stats.md). Handlers registered below are
+// wrapped, so this runs before any ipcMain.handle call.
+const featureUsage = createFeatureUsageCounter({
+  statePath: path.join(dataDir, FEATURE_USAGE_FILE_NAME),
+  isEnabled: () => usageStatsReporter.isActive(),
+});
+instrumentIpcHandlers(ipcMain, featureUsage);
 const usageStatsReporter = createUsageStatsReporter({
   statePath: path.join(dataDir, USAGE_STATS_FILE_NAME),
   endpoint: resolveUsageStatsEndpoint({
@@ -469,11 +482,15 @@ const usageStatsReporter = createUsageStatsReporter({
   appVersion: app.getVersion(),
   isEnabled: () =>
     (appConfig || defaultConfig)?.UsageStats?.enabled !== false,
+  features: featureUsage,
 });
 const usageStatsJob = createPeriodicJob({
   name: "usage-stats",
   intervalMs: USAGE_STATS_RECHECK_INTERVAL_MS,
-  run: () => usageStatsReporter.reportIfDue(),
+  run: () => {
+    featureUsage.flush();
+    return usageStatsReporter.reportIfDue();
+  },
   isEnabled: () => usageStatsReporter.isActive(),
 });
 
@@ -4861,6 +4878,12 @@ ipcMain.handle("log", async (event, message) => {
   console.log(`Renderer: ${message}`);
 });
 
+// Where the user goes (sections, settings pages); only names from the
+// fixed list in featureUsage.js are counted.
+ipcMain.handle("track-feature", async (_event, feature) => {
+  featureUsage.recordRenderer(feature);
+});
+
 ipcMain.handle("update-progress", async (event, progress) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window) {
@@ -7207,6 +7230,7 @@ app.whenReady().then(async () => {
     });
   libraryAutoBackupJob.start({ initialDelayMs: AUTO_BACKUP_STARTUP_DELAY_MS });
   catalogSyncJob.start();
+  featureUsage.record("app.launch");
   usageStatsJob.start({ initialDelayMs: USAGE_STATS_STARTUP_DELAY_MS });
   powerMonitor.on("resume", () => {
     // The network needs a moment after wake-up; then re-check everything the
@@ -7252,6 +7276,11 @@ app.on("will-quit", () => {
   libraryAutoBackupJob.stop();
   catalogSyncJob.stop();
   usageStatsJob.stop();
+  try {
+    featureUsage.flush();
+  } catch (error) {
+    console.warn("[usage-stats] Could not keep feature counts:", error);
+  }
   f95CatalogSync?.cancel();
   libraryLiveUpdateChecker?.stop();
   if (f95LoginLiveCheckTimer) {

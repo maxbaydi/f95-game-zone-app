@@ -1,6 +1,9 @@
 name = "f95launcher-stats"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
+# The dashboard copies two helpers into its page with toString(); esbuild's
+# keep-names wrapper (__name) would end up there and break the page.
+keep_names = false
 # Not a secret; needed because account-owned API tokens cannot look it up.
 account_id = "d166286035506436e8301afa6efa49ef"
 
