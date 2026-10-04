@@ -13,7 +13,7 @@
 3. GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret:
    - `CLOUDFLARE_API_TOKEN` — токен из шага 1;
    - `STATS_TOKEN` — длинный пароль от статистики, его же вводить на дашборде. Сгенерировать: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`;
-   - `CLOUDFLARE_ACCOUNT_ID` — не обязательно; нужен, только если у токена доступ к нескольким аккаунтам (Account ID виден справа на странице Workers & Pages).
+   - `CLOUDFLARE_ACCOUNT_ID` не нужен: Account ID уже записан в `wrangler.toml`.
 4. Actions → Stats worker → Run workflow. В логе шага Deploy будет адрес `https://f95launcher-stats.<поддомен>.workers.dev`.
 
 ## Развёртывание вручную

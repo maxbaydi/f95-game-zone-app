@@ -1,6 +1,8 @@
 name = "f95launcher-stats"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
+# Not a secret; needed because account-owned API tokens cannot look it up.
+account_id = "d166286035506436e8301afa6efa49ef"
 
 # Daily cleanup of old per-day rows.
 [triggers]
