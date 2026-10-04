@@ -4856,6 +4856,12 @@ Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run 
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 583 tests, 583 pass.
 
+## 2026-10-04 — 1.8.3: статистика пользователей и используемых функций
+
+Первая версия, которая шлёт анонимный ежедневный пинг на развёрнутый счётчик (`stats-worker/`, Cloudflare Worker + D1, адрес в `package.json → usageStats.endpoint`): случайный id установки, версия, ОС, архитектура и счётчики функций из фиксированного списка (`src/main/featureUsage.js`: действия по белому списку IPC-каналов, разделы и страницы настроек). Выключается в Settings → General → Usage statistics. Дашборд worker'а показывает активных и новых пользователей, версии, системы, страны, скачивания с GitHub и блок «Что используют» (доля пользователей по каждой функции и список неиспользуемых), открывается по личной ссылке `#key=`. Документы: `docs/usage-stats.md`, `docs/feature-usage-stats.md`, ADR 0011/0012.
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 597 tests, 597 pass. Manual: `electron . --user-data-dir=<temp>` against `wrangler dev` sent a ping with `app.launch` and `section.library`; the dashboard opened by `#key=` link and showed the feature table. Published as `v1.8.3`.
+
 ## 2026-10-01 — 1.8.2: обложки и скриншоты в полном размере
 
 Список «Latest Updates» отдаёт ссылки на картинки с хоста превью (`preview.f95zone.to`, уменьшенные копии); в теме те же файлы лежат на `attachments.f95zone.to` по тому же пути. Парсер каталога (`toFullSizeImageUrl`) сохраняет ссылки на полноразмерный хост, миграция 014 переписывает уже сохранённые записи, поэтому `downloadImages` качает обложки и скриншоты в том же качестве, что и из старого каталога. Уже скачанные картинки в кэше и таблицах `banners`/`previews` не затрагиваются.
