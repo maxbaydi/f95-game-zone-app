@@ -2,17 +2,21 @@
 
 Анонимный счётчик установок и активных пользователей F95Launcher: Cloudflare Worker + база D1. Укладывается в бесплатный тариф Cloudflare (Workers Free: 100 000 запросов в сутки; D1 Free: 5 ГБ и 5 млн чтений строк в сутки), сам не «засыпает». Что именно собирается и как устроено — `docs/usage-stats.md`.
 
-## Развёртывание через GitHub Actions (основной путь)
+## Текущее состояние
 
-База D1 `f95launcher-stats` уже создана в аккаунте Cloudflare (id в `wrangler.toml`), таблицы на месте. Worker разворачивает workflow **Stats worker** (`.github/workflows/stats-worker.yml`): сам при каждом изменении `stats-worker/` в `main` и по кнопке Run workflow. Каждый прогон заново применяет `schema.sql` (безопасно: только `CREATE ... IF NOT EXISTS`), деплоит worker и загружает `STATS_TOKEN`.
+Worker развёрнут: **https://f95launcher-stats.maxbayqoor.workers.dev** (аккаунт `account_id` из `wrangler.toml`, поддомен `maxbayqoor.workers.dev`). База D1 `f95launcher-stats` создана там же (id в `wrangler.toml`), таблицы из `schema.sql` применены, секрет `STATS_TOKEN` загружен, адрес вписан в корневой `package.json`. Ниже — как развернуть заново или обновить.
 
-Один раз:
+## Развёртывание через GitHub Actions
+
+Workflow **Stats worker** (`.github/workflows/stats-worker.yml`) деплоит сам при каждом изменении `stats-worker/` в `main` и по кнопке Run workflow. Каждый прогон заново применяет `schema.sql` (безопасно: только `CREATE ... IF NOT EXISTS`), деплоит worker и загружает `STATS_TOKEN`. Пока в репозитории нет секрета `CLOUDFLARE_API_TOKEN`, прогон только пишет notice и ничего не меняет.
+
+Чтобы включить:
 
 1. Cloudflare → My Profile → API Tokens → Create Token → шаблон **Edit Cloudflare Workers** → в Permissions добавить строку **Account · D1 · Edit** → Continue to summary → Create Token. Скопировать токен.
 2. Если в аккаунте ещё не было ни одного worker'а: открыть в панели Cloudflare раздел Workers & Pages и выбрать поддомен `workers.dev`. Без этого первый деплой остановится с просьбой зарегистрировать поддомен.
 3. GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret:
    - `CLOUDFLARE_API_TOKEN` — токен из шага 1;
-   - `STATS_TOKEN` — длинный пароль от статистики, его же вводить на дашборде. Сгенерировать: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`;
+   - `STATS_TOKEN` — длинный пароль от статистики, его же вводить на дашборде. Можно взять уже загруженный в worker или сгенерировать новый: `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"` (каждый прогон перезаписывает секрет worker'а этим значением);
    - `CLOUDFLARE_ACCOUNT_ID` не нужен: Account ID уже записан в `wrangler.toml`.
 4. Actions → Stats worker → Run workflow. В логе шага Deploy будет адрес `https://f95launcher-stats.<поддомен>.workers.dev`.
 
@@ -29,16 +33,19 @@ npm run deploy                              # выведет адрес https://
 npx wrangler secret put STATS_TOKEN         # ввести пароль от статистики
 ```
 
-Для другого аккаунта Cloudflare сначала `npx wrangler d1 create f95launcher-stats` и новый `database_id` в `wrangler.toml`.
+Вместо `wrangler login` подойдёт API-токен аккаунта с правами Workers Scripts Edit и D1 Edit: `$env:CLOUDFLARE_API_TOKEN = "<токен>"` в том же окне.
+
+Для другого аккаунта Cloudflare сначала `npx wrangler d1 create f95launcher-stats`, новые `database_id` и `account_id` в `wrangler.toml`, затем новый адрес в `package.json`.
 
 ## Подключение приложения
 
-1. В корневом `package.json` заполнить адрес worker'а (без `/` в конце):
+1. Адрес worker'а (без `/` в конце) уже записан в корневой `package.json`:
    ```json
    "usageStats": {
-     "endpoint": "https://f95launcher-stats.<аккаунт>.workers.dev"
+     "endpoint": "https://f95launcher-stats.maxbayqoor.workers.dev"
    }
    ```
+   Тест `test/usageStats.test.js` следит, чтобы адрес не потерялся.
 2. Выпустить новую версию приложения. Счётчик пойдёт с установок, обновившихся до неё.
 
 ## Где смотреть
@@ -46,7 +53,7 @@ npx wrangler secret put STATS_TOKEN         # ввести пароль от с�
 - Открыть адрес worker'а в браузере и ввести `STATS_TOKEN` (хранится только в этом браузере).
 - Или в корне репозитория:
   ```powershell
-  $env:F95LAUNCHER_STATS_URL = "https://f95launcher-stats.<аккаунт>.workers.dev"
+  $env:F95LAUNCHER_STATS_URL = "https://f95launcher-stats.maxbayqoor.workers.dev"
   $env:F95LAUNCHER_STATS_TOKEN = "<токен>"
   npm run stats
   ```

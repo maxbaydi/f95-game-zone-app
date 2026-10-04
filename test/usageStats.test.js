@@ -160,6 +160,14 @@ test("dev runs report only when the environment variable asks for it", () => {
   assert.equal(resolveUsageStatsEndpoint({ isPackaged: true, env: {}, packageEndpoint: "" }), "");
 });
 
+test("packaged builds report to the deployed stats worker", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+  const packageEndpoint = packageJson.usageStats?.endpoint;
+  assert.equal(packageEndpoint, "https://f95launcher-stats.maxbayqoor.workers.dev");
+  assert.equal(normalizeUsageStatsEndpoint(packageEndpoint), packageEndpoint);
+  assert.equal(resolveUsageStatsEndpoint({ isPackaged: true, env: {}, packageEndpoint }), packageEndpoint);
+});
+
 test("the renderer may only flip the switch, never touch the install id", () => {
   const next = applySettingsPatch({}, "UsageStats", { enabled: "false" });
   assert.deepEqual(next.UsageStats, { enabled: false });

@@ -8,7 +8,7 @@
   "description": "F95Launcher: desktop library, installs, updates, and cloud save sync for F95 games",
   "main": "src/main.js",
   "usageStats": {
-    "endpoint": ""
+    "endpoint": "https://f95launcher-stats.maxbayqoor.workers.dev"
   },
   "scripts": {
     "start": "electron .",

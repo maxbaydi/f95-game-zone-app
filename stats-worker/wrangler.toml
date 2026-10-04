@@ -14,7 +14,7 @@ GITHUB_REPO = "maxbaydi/f95-game-zone-app"
 [[d1_databases]]
 binding = "DB"
 database_name = "f95launcher-stats"
-database_id = "ed7f5f26-d092-423e-8552-5e109e59235f"
+database_id = "1d029228-2fab-49b2-aea7-9bc251fcce5a"
 
 # The dashboard and /v1/stats need a secret token. The "Stats worker"
 # workflow uploads it from the STATS_TOKEN repository secret; by hand:
