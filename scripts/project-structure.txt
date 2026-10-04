@@ -20,8 +20,6 @@
 │   ├── background-automation.md (10441 bytes)
 │   ├── check-mirrors.md (8709 bytes)
 │   ├── f95-browser-workspace.md (6663 bytes)
-│   ├── handoff
-│   │   └── verify-downloads-prompt.md (8760 bytes)
 │   ├── install-recovery.md (17761 bytes)
 │   ├── library-backups.md (7882 bytes)
 │   ├── library-catalog-link.md (7931 bytes)

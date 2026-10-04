@@ -4674,9 +4674,9 @@ Release path:
 
 Not included:
 
-- `claude/dazzling-bardeen-4gwbcw` (download pipeline rework from another session) is not merged into `main` and is not part of this release
+- the download pipeline rework branch is not merged into `main` and is not part of this release
 
-## 2026-09-26 — Merge `claude/dazzling-bardeen-4gwbcw` into `main`
+## 2026-09-26 — Merge the download pipeline rework into `main`
 
 What was done:
 
@@ -4875,7 +4875,7 @@ Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run 
 - Фоновая автоматика (`docs/background-automation.md`): Windows‑уведомления об установке (`Notifications.installs`), автоскачивание/установка обновлений приложения и перепроверка каждые 6 ч и после сна (`AppUpdates.autoDownload`, `periodicJob.js`), «Launch with Windows» + «Start in the tray», недельные автобэкапы базы с ротацией (`libraryAutoBackup.js`), фоновые проверки тем для всей библиотеки (`LiveUpdates.allGames`), скан новых игр при старте (`Library.autoScanOnStartup`), пароль архива из стартового поста с автоповтором распаковки (`threadPassword.js`).
 - Supabase: встроенный проект автора, вход по email/паролю, облачный каталог библиотеки и очередь удалений, `@supabase/supabase-js` — удалены (`cloudSaveSync.js`, `cloudLibraryCatalog.js` → `libraryIdentity.js`, `supabase/client.js`, `CloudAuthPanel.jsx`, `CloudSync.jsx`, `cloudSyncErrors.js`, `supabaseStorageErrors.js`, `db/cloudLibraryDeleteQueueStore.js`; таблица `cloud_library_delete_queue` остаётся в миграциях). Добавлен провайдер `supabase` в хранилище сохранений (свой проект пользователя: URL, ключ, bucket, автосоздание bucket) с формой в Settings → Save storage; кнопка облака в шапке показывает состояние хранилища.
 - Настройки: карточка General → Background work, строки автозапуска, пункт Notifications → «Finished and failed installs», секции `AppUpdates`/`LiveUpdates` в схеме `settingsPatch`.
-- Удалена лишняя ветка `claude/eloquent-babbage-poe8wo` (указывала на тот же коммит, что и `main`).
+- Удалена лишняя служебная ветка (указывала на тот же коммит, что и `main`).
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 543 tests, 536 pass / 7 fail (the same pre-existing Windows-path tests on Linux; CI runs on Windows).
 
