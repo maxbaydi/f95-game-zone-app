@@ -1,0 +1,19 @@
+name = "f95launcher-stats"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Daily cleanup of old per-day rows.
+[triggers]
+crons = ["17 3 * * *"]
+
+[vars]
+GITHUB_REPO = "maxbaydi/f95-game-zone-app"
+
+# `npx wrangler d1 create f95launcher-stats` prints the database_id to put here.
+[[d1_databases]]
+binding = "DB"
+database_name = "f95launcher-stats"
+database_id = "REPLACE_WITH_DATABASE_ID"
+
+# The dashboard and /v1/stats need a secret token:
+#   npx wrangler secret put STATS_TOKEN

@@ -134,6 +134,11 @@ const {
   createInstallNotificationController,
 } = require("./main/installNotificationController");
 const { createPeriodicJob } = require("./main/periodicJob");
+const {
+  USAGE_STATS_FILE_NAME,
+  createUsageStatsReporter,
+  resolveUsageStatsEndpoint,
+} = require("./main/usageStats");
 const { runScheduledLibraryBackup } = require("./main/libraryAutoBackup");
 const { listLibraryBackups } = require("./main/libraryBackups");
 const { backupDatabaseFile } = require("./main/libraryReset");
@@ -446,6 +451,30 @@ const libraryAutoBackupJob = createPeriodicJob({
   name: "library-backup",
   intervalMs: AUTO_BACKUP_RECHECK_INTERVAL_MS,
   run: () => runScheduledLibraryBackupIfEnabled(),
+});
+
+// Anonymous "this install is alive today" ping for the download/usage
+// counters (docs/usage-stats.md). The hourly run only touches the network
+// when the UTC day has changed, so a launcher that lives in the tray is
+// still counted every day it runs.
+const USAGE_STATS_STARTUP_DELAY_MS = 90 * 1000;
+const USAGE_STATS_RECHECK_INTERVAL_MS = 60 * 60 * 1000;
+const usageStatsReporter = createUsageStatsReporter({
+  statePath: path.join(dataDir, USAGE_STATS_FILE_NAME),
+  endpoint: resolveUsageStatsEndpoint({
+    isPackaged: app.isPackaged,
+    env: process.env,
+    packageEndpoint: require("../package.json").usageStats?.endpoint,
+  }),
+  appVersion: app.getVersion(),
+  isEnabled: () =>
+    (appConfig || defaultConfig)?.UsageStats?.enabled !== false,
+});
+const usageStatsJob = createPeriodicJob({
+  name: "usage-stats",
+  intervalMs: USAGE_STATS_RECHECK_INTERVAL_MS,
+  run: () => usageStatsReporter.reportIfDue(),
+  isEnabled: () => usageStatsReporter.isActive(),
 });
 
 const appUpdater = createAppUpdaterController({
@@ -3684,6 +3713,9 @@ const defaultConfig = {
   LiveUpdates: {
     allGames: false,
   },
+  UsageStats: {
+    enabled: true,
+  },
   Onboarding: {
     completed: false,
     completedAt: "",
@@ -6361,6 +6393,10 @@ function loadConfig() {
         ...defaultConfig.LiveUpdates,
         ...(appConfig?.LiveUpdates || {}),
       },
+      UsageStats: {
+        ...defaultConfig.UsageStats,
+        ...(appConfig?.UsageStats || {}),
+      },
       Onboarding: {
         ...defaultConfig.Onboarding,
         ...(appConfig?.Onboarding || {}),
@@ -7171,11 +7207,13 @@ app.whenReady().then(async () => {
     });
   libraryAutoBackupJob.start({ initialDelayMs: AUTO_BACKUP_STARTUP_DELAY_MS });
   catalogSyncJob.start();
+  usageStatsJob.start({ initialDelayMs: USAGE_STATS_STARTUP_DELAY_MS });
   powerMonitor.on("resume", () => {
     // The network needs a moment after wake-up; then re-check everything the
     // launcher would have checked had it been running.
     appUpdateRecheckJob.kick("resume", RESUME_RECHECK_DELAY_MS);
     catalogSyncJob.kick("resume", RESUME_RECHECK_DELAY_MS + 30 * 1000);
+    usageStatsJob.kick("resume", RESUME_RECHECK_DELAY_MS);
     setTimeout(() => {
       libraryLiveUpdateChecker?.runNow({ reason: "resume" }).catch((error) => {
         console.error("[library.live] Thread check after wake-up failed:", error);
@@ -7213,6 +7251,7 @@ app.on("will-quit", () => {
   appUpdateRecheckJob.stop();
   libraryAutoBackupJob.stop();
   catalogSyncJob.stop();
+  usageStatsJob.stop();
   f95CatalogSync?.cancel();
   libraryLiveUpdateChecker?.stop();
   if (f95LoginLiveCheckTimer) {

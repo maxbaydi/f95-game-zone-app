@@ -4845,6 +4845,17 @@ Release path: pushing to `main` triggers `.github/workflows/main.yml`, which bui
 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 540 pass / 7 fail (the same pre-existing Windows-path tests on Linux).
 
+## 2026-10-04 — Статистика скачиваний и пользователей
+
+Сколько скачали — из GitHub Releases API (установщики отдельно от проверок обновлений `latest*.yml`); сколько пользуются — анонимный пинг раз в UTC‑сутки (`docs/usage-stats.md`, ADR 0011).
+
+- `src/main/usageStats.js`: случайный UUID v4 в `<data>/usage-stats.json`, `POST <endpoint>/v1/ping` с полями `id`, `version`, `platform`, `arch`, повтор при ошибке, не чаще раза в день. `main.js`: задача `usage-stats` (90 с после старта, раз в час, после сна), секция `UsageStats.enabled` (по умолчанию true); отправляет только упакованная сборка при заполненном `package.json → usageStats.endpoint`, dev — только с `F95LAUNCHER_USAGE_STATS_URL`.
+- UI: карточка Settings → General → Usage statistics и переключатель на шаге «You're all set» мастера, с перечнем отправляемых полей.
+- `stats-worker/`: Cloudflare Worker + D1 (таблицы `installs`, `daily_active`), строгая проверка пинга, `GET /v1/stats` по токену, дашборд на `/` (плитки, графики активных и новых по дням, версии/системы/страны, скачивания по релизам), cron‑чистка старше 400 дней; README с развёртыванием. Проверено `wrangler deploy --dry-run` и локальным `wrangler dev` с D1: пинг модулем приложения → статистика.
+- `npm run stats` (`scripts/usage-stats.js`): скачивания по релизам и пользователи в терминале, `--json`, `--days`.
+
+Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 583 tests, 583 pass.
+
 ## 2026-10-01 — 1.8.2: обложки и скриншоты в полном размере
 
 Список «Latest Updates» отдаёт ссылки на картинки с хоста превью (`preview.f95zone.to`, уменьшенные копии); в теме те же файлы лежат на `attachments.f95zone.to` по тому же пути. Парсер каталога (`toFullSizeImageUrl`) сохраняет ссылки на полноразмерный хост, миграция 014 переписывает уже сохранённые записи, поэтому `downloadImages` качает обложки и скриншоты в том же качестве, что и из старого каталога. Уже скачанные картинки в кэше и таблицах `banners`/`previews` не затрагиваются.

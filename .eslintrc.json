@@ -13,6 +13,16 @@
         "no-console": "off",
         "no-async-promise-executor": "off"
       }
+    },
+    {
+      "files": ["stats-worker/src/**/*.js"],
+      "env": {
+        "browser": true,
+        "node": false
+      },
+      "parserOptions": {
+        "sourceType": "module"
+      }
     }
   ]
 }

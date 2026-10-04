@@ -65,6 +65,9 @@ const SETTINGS_SCHEMA = {
   LiveUpdates: {
     allGames: toBoolean,
   },
+  UsageStats: {
+    enabled: toBoolean,
+  },
   Onboarding: {
     completed: toBoolean,
     completedAt: toText,

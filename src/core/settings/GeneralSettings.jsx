@@ -52,6 +52,8 @@ const GeneralSettings = ({ settings, onRunSetup }) => {
 
       <AutomationSettingsCard settings={settings} />
 
+      <UsageStatsSettingsCard settings={settings} />
+
       {onRunSetup && (
         <window.SettingsCard
           icon="auto_awesome"
@@ -144,6 +146,35 @@ const AutomationSettingsCard = ({ settings }) => {
           checked={library.autoBackup !== false}
           onChange={(checked) =>
             settings.update("Library", { autoBackup: checked })
+          }
+        />
+      </window.SettingRow>
+    </window.SettingsCard>
+  );
+};
+
+// Lists exactly what the daily ping carries (fields in docs/usage-stats.md).
+const USAGE_STATS_DESCRIPTION =
+  "Once a day F95Launcher tells the developer it is in use, so they can see how many people run it. It sends a random ID created on this PC, the app version, the OS and the processor type. Nothing about your games, library, files or F95 account is sent, and your IP address is not stored.";
+
+const UsageStatsSettingsCard = ({ settings }) => {
+  const usageStats = settings.config?.UsageStats || {};
+
+  return (
+    <window.SettingsCard
+      icon="query_stats"
+      title="Usage statistics"
+      description="Anonymous numbers that help decide what to work on next."
+    >
+      <window.SettingRow
+        title="Send anonymous usage statistics"
+        description={USAGE_STATS_DESCRIPTION}
+      >
+        <window.ToggleSwitch
+          label="Send anonymous usage statistics"
+          checked={usageStats.enabled !== false}
+          onChange={(checked) =>
+            settings.update("UsageStats", { enabled: checked })
           }
         />
       </window.SettingRow>

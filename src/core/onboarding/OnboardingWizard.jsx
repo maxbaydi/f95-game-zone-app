@@ -371,6 +371,7 @@ const OnboardingDoneStep = ({
 }) => {
   const interfaceSettings = settings.config?.Interface || {};
   const notifications = settings.config?.Notifications || {};
+  const usageStats = settings.config?.UsageStats || {};
 
   return (
     <div>
@@ -442,6 +443,18 @@ const OnboardingDoneStep = ({
             checked={notifications.libraryUpdates !== false}
             onChange={(checked) =>
               settings.update("Notifications", { libraryUpdates: checked })
+            }
+          />
+        </window.SettingRow>
+        <window.SettingRow
+          title="Send anonymous usage statistics"
+          description="Once a day: a random ID, the app version, the OS and the processor type, so the developer knows how many people use the app. Nothing about your games, files or accounts."
+        >
+          <window.ToggleSwitch
+            label="Send anonymous usage statistics"
+            checked={usageStats.enabled !== false}
+            onChange={(checked) =>
+              settings.update("UsageStats", { enabled: checked })
             }
           />
         </window.SettingRow>

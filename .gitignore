@@ -15,3 +15,5 @@ src/data/config.ini
 AGENTS.md
 ТЗ.md
 .codex/
+.wrangler/
+.dev.vars

@@ -23,7 +23,7 @@ F95Launcher (repository `f95-game-zone-app`) is a desktop manager for F95 games 
 
 ## Cloud saves
 
-F95Launcher runs no servers and ships no cloud account. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client, a WebDAV server, an S3-compatible bucket or a bucket in the user's own Supabase project. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage offers the rest, including a passphrase for end-to-end encryption and a portable connection card.
+F95Launcher ships no cloud account and keeps no saves on its own servers. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client, a WebDAV server, an S3-compatible bucket or a bucket in the user's own Supabase project. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage offers the rest, including a passphrase for end-to-end encryption and a portable connection card.
 
 Current cloud-save behavior:
 
@@ -77,6 +77,14 @@ Checks:
 ```powershell
 npm run ci:check
 ```
+
+## Usage statistics
+
+Once a day the app sends an anonymous ping (a random install ID made on the PC, the app version, the OS and the CPU architecture) so the maintainer can see how many people use it. Nothing about games, the library, files or accounts is sent, and the IP address is not stored. It can be turned off in Settings → General → Usage statistics or on the last step of the setup assistant. Only packaged builds report, and only once `usageStats.endpoint` in `package.json` points at a deployed counter.
+
+- the counter is a Cloudflare Worker with a D1 database in `stats-worker/` (deploy steps in `stats-worker/README.md`); opening its URL shows a dashboard with installs, daily/weekly/monthly users, versions, systems, countries and GitHub downloads per release
+- `npm run stats` prints GitHub downloads per release and, with `F95LAUNCHER_STATS_URL` and `F95LAUNCHER_STATS_TOKEN` set, the user numbers
+- details: `docs/usage-stats.md`
 
 ## Releases
 
