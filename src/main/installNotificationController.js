@@ -64,12 +64,15 @@ function createInstallNotificationController(input) {
 
   return {
     /**
-     * @param {{ title: string, warning?: string, recordId?: number | null }} detail
+     * @param {{ title: string, warning?: string, recordId?: number | null, savedArchive?: boolean }} detail
      */
     notifyCompleted(detail) {
       const title = String(detail.title || "The game").trim();
       return notify("completed", {
-        body: detail.warning
+        title: detail.savedArchive ? "F95Launcher — Download saved" : undefined,
+        body: detail.savedArchive
+          ? `${title} was saved without unpacking. Open Downloads to find the file or install it later.`
+          : detail.warning
           ? `${title} is installed. ${detail.warning}`
           : `${title} is installed and ready to play.`,
         recordId: detail.recordId ?? null,

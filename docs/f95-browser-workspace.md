@@ -25,7 +25,7 @@
 7. Демо‑режим: `?demo=1&f95=thread` — вместо `<webview>` рендерится `<iframe srcdoc>` с вымышленной темой, `getF95ThreadInstallState` отвечает «в библиотеке», `installF95Thread` — `captcha_required`, `onF95DownloadProgress` присылает один прогресс, чтобы снимок показывал чип и карточку.
 
 ## Контракт
-- `window.F95BrowserWorkspace` принимает `onOpenDownloads?: () => void`, `onOpenLibraryRecord?: (recordId) => void`.
+- `window.F95BrowserWorkspace` принимает `onOpenDownloads?: () => void`, `onOpenLibraryRecord?: (recordId) => void`, `initialUrl?: string` (по умолчанию Latest Updates). Переход из библиотеки передаёт Games tag IDs, AND/OR и текст в native hash сайта; вход и пересоздание webview сохраняют этот адрес. Кнопка Home открывает обычный Latest Updates.
 - `data-notice="captcha|browser-error|install-error|status-<nonce>"` на карточках (для скриншотов/тестов), `role="toolbar" aria-label="F95 browser"`.
 
 ## Граничные случаи и ошибки

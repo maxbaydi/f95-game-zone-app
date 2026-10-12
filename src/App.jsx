@@ -675,6 +675,11 @@ const App = () => {
   const [isSiteSearchLimited, setIsSiteSearchLimited] = useState(false);
   const [isSiteSearchLoading, setIsSiteSearchLoading] = useState(false);
   const [siteSearchError, setSiteSearchError] = useState("");
+  const [libraryTags, setLibraryTags] = useState([]);
+  const [libraryTagLogic, setLibraryTagLogic] = useState("AND");
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [f95SearchUrl, setF95SearchUrl] = useState(window.f95SearchUrl.F95_SEARCH_URL);
+  const [isOpeningF95Search, setIsOpeningF95Search] = useState(false);
   const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
   // Anonymous feature counter: which parts of the app get opened
   // (docs/feature-usage-stats.md).
@@ -888,8 +893,9 @@ const App = () => {
 
         const title = item.title || item.fileName || "Download";
         if (nextStatus === "completed") {
-          appToast.success(`${title} is installed and ready to play.`, {
-            title: "Install complete",
+          const saved = item.completionKind === "archive";
+          appToast.success(saved ? `${title} was saved without unpacking.` : `${title} is installed and ready to play.`, {
+            title: saved ? "Download saved" : "Install complete",
           });
         } else if (nextStatus === "error") {
           appToast.error(item.error || item.text || "The download failed.", {
@@ -902,7 +908,7 @@ const App = () => {
             ],
           });
         } else if (nextStatus === "installing") {
-          appToast.info(`Unpacking ${title} into your library…`, {
+          appToast.info(item.completionKind === "archive" ? `Saving ${title} without unpacking…` : `Unpacking ${title} into your library…`, {
             title: "Download finished",
             duration: 3000,
           });
@@ -978,8 +984,29 @@ const App = () => {
     setSiteSearchFilters(filters);
   };
 
-  const openSearchWorkspace = () => {
-    setActiveSection(SECTION_SEARCH);
+  const openSearchWorkspace = async () => {
+    if (isOpeningF95Search) return;
+    setIsOpeningF95Search(true);
+    try {
+      const options = libraryTags.length
+        ? await window.electronAPI.getUniqueFilterOptions()
+        : null;
+      const result = window.f95SearchUrl.buildF95SearchUrl(
+        { tags: libraryTags, tagLogic: libraryTagLogic, text: libraryQuery },
+        options?.tagDefinitions || {},
+      );
+      if (!result.success) {
+        appToast.error(`These tags are unavailable on F95: ${result.missingTags.join(", ")}. Choose other tags or try again after signing in.`);
+        return;
+      }
+      setF95SearchUrl(result.url);
+      setActiveSection(SECTION_SEARCH);
+    } catch (error) {
+      console.error("[f95.search] Could not prepare website filters:", error);
+      appToast.error("Could not open this search on F95. Please try again.");
+    } finally {
+      setIsOpeningF95Search(false);
+    }
   };
 
   const handleSearchTextChange = (value) => {
@@ -990,7 +1017,13 @@ const App = () => {
     setLibraryQuery(value);
   };
 
+  const handleTagSearch = (tag) => {
+    setLibraryTags((previous) => window.gameTags.splitGameTags([...previous, tag]));
+    setTagPickerOpen(true);
+  };
+
   const handleSidebarSelect = (sectionId) => {
+    if (sectionId === SECTION_SEARCH) setF95SearchUrl(window.f95SearchUrl.F95_SEARCH_URL);
     setActiveSection(sectionId);
   };
 
@@ -3343,14 +3376,14 @@ const App = () => {
   const sortedFilteredLibraryGames = useMemo(
     () =>
       sortLibraryGames(
-        filterLocalGames(
+        window.gameTags.filterLibraryGamesByTags(filterLocalGames(
           games,
           deferredLibraryQuery,
           activeSection === SECTION_UPDATES,
           activeSection === SECTION_LIBRARY
             ? libraryInstallFilter
             : LIBRARY_INSTALL_FILTERS.ALL,
-        ),
+        ), libraryTags, libraryTagLogic),
         librarySortMode,
       ),
     [
@@ -3359,6 +3392,8 @@ const App = () => {
       activeSection,
       librarySortMode,
       libraryInstallFilter,
+      libraryTags,
+      libraryTagLogic,
     ],
   );
   const favoriteLibraryGames = useMemo(
@@ -3740,7 +3775,7 @@ const App = () => {
     return (
       <div
         key={game.record_id}
-        className="app-card-enter"
+        className="app-card-enter library-card-cell"
         style={{
           ...style,
           display: "flex",
@@ -3755,6 +3790,7 @@ const App = () => {
           onSelect={() => selectGame(game)}
           onUpdateGame={handleGameUpdate}
           onToggleFavorite={toggleGameFavorite}
+          onTagSelect={handleTagSearch}
         />
       </div>
     );
@@ -3765,7 +3801,7 @@ const App = () => {
       {gamesList.map((game, index) => (
         <div
           key={`${sectionKey}-${game.record_id}`}
-          className="app-card-enter flex justify-start px-1"
+          className="app-card-enter library-card-cell relative flex justify-start px-1"
           style={{ "--app-index": Math.min(index, CARD_STAGGER_LIMIT) }}
         >
           <window.GameBanner
@@ -3773,6 +3809,7 @@ const App = () => {
             onSelect={() => selectGame(game)}
             onUpdateGame={handleGameUpdate}
             onToggleFavorite={toggleGameFavorite}
+            onTagSelect={handleTagSearch}
           />
         </div>
       ))}
@@ -3781,6 +3818,10 @@ const App = () => {
 
   const renderSectionControls = (resultsCount) => (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <button type="button" onClick={() => setTagPickerOpen((value) => !value)} aria-expanded={tagPickerOpen} className={`inline-flex items-center gap-1 border px-2.5 py-1 text-xs ${libraryTags.length ? "border-accent/60 bg-accent/15 text-text" : "border-border bg-black/25 text-text/75 hover:bg-white/10"}`}>
+        <span className="material-symbols-outlined text-[15px]" aria-hidden>label</span>
+        Tags{libraryTags.length ? ` (${libraryTags.length})` : ""}
+      </button>
       <label className="flex items-center gap-2 border border-border bg-black/25 px-2 py-1 text-[11px] text-text/90 shadow-glass-sm backdrop-blur-md transition-colors hover:border-accent/40">
         <span className="uppercase tracking-[0.14em] text-text/60">Sort</span>
         <select
@@ -3975,7 +4016,13 @@ const App = () => {
     activeSection === SECTION_LIBRARY &&
     libraryInstallFilter !== LIBRARY_INSTALL_FILTERS.ALL;
   const sectionMeta =
-    activeSection === SECTION_UPDATES
+    libraryTags.length > 0
+      ? {
+          icon: "search_off",
+          emptyTitle: "No games match these filters",
+          emptyDescription: "Choose other tags, switch to OR, or clear tags and the search text.",
+        }
+      : activeSection === SECTION_UPDATES
       ? {
           icon: "task_alt",
           eyebrow: "Update Inbox",
@@ -4028,6 +4075,7 @@ const App = () => {
           {sectionMeta.emptyDescription}
         </div>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          {libraryTags.length > 0 && <button type="button" onClick={() => { setLibraryTags([]); setLibraryQuery(""); }} className="border border-accent/50 bg-accent/15 px-3 py-1.5 text-xs text-text hover:bg-accent/25">Clear search filters</button>}
           {hasLibraryQuery ? (
             <button
               type="button"
@@ -4055,13 +4103,6 @@ const App = () => {
               </button>
               <button
                 type="button"
-                onClick={openSearchWorkspace}
-                className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
-              >
-                Find games on F95
-              </button>
-              <button
-                type="button"
                 onClick={addGame}
                 className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
               >
@@ -4075,6 +4116,16 @@ const App = () => {
               className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10"
             >
               Back to library
+            </button>
+          )}
+          {activeSection === SECTION_LIBRARY && (
+            <button
+              type="button"
+              onClick={openSearchWorkspace}
+              disabled={isOpeningF95Search}
+              className="border border-border bg-white/5 px-3 py-1.5 text-xs font-semibold text-text transition hover:bg-white/10 disabled:opacity-50"
+            >
+              {isOpeningF95Search ? "Opening search…" : "Find games on F95"}
             </button>
           )}
         </div>
@@ -4110,6 +4161,7 @@ const App = () => {
       return (
         <AppSafe name="search" title="The F95 workspace failed to load">
           <window.F95BrowserWorkspace
+            initialUrl={f95SearchUrl}
             onOpenDownloads={() => setDownloadsPanelOpen(true)}
             onOpenLibraryRecord={openLibraryRecord}
           />
@@ -4261,7 +4313,7 @@ const App = () => {
               <window.SearchBox
                 value={activeSection === SECTION_SEARCH ? "" : libraryQuery}
                 onChange={handleSearchTextChange}
-                onAction={openSearchWorkspace}
+                onAction={activeSection === SECTION_SEARCH ? openSearchWorkspace : () => setTagPickerOpen((value) => !value)}
                 isSearchActive={activeSection === SECTION_SEARCH}
                 placeholder={
                   activeSection === SECTION_SEARCH
@@ -4435,6 +4487,17 @@ const App = () => {
 
           <div className="flex flex-1 overflow-hidden">
             <div className="isolate flex flex-1 flex-col overflow-hidden">
+              {(activeSection === SECTION_LIBRARY || activeSection === SECTION_UPDATES) && (
+                <window.LibraryTagFilters
+                  isOpen={tagPickerOpen}
+                  selectedTags={libraryTags}
+                  tagLogic={libraryTagLogic}
+                  onTagsChange={setLibraryTags}
+                  onLogicChange={setLibraryTagLogic}
+                  onOpen={() => setTagPickerOpen(true)}
+                  onClose={() => setTagPickerOpen(false)}
+                />
+              )}
               <div
                 id="gameGrid"
                 className="relative z-0 flex-1 overflow-y-auto overflow-x-hidden bg-transparent px-0.5 pt-6 pb-3"
@@ -4466,6 +4529,7 @@ const App = () => {
                   isLoading={detailsSnapshot.isLoading}
                   onClose={closeSelectedGamePanel}
                   onOpenPage={openSelectedGamePage}
+                  onTagSelect={handleTagSearch}
                   onPlayGame={launchInstalledVersion}
                   onUpdateGame={handleGameUpdate}
                   onOpenFolder={openGameFolder}

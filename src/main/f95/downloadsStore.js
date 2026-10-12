@@ -3,6 +3,7 @@ const MAX_HISTORY_ITEMS = 40;
 /**
  * Download entry lifecycle:
  *   resolving → (queued) → downloading → installing → completed
+ *   downloading → completed (saved original, completionKind: archive)
  *   resolving | downloading → action (user finishes a step in the browser)
  *   action → downloading (auto-continue) | error | cancelled
  *   any active state → error | cancelled
@@ -43,6 +44,7 @@ const CLEARED_ERROR_FIELDS = {
   hint: "",
   packagePath: "",
   warning: "",
+  completionKind: "",
 };
 
 /** Error codes that a password can fix (see src/main/archive/archiveErrors.js). */
@@ -100,9 +102,9 @@ function trimHistory(entries) {
 
 /**
  * Public shape sent to the renderer. `hasRetryPayload` is internal and is
- * exposed as the derived `canRetry` flag. `packagePath` is the downloaded
- * package kept on disk after a failed install: `canInstallFromPackage`
- * means the install can be retried without downloading again.
+ * exposed as the derived `canRetry` flag. `packagePath` is a downloaded
+ * package kept after an error or saved without installing. The derived
+ * `canInstallFromPackage` allows an explicit install without downloading.
  */
 function toPublicEntry(entry) {
   const { hasRetryPayload, ...publicEntry } = entry;
@@ -120,7 +122,7 @@ function toPublicEntry(entry) {
     engine: publicEntry.engine || "",
     canCancel: CANCELLABLE_STATUSES.has(entry.status),
     canRetry: RETRYABLE_STATUSES.has(entry.status) && hasRetryPayload === true,
-    canInstallFromPackage: entry.status === "error" && Boolean(packagePath),
+    canInstallFromPackage: Boolean(packagePath) && (entry.status === "error" || (entry.status === "completed" && entry.completionKind === "archive")),
     canInstallManually: MANUAL_INSTALL_STATUSES.has(entry.status),
     needsPassword: entry.status === "error" && PASSWORD_ERROR_CODES.has(errorCode),
   };
@@ -243,6 +245,7 @@ function createDownloadsStore(options = {}) {
       "version",
       "creator",
       "engine",
+      "keepArchive",
     ]) {
       if (entry[key] !== undefined) {
         descriptor[key] = entry[key] || "";
@@ -267,6 +270,7 @@ function createDownloadsStore(options = {}) {
         version: entry.version || "",
         creator: entry.creator || "",
         engine: entry.engine || "",
+        keepArchive: entry.keepArchive === true,
         text: entry.text || `Queued ${entry.title || "download"}`,
         speedBytesPerSecond: 0,
         ...(entry.hasRetryPayload !== undefined

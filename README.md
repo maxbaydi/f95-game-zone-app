@@ -14,6 +14,9 @@ F95Launcher (repository `f95-game-zone-app`) is a desktop manager for F95 games 
 - opens live F95 threads inside the app through a logged-in session
 - installs or updates games from thread mirrors into the correct library folder
 - keeps a downloads queue with background progress and history
+- shows all game tags on card hover/focus and in game details
+- clicking tags filters the existing library, with multiple-tag AND/OR matching combined with its search field
+- optionally saves original download archives without unpacking; install them later from Downloads
 - detects save locations for Ren'Py, RPG Maker, Unity, Unreal, Godot, Wolf RPG, KiriKiri, GameMaker, Flash and HTML games (game folder, AppData, LocalLow, Documents, Saved Games)
 - exports and imports saves as plain zip files, per game or for the whole library, with no account needed
 - backs up saves before destructive operations

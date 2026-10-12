@@ -69,3 +69,11 @@ test("applySettingsPatch only accepts known animation levels", () => {
     "auto",
   );
 });
+
+test("the archive-only download switch can be enabled and disabled", () => {
+  const enabled = applySettingsPatch({ Library: { gameFolder: "D:\\Games" } }, "Library", { keepArchives: "true" });
+  assert.equal(enabled.Library.keepArchives, true);
+  const disabled = applySettingsPatch(enabled, "Library", { keepArchives: "false" });
+  assert.equal(disabled.Library.keepArchives, false);
+  assert.equal(disabled.Library.gameFolder, "D:\\Games");
+});

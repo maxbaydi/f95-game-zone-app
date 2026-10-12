@@ -559,17 +559,22 @@ async function listCatalogEntries(db) {
 
 /**
  * @param {any} db
- * @returns {Promise<{ categories: string[], engines: string[], statuses: string[], tags: string[] }>}
+ * @returns {Promise<{ categories: string[], engines: string[], statuses: string[], tags: string[], tagDefinitions: Record<string, string> }>}
  */
 async function getCatalogFilterOptions(db) {
-  const [categories, engines, statuses, tagRows] = await Promise.all([
+  const [categories, engines, statuses, tagRows, state] = await Promise.all([
     all(db, "SELECT DISTINCT category FROM f95_catalog WHERE category != '' ORDER BY category"),
     all(db, "SELECT DISTINCT engine FROM f95_catalog WHERE engine != '' ORDER BY engine"),
     all(db, "SELECT DISTINCT status FROM f95_catalog WHERE status != '' ORDER BY status"),
-    all(db, "SELECT DISTINCT tags FROM f95_catalog WHERE tags != ''"),
+    all(db, "SELECT DISTINCT tags FROM f95_catalog WHERE tags != '' AND lower(category) = 'games'"),
+    getCatalogSyncState(db),
   ]);
-  const tags = new Set();
-  for (const row of tagRows) {
+  const scoped = Array.isArray(state.definitions?.gameTagIds);
+  const tagDefinitions = Object.fromEntries(
+    Object.entries(state.definitions?.tags || {}).filter(([id]) => scoped && state.definitions.gameTagIds.includes(Number(id))),
+  );
+  const tags = new Set(Object.values(tagDefinitions));
+  for (const row of scoped ? [] : tagRows) {
     for (const tag of splitList(row.tags)) {
       tags.add(tag);
     }
@@ -579,6 +584,7 @@ async function getCatalogFilterOptions(db) {
     engines: engines.map((row) => String(row.engine)),
     statuses: statuses.map((row) => String(row.status)),
     tags: [...tags].sort((left, right) => left.localeCompare(right)),
+    tagDefinitions,
   };
 }
 

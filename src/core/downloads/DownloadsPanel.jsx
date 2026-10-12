@@ -145,6 +145,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
   const [pendingAction, setPendingAction] = React.useState("");
   const [archivePassword, setArchivePassword] = React.useState("");
   const meta = getDownloadStatusMeta(item.status);
+  const isSavedArchive = item.status === "completed" && item.completionKind === "archive";
   const percent = Math.max(0, Math.min(100, Number(item.percent) || 0));
   const totalBytes = Number(item.totalBytes) || 0;
   const receivedBytes = Number(item.receivedBytes) || 0;
@@ -275,7 +276,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
       downloadsToast()?.info(
         password
           ? `Unpacking ${result.fileName || "the package"} with the password.`
-          : `Installing ${result.fileName || "the package"} again, nothing is downloaded.`,
+          : `Installing ${result.fileName || "the package"}, nothing is downloaded.`,
         { title: item.title || "Install", duration: 4000 },
       );
     });
@@ -346,7 +347,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
           key={item.status}
           className={`app-badge-enter shrink-0 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] ${meta.tone}`}
         >
-          {meta.label}
+          {isSavedArchive ? "Archive saved" : item.status === "installing" && item.completionKind === "archive" ? "Saving archive" : meta.label}
         </div>
       </div>
 
@@ -595,7 +596,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
               onClick={handleRetryInstall}
               disabled={Boolean(pendingAction)}
               className="inline-flex items-center gap-1 border border-sky-400/50 bg-sky-400/20 px-2.5 py-1 text-xs text-sky-50 transition hover:bg-sky-400/30 disabled:opacity-50"
-              title="Install the downloaded file again without downloading it"
+              title="Install the saved file without downloading it"
             >
               {pendingAction === "retry-install" ? (
                 <span className="app-spinner app-keep-motion" aria-hidden />
@@ -604,7 +605,7 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
                   restart_alt
                 </span>
               )}
-              Retry install
+              {isSavedArchive ? "Install" : "Retry install"}
             </button>
           )}
           {canRetry && (

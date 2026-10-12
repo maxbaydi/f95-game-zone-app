@@ -17,3 +17,5 @@ AGENTS.md
 .codex/
 .wrangler/
 .dev.vars
+/output/playwright/
+/.playwright-mcp/

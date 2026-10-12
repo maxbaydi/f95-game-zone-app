@@ -11,7 +11,7 @@
       minimizeToTray: false,
       showGameList: true,
     },
-    Library: { rootPath: "", gameFolder: "" },
+    Library: { rootPath: "", gameFolder: "", keepArchives: false },
     Metadata: { downloadPreviews: false },
     Performance: { maxHeapSize: 4096 },
     Onboarding: { completed: true },
@@ -298,6 +298,7 @@
         censored: [],
         languages: [],
         tags: [],
+        tagDefinitions: {},
       }),
     removeAllListeners: noop,
   };
@@ -740,6 +741,22 @@
     const DEMO_DOWNLOADS = {
       activeCount: 1,
       items: [
+        {
+          id: "dl-saved-archive",
+          status: "completed",
+          completionKind: "archive",
+          title: "Harbor Lights 0.10.0",
+          fileName: "HarborLights-0.10.0-pc.zip",
+          text: "Saved Harbor Lights without unpacking",
+          percent: 100,
+          totalBytes: 1.9 * 1024 ** 3,
+          receivedBytes: 1.9 * 1024 ** 3,
+          packagePath: `${DEMO_APPDATA}\\data\\archives\\HarborLights-0.10.0-pc.zip`,
+          canInstallFromPackage: true,
+          canRetry: false,
+          canCancel: false,
+          updatedAt: minutesAgo(2),
+        },
         {
           id: "dl-ashen-kingdom-0-8",
           status: "error",
@@ -1237,6 +1254,7 @@
           isFreshInstall: false,
           paths: {
             userData: DEMO_APPDATA,
+            archives: `${DEMO_APPDATA}\\data\\archives`,
             fallbackGames: `${DEMO_APPDATA}\\games`,
             logs: `${DEMO_APPDATA}\\logs`,
           },
@@ -1316,7 +1334,8 @@
           statuses: ["Ongoing", "Completed", "Onhold"],
           censored: ["No"],
           languages: ["English"],
-          tags: [],
+          tags: window.gameTags.splitGameTags(DEMO_GAMES.flatMap((game) => game.f95_tags.split(","))),
+          tagDefinitions: { 2257: "sandbox", 330: "romance", 361: "humor", 179: "fantasy", 162: "adventure", 141: "sci-fi", 550: "combat", 448: "simulator", 628: "strategy", 348: "dating sim", 322: "multiple endings" },
         }),
     };
   };

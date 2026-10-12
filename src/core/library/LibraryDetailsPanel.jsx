@@ -81,17 +81,7 @@ const formatDetailBytes = (value) => {
 
 const SCREENSHOTS_GRID_MAX_HEIGHT_PX = 420;
 
-const splitGameTags = (value) => {
-  if (!value || typeof value !== "string") {
-    return [];
-  }
-
-  return value
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .slice(0, 14);
-};
+const splitGameTags = window.gameTags.splitGameTags;
 
 const DetailPill = ({ children, tone = "neutral" }) => {
   const toneClass =
@@ -489,6 +479,7 @@ const LibraryDetailsPanel = ({
   isLoading,
   onClose,
   onOpenPage,
+  onTagSelect,
   onPlayGame,
   onUpdateGame,
   onOpenFolder,
@@ -1264,30 +1255,27 @@ const LibraryDetailsPanel = ({
                     value={formatDetailDate(game.catalog_updated_ts)}
                   />
                   {tags.length > 0 && (
-                    <details className="tags-spoiler pt-3">
-                      <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] uppercase tracking-[0.18em] opacity-55 [&::-webkit-details-marker]:hidden">
-                        <span
-                          className="tag-chevron material-symbols-outlined text-[16px] transition-transform duration-450"
-                          aria-hidden
-                        >
-                          expand_more
-                        </span>
+                    <section className="pt-3" aria-label="Game tags">
+                      <div className="flex items-center gap-1 text-[11px] uppercase tracking-[0.18em] text-text/55">
                         Tags
                         <span className="normal-case tracking-normal text-text/45">
                           ({tags.length})
                         </span>
-                      </summary>
+                      </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         {tags.map((tag) => (
-                          <span
+                          <button
                             key={tag}
-                            className="border border-border bg-canvas/40 px-1.5 py-0.5 text-[11px]"
+                            type="button"
+                            aria-label={`Search games tagged ${tag}`}
+                            onClick={() => onTagSelect?.(tag)}
+                            className="game-tag-chip game-tag-button"
                           >
                             {tag}
-                          </span>
+                          </button>
                         ))}
                       </div>
-                    </details>
+                    </section>
                   )}
                   <div className="pt-4">
                     <div className="mb-2 text-[11px] uppercase tracking-[0.18em] opacity-55">

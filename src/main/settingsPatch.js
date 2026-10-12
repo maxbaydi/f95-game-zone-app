@@ -53,6 +53,7 @@ const SETTINGS_SCHEMA = {
     autoScanOnStartup: toBoolean,
     autoBackup: toBoolean,
     catalogAutoSync: toBoolean,
+    keepArchives: toBoolean,
   },
   Notifications: {
     appUpdates: toBoolean,

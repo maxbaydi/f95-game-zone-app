@@ -4897,3 +4897,72 @@ Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run 
 Checks (real output): `npm run lint` clean, `npm run typecheck` clean, `npm run check:jsx` ok, `npm test` 543 tests, 536 pass / 7 fail (the same pre-existing Windows-path tests on Linux; CI runs on Windows).
 
 Осталось (см. бэклог): лимит параллельных загрузок и пауза, докачка после перезапуска, «Update all», автоповтор по времени, очередь одобрения в Scan Hub, диалог конфликтов и история сохранений, ручной smoke автозапуска/уведомлений на Windows.
+## 2026-10-12 — Теги карточек и скачивание без распаковки
+
+- Цель: полный список тегов при наведении и в деталях игры; сохраняемый переключатель загрузки исходного архива без установки. Границы: renderer — отображение/настройки; shared — pure normalization; main — валидация, постоянное хранение и установка копии; прежние preload IPC без новых endpoint. Worktree перед работой был чистым.
+- Сделано: плавный hover/focus-блок поверх сетки с выбором верхнего/нижнего положения и прокруткой; в деталях убрано ограничение 14 тегов и скрытие списка. Общая нормализация убирает пустые/повторные теги.
+- Сделано: Library.keepArchives (по умолчанию false), snapshot режима на запрос; отдельная appPaths.archives в userData/data/archives; исходные байты сохраняются без распаковки/регистрации. Имена не перезаписываются. Downloads показывает Archive saved, Install и Folder. Установка работает с копией; очистка истории и запуск не удаляют постоянные оригиналы.
+- Rationale/контракт/ручные сценарии: docs/game-tags-and-saved-downloads.md. Новых зависимостей, DB migrations и изменений сейвов нет.
+- Проверено на текущем срезе: общий ci:check — 597/597; новые targeted tests — 31/31, затем найден и исправлен unknown в assertion typecheck.
+- Осталось: финальные lint/typecheck/тесты, browser и изолированный Electron smoke, независимый review файлового пути. Прогресс этапа около 80%; относительно общего ТЗ это дополнение UX каталога/скачиваний, roadmap сейвов и синхронизации не меняется.
+
+### 2026-10-12 — расширение: кликабельные теги и native AND/OR-поиск
+
+- Получен live-справочник через существующую Electron persist:f95-auth-сессию: HTTP 200, 153 тега; cookies/секреты не экспортировались. Справочник runtime обновляется отдельным чтением Latest Updates, кешируется существующим catalog_sync и работает offline.
+- Возвращён ранее недоступный native catalog search: Game catalog/F95 browser, tag picker со всеми сайт-тегами, выбранные chips, AND/OR, text/title/creator, engine/status/sort, My library, clear/reset, pagination. Клик по тегам в карточке/деталях/результате добавляет tag в native-фильтр. Pure matcher использует полные labels, trim/case normalization и дедупликацию.
+- Исправлены findings независимого review: clip viewport/max height, точные сообщения archive saving вместо installed, постоянный Open folder при выключенном режиме. Browser smoke нашёл и исправлен конфликт 3D-hover с press-feedback кликабельных tags; tag panel теперь в flat plane.
+- Проверен фактический Electron путь в временном profile: localhost ZIP → archive-only без версии/распаковки → restart → Install через копию → SQLite версия/launcher → оригинал сохранён → clearHistory → auto-install с выключенным switch → restart. Проверены сохранность байтов, сохранение переключателя и native IPC-поиск AND/OR; 153 tags доступны из кеша.
+- На этом срезе targeted search/catalog tests — 19/19 до нового dictionary-refresh test; check:jsx/typecheck прошли. Осталось завершить final ci:check, UI edge cases и итоговый diff. Этап около 95%; влияние на общий ТЗ: завершён самостоятельный UX-срез каталога/скачиваний, cloud/save roadmap не меняется.
+
+### 2026-10-12 — корректировка приёмки: фильтры внутри существующей библиотеки
+
+- По уточнению пользователя отдельная native catalog search страница удалена. Вернулась исходная F95 Search-страница, лишние изменения catalog search DTO/preload/результатов отменены.
+- Итог: LibraryTagFilters — встроенная компактная панель над существующей сеткой; открывается Tags/advanced search/кликом по тегу. AND/OR применяется к текущему локальному списку вместе с исходным search/title/creator, install-state, favorites, updates и sorting. Titles list и карточки используют один отфильтрованный массив. На другую страницу клик не переводит.
+- Browser acceptance: sandbox+romance — AND 1, OR 6; текст Starfall — 1. Сохранено полное чтение website tag dictionary через сохранённую сессию, включая offline fallback к локальным тегам.
+- Проверки среза: build:css/check:jsx/typecheck проходят, pure tags — 3/3. Осталось финальное ci:check после корректировки и повторный smoke краткого окна/архивов. Прогресс этапа около 95%; это UX-апгрейд библиотеки и режима скачивания, отдельного нового сценария навигации нет.
+
+### 2026-10-12 — финальная приёмка тегов и архивов
+
+- Итоговая реализация принята внутри существующей библиотеки: плавные hover/focus-теги, кликабельные теги в карточках и деталях, общий title/creator + AND/OR поиск, синхронные карточки/названия/счётчики, полный сайт-справочник с локальным offline fallback. Отдельной search-страницы для этой функции нет.
+- Финальный ci:check: CSS build, lint, JSX check, typecheck и 608/608 tests, 0 failures. Browser: AND 1 / OR 6 / +Starfall 1, клики с Full motion, keyboard, сохранение chips при Hide picker; окно 1150×650 с открытыми фильтрами — flyout полностью внутри видимого viewport (подтверждено bounding boxes).
+- Повторный Electron smoke после уточнения scope прошёл: 153 тега через IPC; archive-only → restart → Install → исходный ZIP сохранён → clearHistory/restart → обычный auto-install → switch сохранён. Оригиналы не зависят от download history и не теряются при установке; native и in-app сообщения различают saved/installed.
+- Документация и rationale актуализированы в docs/game-tags-and-saved-downloads.md; скриншот итоговой библиотеки output/playwright/library-tags-or.png. Прогресс текущего этапа 100%; работ по этому запросу не осталось. Влияние на общий ТЗ — завершён UX-срез поиска библиотеки/скачиваний без изменения cloud/save архитектуры и без утверждения 100% всего roadmap.
+
+### 2026-10-12 — исправление перехода на F95 и ограничение тегов категорией Games
+
+- Цель/границы: исправить Find games on F95 внутри существующей библиотеки; передать selected tags, AND/OR и title query без новой страницы. Дополнительно в выборе оставлять только Games. Риск — незаметно потерять фильтры или переиспользовать общий старый кеш; приёмка: реальные ID/hash, отсутствие других категорий, сохранение поиска после входа, offline scoped cache, UI-клик и обязательные проверки.
+- Renderer хранит подготовленный initialUrl и передаёт его существующему webview; shared/f95SearchUrl строит native hash. Кнопка доступна и при пустом текстовом результате, показывает loading/error. Unknown tags останавливают переход. Main getter добавляет read-only tagDefinitions без нового IPC; DB JSON definitions дополнен gameTagIds без миграции.
+- Games membership получено с сайта через cmd=tags&cat=games: live ответ 115 ID. Общие 153 names остаются для разбора метаданных; picker/getter пересекают их с Games ID и не добавляют неизвестные local tags. Старый global cache принудительно обновляется, scoped cache используется offline. Ошибка обновления сохраняет прежние валидные данные.
+- После первого исправления ci:check — 611/611; после Games-среза targeted parser/store/sync/search — 24/24, JSX/typecheck проходят. Осталось final ci:check после новых regression cases и Electron UI smoke. Этап около 85%; влияние на общий ТЗ — завершение приёмки поиска, архивы/cloud/save workflow не меняются.
+
+### 2026-10-12 — приёмка перехода с тегами и Games dictionary
+
+- Final ci:check: CSS build/lint/JSX/typecheck + 613/613, 0 fail. Новые проверки покрывают реальные tag IDs/hash, кодирование текста, отказ при неизвестных тегах, Games membership, обновление свежего legacy global cache и сохранение scoped cache при ошибке сети. git diff --check чистый.
+- Electron: фактический UI-клик Find games on F95 с sandbox+romance и Mad Adventure передал обе группы ID и text. Native site script показал selected chips и отправил реальный cmd=list с tags[]=2257, tags[]=330; AND без tagtype=or, OR с tagtype=or. Проверены 115 picker tags, 0 asset matches и возврат Sidebar Search к обычной домашней странице.
+- Граница live evidence: временный профиль, обезличенный fixture HTML страницы, свежий официальный JS и живой API сайта; профиль работающего приложения не разделялся, его SQLite/cookies не изменялись. Временное окно закрыто; dev web сервер не запускался. Для применения в уже запущенном приложении нужен перезапуск, поскольку изменён main getter.
+- Документация обновлена, незавершённых работ в этом срезе нет. Прогресс текущего исправления 100%; общий roadmap cloud/save/scanner не изменяется.
+
+### 2026-10-12 — компактная панель тегов и подсказки поиска
+
+- Цель/границы: изменить только LibraryTagFilters renderer и документацию. Первая строка — AND/OR + поиск тегов, вторая — active chips, ниже — native disclosure All tags, default closed. Games scope, main/preload/shared contracts, архивы и механизм фильтрации не меняются. Риски: dropdown clipping, потеря выбора при blur и конфликт Escape; приёмка — mouse/keyboard выбор, раскрытие списка, сохранение AND/OR и narrow-window UI.
+- Полный список размещён в details/summary; закрывается по умолчанию и при повторном открытии панели. Ввод показывает combobox/listbox с unselected matches; click/↑/↓/Enter добавляют тег без дублей, очищают tag query и сохраняют input focus. Escape и blur закрывают dropdown. Выбранные chips остаются во второй строке независимо от disclosure.
+- CSS build/lint/JSX/typecheck прошли, targeted gameTags/f95SearchUrl — 6/6. Осталась Electron приёмка и visual QA. Прогресс этапа около 75%; влияние на общий ТЗ — UX-уточнение существующей библиотеки, без расширения функционального scope.
+
+### 2026-10-12 — приёмка компактного выбора тегов
+
+- Electron UI smoke завершён в изолированном profile: full list default closed; search + AND/OR на первой строке, active chips ниже, disclosure под ними (проверены bounds). Mouse selection, ↑/↓/Enter, Escape/outside dismiss, сохранение input focus, отсутствие duplicate selected tags, раскрытие 115 Games tags и закрытие при reopen проходят. Проверены сохранение AND/OR результатов библиотеки и dropdown в окне 960×700.
+- Visual QA: output/playwright/tags-collapsed-picker.png и tags-search-suggestions.png; подсказки видны поверх содержимого, выбранные chips остаются на отдельной строке. Обязательные CSS build/lint/JSX/typecheck и targeted 6/6 прошли, git diff --check чистый. Новых зависимостей и рабочих файлов в install directory нет; временное окно закрыто, сервер не запускался.
+- Руководство и manual verification актуализированы. Осталось: нет; текущий UI-срез 100%, общий функциональный roadmap не меняется. Уже открытое окно приложения применит renderer-изменение после Ctrl+R.
+
+### 2026-10-12 — выпуск 1.9.0: подготовка
+
+- Цель: опубликовать готовые изменения тегов/библиотеки и archive-only downloads как новый релиз F95Launcher. Границы: версия package/lock, документация, исходники/тесты текущего среза, commit main + новый v1.9.0 tag, существующий GitHub Release workflow Windows/Linux. Stats worker, cloud/save API и действующие релизы не меняются.
+- Удалённый main совпадает с локальным e295bb7 (1.8.3); новый релиз — minor 1.9.0. Все pending изменения перечислены и относятся к текущей работе; без reset/cleanup, stage только intended paths. Версии синхронизированы в package.json/package-lock.json, release notes добавлены.
+- План/риски: final ci:check, независимое read-only review файлов сохранения/поиска и release composition, контроль SHA и отсутствия секретов; push main/tag; дождаться Checks + Windows/Linux Release; live readback installer/update manifest и packaged Electron smoke. Приёмка: публичный 1.9.0 с корректными manifest/checksums, новая packaged UI и сохранность оригиналов.
+- Осталось выполнение preflight/review и публикация; текущий этап около 20%. Влияние на общий ТЗ — доставка завершённого UX/download среза пользователям, без утверждения готовности всего roadmap.
+
+### 2026-10-12 — release preflight 1.9.0
+
+- Final ci:check — 613/613, CSS/lint/JSX/typecheck. Локальный electron-builder Windows x64 directory package успешно собран; Electron запустил packaged app.asar с реальными SQLite/7zip в изолированном profile. 115 Games tags через IPC; archive-only → restart → explicit Install → оригинальные bytes сохранены → clearHistory → auto-install → restart проходят.
+- Независимое read-only review immutable patch не обнаружило продуктовых storage/search/packaging blockers; ранее найденный Open folder исправлен. Дополнительно выявлена flaky assertion в savedPackages eviction: несколько complete() могли иметь одинаковый Date.now(), тогда выбор удаляемого tied элемента не определён. Тест получает monotonic mocked clock; runtime не меняется, первоначальная проверка удаления записи и сохранности оригинала остаётся.
+- Осталось повторное ci/review delta, commit/tag/push, Windows/Linux release jobs и публичная проверка артефактов. Прогресс выпуска около 50%; это release delivery, без изменения функционального ТЗ.

@@ -220,8 +220,40 @@ function F95BannerCard({
   onUpdateGame,
   onContextMenu,
   onToggleFavorite,
+  onTagSelect,
 }) {
   const displayTitle = game.displayTitle || game.title || "Unknown";
+  const tags = window.gameTags.splitGameTags(game.f95_tags);
+  const [tagPlacement, setTagPlacement] = useState({ above: false, maxHeight: 220, overlay: false, top: 0 });
+  const placeTags = (event) => {
+    const card = event.currentTarget;
+    const panel = card.querySelector(".banner-tags-panel");
+    const list = card.querySelector(".banner-tags-list");
+    if (!panel || !list) return;
+    const panelChrome = panel.offsetHeight - list.offsetHeight;
+    const panelHeight = Math.min(220, list.scrollHeight) + panelChrome;
+    const bounds = card.getBoundingClientRect();
+    let viewportTop = 0;
+    let viewportBottom = window.innerHeight;
+    for (let ancestor = card.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(ancestor).overflowY)) {
+        const viewport = ancestor.getBoundingClientRect();
+        viewportTop = Math.max(viewportTop, viewport.top);
+        viewportBottom = Math.min(viewportBottom, viewport.bottom);
+      }
+    }
+    const below = Math.max(0, viewportBottom - bounds.bottom - 12);
+    const above = Math.max(0, bounds.top - viewportTop - 12);
+    const openAbove = below < panelHeight && above > below;
+    // A short viewport with the tag picker open may have no room outside
+    // the card. Keep the flyout inside the visible grid in that case.
+    const overlay = Math.max(above, below) < panelChrome + 48;
+    const available = overlay ? viewportBottom - viewportTop - 24 : openAbove ? above : below;
+    const maxHeight = Math.max(24, Math.min(220, available - panelChrome));
+    const visibleHeight = Math.min(maxHeight, list.scrollHeight) + panelChrome;
+    const top = overlay ? Math.max(viewportTop + 12, Math.min(bounds.bottom, viewportBottom - visibleHeight - 12)) - bounds.top : 0;
+    setTagPlacement({ above: openAbove, maxHeight, overlay, top });
+  };
   const installState = getCardInstallState(game);
   const isInstalled = installState === "installed";
   const isMissing = installState === "missing";
@@ -539,10 +571,12 @@ function F95BannerCard({
     "div",
     {
       className:
-        "relative flex flex-col cursor-pointer overflow-hidden banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        "relative flex flex-col cursor-pointer banner-root border border-border bg-black/30 shadow-glass-sm ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-accent",
       style: {
         width: BANNER_WIDTH,
         height: BANNER_HEIGHT,
+        "--banner-tags-max-height": `${tagPlacement.maxHeight}px`,
+        "--banner-tags-top": `${tagPlacement.top}px`,
       },
       role: "button",
       tabIndex: 0,
@@ -552,6 +586,10 @@ function F95BannerCard({
       onClick: onSelect,
       onKeyDown: handleCardKeyDown,
       onContextMenu: onContextMenu,
+      onMouseEnter: tags.length ? placeTags : undefined,
+      onFocus: tags.length ? (event) => { if (event.target === event.currentTarget) placeTags(event); } : undefined,
+      "data-tags-above": tagPlacement.above || undefined,
+      "data-tags-overlay": tagPlacement.overlay || undefined,
     },
     [
       React.createElement(
@@ -572,13 +610,35 @@ function F95BannerCard({
         },
         bodyChildren,
       ),
+      tags.length > 0 && React.createElement(
+        "div",
+        { key: "tags", className: "banner-tags-reveal", onClick: (event) => event.stopPropagation() },
+        React.createElement(
+          "div",
+          { className: "banner-tags-clip" },
+          React.createElement(
+            "section",
+            { className: "banner-tags-panel", "aria-label": `${displayTitle} tags` },
+            React.createElement("div", { className: "banner-tags-heading" }, `Tags (${tags.length})`),
+            React.createElement(
+              "div",
+              { className: "banner-tags-list" },
+              tags.map((tag) => React.createElement("button", {
+                key: tag, type: "button", className: "game-tag-chip game-tag-button",
+                "aria-label": `Search games tagged ${tag}`,
+                onClick: (event) => { event.stopPropagation(); onTagSelect?.(tag); },
+              }, tag)),
+            ),
+          ),
+        ),
+      ),
     ],
   );
 }
 
 window.F95BannerCard = F95BannerCard;
 
-const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
+const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite, onTagSelect }) => {
   const handleContextMenu = (e) => {
     e.preventDefault();
     if (!game) {
@@ -753,6 +813,7 @@ const GameBanner = ({ game, onSelect, onUpdateGame, onToggleFavorite }) => {
     onSelect,
     onUpdateGame,
     onToggleFavorite,
+    onTagSelect,
     onContextMenu: handleContextMenu,
   });
 };

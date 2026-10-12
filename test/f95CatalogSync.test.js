@@ -7,11 +7,13 @@ const sqlite3 = require("sqlite3");
 const { runMigrations } = require("../src/main/db/runMigrations");
 const store = require("../src/main/db/f95CatalogStore");
 const { createF95CatalogSync } = require("../src/main/catalog/f95CatalogSync");
-const { buildListUrl, LATEST_PAGE_URL } = require("../src/main/catalog/f95CatalogParser");
+const { buildListUrl, LATEST_PAGE_URL, LATEST_DATA_URL } = require("../src/main/catalog/f95CatalogParser");
 
 const FIXTURES = path.join(__dirname, "fixtures", "f95", "catalog");
 const readFixture = (name) => fs.readFileSync(path.join(FIXTURES, name), "utf8");
 const PAGE_HTML = readFixture("latest_alpha.html");
+const GAMES_TAGS_URL = `${LATEST_DATA_URL}?cmd=tags&cat=games`;
+const GAMES_TAGS = readFixture("tags-games.json");
 const PAGE_1 = JSON.parse(readFixture("list-games-date-page-1.json"));
 const PAGE_2 = JSON.parse(readFixture("list-games-date-page-2.json"));
 
@@ -64,6 +66,7 @@ function makeSite({ pages = 3, rowsPerPage = 90 } = {}) {
       if (url === LATEST_PAGE_URL) {
         return { status: 200, text: PAGE_HTML };
       }
+      if (url === GAMES_TAGS_URL) return { status: 200, text: GAMES_TAGS };
       const page = Number(new URL(url).searchParams.get("page")) || 1;
       const total = Math.ceil(allRows.length / rowsPerPage);
       const effective = Math.min(page, total);
@@ -109,7 +112,7 @@ test("the first run walks every page, stores the cursor and finishes with fullDo
   assert.equal(summary.entryCount, 270);
   assert.match(summary.message, /270 entries changed/);
   assert.equal(site.requests[0], LATEST_PAGE_URL, "definitions come first");
-  assert.deepEqual(site.requests.slice(1), [1, 2, 3].map((page) => buildListUrl({ page })));
+  assert.deepEqual(site.requests.slice(1), [GAMES_TAGS_URL, ...[1, 2, 3].map((page) => buildListUrl({ page }))]);
 
   const state = await store.getCatalogSyncState(db);
   assert.equal(state.fullDone, true);
@@ -257,7 +260,7 @@ test("HTTP 429 and 5xx are retried, other statuses are not; runs never overlap; 
     db: await openMigrated(),
     fetchText: async (url) => {
       const response = await originalFetch(url);
-      if (url !== LATEST_PAGE_URL) {
+      if (url !== LATEST_PAGE_URL && url !== GAMES_TAGS_URL) {
         cancellable.cancel();
       }
       return response;
@@ -271,5 +274,50 @@ test("HTTP 429 and 5xx are retried, other statuses are not; runs never overlap; 
   assert.equal(cancelled.success, false);
   assert.equal(cancelled.skippedReason, "cancelled");
   assert.equal(cancelled.pagesFetched, 1);
+  db.close();
+});
+test("tag dictionary refresh is deduplicated, does not crawl games, and works offline from saved definitions", async () => {
+  const db = await openMigrated();
+  const requests = [];
+  let authenticated = true;
+  const sync = createF95CatalogSync({ db, fetchText: async (url) => { requests.push(url); return { status: 200, text: url === GAMES_TAGS_URL ? GAMES_TAGS : PAGE_HTML }; }, hasSession: () => authenticated, logger: { info() {}, warn() {} }, sleep: async () => {} });
+  const first = sync.refreshDefinitions();
+  const second = sync.refreshDefinitions();
+  assert.equal(first, second);
+  const definitions = await first;
+  assert.ok(Object.keys(definitions.tags).length > 100);
+  assert.equal(definitions.gameTagIds.length, 115);
+  assert.deepEqual(requests, [LATEST_PAGE_URL, GAMES_TAGS_URL]);
+  await sync.refreshDefinitions();
+  assert.equal(requests.length, 2, "fresh definitions need no second website request");
+  authenticated = false;
+  const offline = await sync.refreshDefinitions();
+  assert.deepEqual(offline, definitions);
+  assert.equal(requests.length, 2);
+  assert.equal(await store.countCatalogEntries(db), 0, "refreshing the dictionary never crawls catalog pages");
+  db.close();
+});
+
+test("a fresh legacy global tag cache still upgrades to Games and a failed refresh preserves the scoped cache", async () => {
+  const db = await openMigrated();
+  const { parseDefinitions } = require("../src/main/catalog/f95CatalogParser");
+  const legacy = parseDefinitions(PAGE_HTML).definitions;
+  await store.saveCatalogSyncState(db, { definitions: legacy, definitionsAt: new Date().toISOString() });
+  const requests = [];
+  let fail = false;
+  const sync = createF95CatalogSync({ db, fetchText: async (url) => {
+    requests.push(url);
+    return { status: 200, text: url === GAMES_TAGS_URL ? (fail ? '{"status":"error"}' : GAMES_TAGS) : PAGE_HTML };
+  }, hasSession: () => true, logger: { info() {}, warn() {} }, sleep: async () => {} });
+  const scoped = await sync.refreshDefinitions();
+  assert.equal(scoped.gameTagIds.length, 115);
+  assert.deepEqual(requests, [LATEST_PAGE_URL, GAMES_TAGS_URL]);
+  const options = await store.getCatalogFilterOptions(db);
+  assert.equal(options.tags.length, 115);
+  assert.ok(!options.tags.some((tag) => tag.startsWith("asset-")));
+  await store.saveCatalogSyncState(db, { definitionsAt: "2000-01-01T00:00:00Z" });
+  fail = true;
+  assert.deepEqual(await sync.refreshDefinitions(), scoped);
+  assert.deepEqual((await store.getCatalogFilterOptions(db)).tags, options.tags);
   db.close();
 });

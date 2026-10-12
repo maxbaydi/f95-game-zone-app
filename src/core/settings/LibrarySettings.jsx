@@ -755,6 +755,26 @@ const LibrarySettings = ({ settings, appInfo, onScanNow, isScanRunning }) => {
         )}
       </window.SettingsCard>
 
+      <window.SettingsCard icon="folder_zip" title="Downloads">
+        <window.SettingRow
+          title="Keep downloads without unpacking"
+          description="Save the original ZIP, RAR or 7z file instead of installing the game. You can install it later from Downloads. Applies to new downloads."
+        >
+          <window.ToggleSwitch
+            label="Keep downloads without unpacking"
+            checked={Boolean(library.keepArchives)}
+            onChange={(checked) => settings.update("Library", { keepArchives: checked })}
+          />
+        </window.SettingRow>
+        {appInfo?.paths?.archives && (
+          <window.SettingRow title="Saved archives" description={appInfo.paths.archives}>
+            <window.SettingsButton icon="folder_open" onClick={() => window.electronAPI.openDirectory(appInfo.paths.archives)}>
+              Open folder
+            </window.SettingsButton>
+          </window.SettingRow>
+        )}
+      </window.SettingsCard>
+
       <ScanFoldersCard
         onScanNow={onScanNow}
         isScanRunning={isScanRunning}

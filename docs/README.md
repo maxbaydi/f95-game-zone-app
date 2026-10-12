@@ -27,3 +27,7 @@
 - [Статистика скачиваний и пользователей](usage-stats.md) — анонимный пинг раз в сутки (случайный id, версия, ОС), Cloudflare Worker + D1 в `stats-worker/`, дашборд и `npm run stats` со скачиваниями GitHub по релизам.
 - [Статистика: какие функции используют](feature-usage-stats.md) — счётчики действий и разделов по белому списку в ежедневном пинге, блок «Что используют» на дашборде, вход в дашборд по ссылке `#key=`.
 - [ADR](adr/) — архитектурные решения.
+# Tags and saved downloads
+
+See [Game tags and downloads without unpacking](game-tags-and-saved-downloads.md)
+for the optional download mode, persistent files, UI behavior and smoke steps.

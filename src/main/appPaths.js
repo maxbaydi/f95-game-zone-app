@@ -13,6 +13,7 @@ const path = require("path");
  * @property {string} launchers
  * @property {string} games
  * @property {string} downloads
+ * @property {string} archives
  * @property {string} images
  * @property {string} updates
  * @property {string} bannerTemplates
@@ -57,6 +58,7 @@ function buildAppPaths(userDataRoot) {
     launchers: path.join(data, "launchers"),
     games: path.join(data, "games"),
     downloads: path.join(cache, "downloads"),
+    archives: path.join(data, "archives"),
     images: path.join(cache, "images"),
     updates: path.join(cache, "updates"),
     bannerTemplates: path.join(templates, "banner"),
@@ -80,6 +82,7 @@ function ensureAppDirs(appPaths) {
     appPaths.launchers,
     appPaths.games,
     appPaths.downloads,
+    appPaths.archives,
     appPaths.images,
     appPaths.updates,
     appPaths.templates,

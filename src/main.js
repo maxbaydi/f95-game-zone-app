@@ -95,6 +95,7 @@ const {
   selectTransferMode,
 } = require("./main/f95/directDownload");
 const { buildDirectTransferOptions } = require("./main/f95/transferOptions");
+const { saveDownloadedPackage } = require("./main/f95/savedPackages");
 const { createMirrorActionFlow } = require("./main/f95/mirrorActionFlow");
 const { createElectronResolverSession } = require("./main/f95/electronSession");
 const {
@@ -1630,8 +1631,10 @@ function createF95ContextFromEntry(entry) {
       mirrorHost: entry.sourceHost || "",
       variantId: "",
       fallbackLinks: [],
+      keepArchive: Boolean(entry.keepArchive),
     },
     requestedUrl: entry.requestedUrl || "",
+    savedArchivePath: entry.savedArchivePath || "",
     hostLabel: entry.hostLabel || hostInfo.label || "",
     metadata: {
       id: entry.id,
@@ -1682,6 +1685,7 @@ function buildF95DownloadRequest(payload) {
     mirrorHost: String(payload?.mirrorHost || "").trim(),
     variantId: String(payload?.variantId || "").trim(),
     archivePassword: String(payload?.archivePassword || "").trim(),
+    keepArchive: Boolean(appConfig?.Library?.keepArchives),
     // Other mirrors of the same build, tried in order when this one fails.
     fallbackLinks: buildMirrorCandidates(
       { url: normalizeF95DownloadUrl(payload?.downloadUrl) },
@@ -2000,6 +2004,7 @@ function queueF95InstallContext(context) {
     sourceLabel: context.metadata.downloadLabel,
     hostLabel: context.hostLabel,
     hasRetryPayload: true,
+    keepArchive: context.request.keepArchive === true,
     text: `Queued ${context.metadata.title} via ${describeF95DownloadHost(context)}`,
   });
   broadcastF95Downloads();
@@ -2217,6 +2222,7 @@ async function runF95DownloadContext(context, options = {}) {
     hostLabel: context.hostLabel,
     hasRetryPayload: true,
     text: `Resolving ${describeF95DownloadHost(context)} link`,
+    keepArchive: context.request.keepArchive === true,
   });
   broadcastF95Downloads();
 
@@ -2466,8 +2472,48 @@ async function finalizeF95DownloadedPackage({
   receivedBytes,
   mimeType,
   password,
+  installNow = false,
 }) {
   try {
+    if (context.request.keepArchive && !installNow) {
+      const text = `Saving ${context.metadata.title}`;
+      f95DownloadsStore.installing(context.id, { text, completionKind: "archive" });
+      broadcastF95Downloads();
+      sendF95DownloadProgress({ phase: "installing", completionKind: "archive", text, percent: 100 });
+      const library = appConfig?.Library || {};
+      const saved = await saveDownloadedPackage({
+        filePath: targetPath,
+        archivesDir: appPaths.archives,
+        mimeType: mimeType || "",
+        archiveExtensions: parseConfiguredExtensions(library.extractionExtensions, DEFAULT_ARCHIVE_EXTENSIONS),
+        gameExtensions: parseConfiguredExtensions(library.gameExtensions, DEFAULT_GAME_EXTENSIONS),
+      });
+      context.targetPath = saved.packagePath;
+      targetPath = saved.packagePath;
+      context.savedArchivePath = saved.packagePath;
+      context.abortController = null;
+      const savedText = `Saved ${context.metadata.title} without unpacking`;
+      storePreferredF95Mirror({
+        threadUrl: context.metadata.threadUrl,
+        host: context.metadata.linkHost || context.metadata.mirrorHost,
+        label: context.metadata.downloadLabel,
+        variantId: context.metadata.variantId,
+      });
+      f95DownloadsStore.complete(context.id, {
+        ...saved,
+        savedArchivePath: saved.packagePath,
+        completionKind: "archive",
+        keepArchive: true,
+        recordId: null,
+        text: savedText,
+        totalBytes: totalBytes || receivedBytes || 0,
+        receivedBytes: receivedBytes || totalBytes || 0,
+      });
+      broadcastF95Downloads();
+      sendF95DownloadProgress({ phase: "completed", completionKind: "archive", text: savedText, percent: 100, fileName: saved.fileName });
+      installNotificationController.notifyCompleted({ title: context.metadata.title, savedArchive: true });
+      return;
+    }
     const importResults = await importDownloadedF95Package(
       targetPath,
       {
@@ -2501,6 +2547,8 @@ async function finalizeF95DownloadedPackage({
       recordId: firstResult?.recordId ?? null,
       warning,
       packagePath: "",
+      savedArchivePath: context.savedArchivePath || "",
+      completionKind: "installed",
     });
     broadcastF95Downloads();
     sendF95DownloadProgress({
@@ -2548,6 +2596,7 @@ async function finalizeF95DownloadedPackage({
         receivedBytes,
         mimeType,
         password: threadPassword,
+        installNow,
       });
     }
     let packagePath = String(error?.packagePath || targetPath || "");
@@ -2605,6 +2654,7 @@ async function installF95RetainedPackage(context, packagePath, options = {}) {
     title,
     fileName: path.basename(packagePath),
     text: options.password ? `Unpacking ${title} with the password` : `Installing ${title} again`,
+    completionKind: "installed",
     percent: 100,
     totalBytes,
     receivedBytes: totalBytes,
@@ -2624,6 +2674,28 @@ async function installF95RetainedPackage(context, packagePath, options = {}) {
     fileName: path.basename(packagePath),
   });
 
+  // Persistent originals are never consumed by the installer. Its cleanup
+  // and extraction operate on a disposable cache copy instead.
+  if (context.savedArchivePath && path.resolve(packagePath) === path.resolve(context.savedArchivePath)) {
+    try {
+      const staged = await stageManualPackage({
+        sourcePath: packagePath,
+        downloadsDir,
+        keepOriginal: true,
+        reservePath: (candidatePath) => {
+          const reservedPath = reserveF95DownloadPath(candidatePath);
+          context.reservedPath = reservedPath;
+          return reservedPath;
+        },
+      });
+      packagePath = staged.targetPath;
+      context.targetPath = packagePath;
+    } catch (error) {
+      releaseF95DownloadPath(context);
+      markF95DownloadFailed(context, error, "install", { packagePath: context.savedArchivePath });
+      return;
+    }
+  }
   await finalizeF95DownloadedPackage({
     context,
     targetPath: packagePath,
@@ -2631,6 +2703,7 @@ async function installF95RetainedPackage(context, packagePath, options = {}) {
     receivedBytes: totalBytes,
     mimeType: "",
     password: options.password || "",
+    installNow: true,
   });
 }
 
@@ -3712,6 +3785,7 @@ const defaultConfig = {
     autoScanOnStartup: true,
     autoBackup: true,
     catalogAutoSync: true,
+    keepArchives: false,
   },
   Metadata: {
     downloadPreviews: true,
@@ -4040,6 +4114,11 @@ ipcMain.handle("open-settings", () => {
   }
 });
 ipcMain.handle("get-unique-filter-options", async () => {
+  try {
+    await getF95CatalogSync()?.refreshDefinitions();
+  } catch (error) {
+    console.warn("[catalog.sync] Could not refresh tags; using the saved catalog:", getErrorMessage(error));
+  }
   return await getCatalogFilterOptions();
 });
 
@@ -4090,6 +4169,7 @@ ipcMain.handle("get-app-info", async () => ({
     logs: appPaths.logs,
     cache: appPaths.cache,
     downloads: downloadsDir,
+    archives: appPaths.archives,
     fallbackGames: appPaths.games,
   },
   defaults: {
@@ -4455,7 +4535,7 @@ function findF95DownloadForManualStep(id) {
         "This download can no longer be resumed. Start it again from the game thread.",
     };
   }
-  if (!MANUAL_INSTALL_STATUSES.has(entry.status)) {
+  if (!MANUAL_INSTALL_STATUSES.has(entry.status) && !entry.canInstallFromPackage) {
     return { error: "This download is still running." };
   }
   // Entries restored after a restart have no live context; rebuild enough
@@ -4651,6 +4731,7 @@ ipcMain.handle("show-f95-download-in-folder", async (event, id) => {
     const entry = f95DownloadsStore.get(downloadId);
     const candidatePaths = [
       entry?.packagePath || "",
+      entry?.savedArchivePath || "",
       context?.targetPath || "",
       context?.targetPath ? `${context.targetPath}.part` : "",
     ].filter(Boolean);

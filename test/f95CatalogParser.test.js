@@ -10,11 +10,23 @@ const {
   decodeHtmlEntities,
   normalizeCatalogEntry,
   parseDefinitions,
+  parseCategoryTagIds,
   parseListResponse,
 } = require("../src/main/catalog/f95CatalogParser");
 
 const FIXTURES = path.join(__dirname, "fixtures", "f95", "catalog");
 const readFixture = (name) => fs.readFileSync(path.join(FIXTURES, name), "utf8");
+
+test("category tag IDs use the real Games response and reject errors or malformed IDs", () => {
+  const result = parseCategoryTagIds(readFixture("tags-games.json"));
+  assert.equal(result.ok, true);
+  assert.equal(result.tagIds.length, 115);
+  assert.ok(result.tagIds.includes(2257));
+  assert.ok(!result.tagIds.includes(2219), "asset-clothing is absent from Games");
+  for (const text of ['<html>Sign in</html>', '{"status":"error","msg":"Missing category"}', '{"status":"ok","msg":{"data":[{"tag_id":"bad"}]}}']) {
+    assert.equal(parseCategoryTagIds(text).ok, false);
+  }
+});
 
 test("parseDefinitions reads prefix groups and tag names from the Latest Updates page", () => {
   const result = parseDefinitions(readFixture("latest_alpha.html"));

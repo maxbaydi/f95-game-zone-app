@@ -67,7 +67,7 @@ const DEFAULT_DEFINITIONS = Object.freeze({
 
 /**
  * @typedef {{ id: number, name: string, group: string }} PrefixDefinition
- * @typedef {{ prefixes: Record<string, PrefixDefinition>, tags: Record<string, string> }} CatalogDefinitions
+ * @typedef {{ prefixes: Record<string, PrefixDefinition>, tags: Record<string, string>, gameTagIds?: number[] }} CatalogDefinitions
  */
 
 /**
@@ -214,6 +214,26 @@ function buildListUrl(input) {
     params.set("search", input.search);
   }
   return `${LATEST_DATA_URL}?${params.toString()}`;
+}
+
+/** Parse the site's category-scoped tag counts, rather than its global dictionary.
+ * @param {string} text
+ * @returns {{ ok: boolean, tagIds: number[], error: string }}
+ */
+function parseCategoryTagIds(text) {
+  try {
+    const response = JSON.parse(text);
+    if (response?.status !== "ok" || !Array.isArray(response.msg?.data)) {
+      return { ok: false, tagIds: [], error: "The game tag list was not available." };
+    }
+    const tagIds = [...new Set(response.msg.data.map((row) => Number(row?.tag_id)).filter((id) => Number.isSafeInteger(id) && id > 0))];
+    if (tagIds.length !== response.msg.data.length) {
+      return { ok: false, tagIds: [], error: "The game tag list contains invalid or duplicate IDs." };
+    }
+    return { ok: true, tagIds, error: "" };
+  } catch {
+    return { ok: false, tagIds: [], error: "The game tag list could not be read." };
+  }
 }
 
 /**
@@ -464,6 +484,7 @@ module.exports = {
   decodeHtmlEntities,
   normalizeCatalogEntry,
   parseDefinitions,
+  parseCategoryTagIds,
   parseListResponse,
   resolveDefinitions,
   toFullSizeImageUrl,

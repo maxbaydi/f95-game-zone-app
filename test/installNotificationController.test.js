@@ -60,3 +60,12 @@ test("install notifications respect the setting and carry the error text", () =>
   shown[0].handlers.click();
   assert.deepEqual(clicks, [{ kind: "failed", recordId: null }]);
 });
+
+test("saving a package sends a download notification without claiming it is installed", () => {
+  const { FakeNotification, shown } = makeNotification();
+  const controller = createInstallNotificationController({ Notification: FakeNotification, isEnabled: () => true, isWindowFocused: () => false });
+  controller.notifyCompleted({ title: "Harbor Lights", savedArchive: true });
+  assert.equal(shown[0].options.title, "F95Launcher — Download saved");
+  assert.match(shown[0].options.body, /saved without unpacking/);
+  assert.doesNotMatch(shown[0].options.body, /ready to play|is installed/);
+});

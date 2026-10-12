@@ -20,8 +20,10 @@
 const {
   CATALOG_CATEGORY,
   LATEST_PAGE_URL,
+  LATEST_DATA_URL,
   buildListUrl,
   parseDefinitions,
+  parseCategoryTagIds,
   parseListResponse,
   resolveDefinitions,
 } = require("./f95CatalogParser");
@@ -127,6 +129,8 @@ function createF95CatalogSync(deps) {
   /** @type {CatalogSyncSummary | null} */
   let lastSummary = null;
   let cancelRequested = false;
+  /** @type {Promise<import("./f95CatalogParser").CatalogDefinitions | null> | null} */
+  let currentDefinitions = null;
 
   /**
    * @param {"info" | "warn" | "error"} level
@@ -217,6 +221,7 @@ function createF95CatalogSync(deps) {
     const storedAt = Date.parse(state.definitionsAt || "");
     const fresh =
       state.definitions &&
+      Array.isArray(state.definitions.gameTagIds) &&
       Number.isFinite(storedAt) &&
       now().getTime() - storedAt < definitionsMaxAgeMs;
     if (fresh) {
@@ -226,6 +231,10 @@ function createF95CatalogSync(deps) {
       const html = await fetchWithRetry(LATEST_PAGE_URL, { json: false });
       const parsed = parseDefinitions(html, { category: CATALOG_CATEGORY });
       if (parsed.ok && parsed.definitions) {
+        const tagResponse = await fetchWithRetry(`${LATEST_DATA_URL}?cmd=tags&cat=${CATALOG_CATEGORY}`, { json: true });
+        const categoryTags = parseCategoryTagIds(tagResponse);
+        if (!categoryTags.ok) throw new CatalogSyncError(categoryTags.error, { code: "bad-response" });
+        parsed.definitions.gameTagIds = categoryTags.tagIds;
         await store.saveCatalogSyncState(deps.db, {
           definitions: parsed.definitions,
           definitionsAt: now().toISOString(),
@@ -469,6 +478,17 @@ function createF95CatalogSync(deps) {
   }
 
   return {
+    /** Fetches only the site's tag/prefix dictionary; no catalog page crawl. */
+    refreshDefinitions() {
+      if (currentDefinitions) return currentDefinitions;
+      if (!currentRun) cancelRequested = false;
+      currentDefinitions = (async () => {
+        const state = await store.getCatalogSyncState(deps.db);
+        if (!(await deps.hasSession())) return state.definitions;
+        return resolveCurrentDefinitions(state);
+      })().finally(() => { currentDefinitions = null; });
+      return currentDefinitions;
+    },
     /**
      * @param {{ reason?: string, mode?: "auto" | "full" | "incremental" }=} options
      */

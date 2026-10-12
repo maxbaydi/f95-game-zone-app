@@ -150,6 +150,14 @@ test("lookups: by id, by record, search and matcher rows", async () => {
   assert.ok(options.engines.includes("Ren'Py"));
   assert.ok(options.statuses.includes("Ongoing"));
   assert.ok(options.tags.includes("milf"));
+  assert.deepEqual(options.tagDefinitions, {}, "no invented IDs for tags in older catalog rows");
+
+  await store.saveCatalogSyncState(db, { definitions: { prefixes: {}, tags: { 999: "tag unused by cached games", 1000: "asset-clothing" }, gameTagIds: [999] } });
+  const allOptions = await store.getCatalogFilterOptions(db);
+  assert.ok(allOptions.tags.includes("tag unused by cached games"), "the site's complete dictionary is available before all games have synced");
+  assert.ok(!allOptions.tags.includes("milf"), "cached local tags cannot expand the official Games list");
+  assert.ok(!allOptions.tags.includes("asset-clothing"), "other categories are excluded");
+  assert.deepEqual(allOptions.tagDefinitions, { 999: "tag unused by cached games" });
 
   assert.equal(await store.setCatalogOverview(db, 311614, "Story"), true);
   assert.equal((await store.getCatalogEntry(db, 311614)).overview, "Story");

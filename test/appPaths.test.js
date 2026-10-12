@@ -30,6 +30,7 @@ test("buildAppPaths computes the expected writable layout", () => {
   assert.equal(appPaths.images, path.join(appPaths.cache, "images"));
   assert.equal(appPaths.launchers, path.join(appPaths.data, "launchers"));
   assert.equal(appPaths.updates, path.join(appPaths.cache, "updates"));
+  assert.equal(appPaths.archives, path.join(appPaths.data, "archives"));
 });
 
 test("ensureAppDirs creates all required writable directories", () => {
@@ -46,6 +47,7 @@ test("ensureAppDirs creates all required writable directories", () => {
     appPaths.backups,
     appPaths.launchers,
     appPaths.games,
+    appPaths.archives,
     appPaths.images,
     appPaths.updates,
     appPaths.bannerTemplates,

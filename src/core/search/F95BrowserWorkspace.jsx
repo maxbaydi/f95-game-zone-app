@@ -271,7 +271,7 @@ const WorkspaceNotice = ({ notice, onDismiss }) => {
   );
 };
 
-const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
+const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord, initialUrl = F95_SEARCH_URL } = {}) => {
   const hostRef = useRef(null);
   const webviewRef = useRef(null);
   const guestReadyRef = useRef(false);
@@ -284,7 +284,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
     isAuthenticated: false,
   });
   const [browserState, setBrowserState] = useState({
-    url: F95_SEARCH_URL,
+    url: initialUrl,
     title: "",
     loading: false,
     canGoBack: false,
@@ -529,7 +529,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
       hostElement.appendChild(frame);
       webviewRef.current = null;
       setBrowserState({
-        url: demoPage.url || F95_SEARCH_URL,
+        url: initialUrl !== F95_SEARCH_URL ? initialUrl : demoPage.url || F95_SEARCH_URL,
         title: demoPage.title || "",
         loading: false,
         canGoBack: true,
@@ -543,7 +543,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
     }
 
     setBrowserState({
-      url: F95_SEARCH_URL,
+      url: initialUrl,
       title: "",
       loading: true,
       canGoBack: false,
@@ -551,7 +551,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
     });
 
     const webview = document.createElement("webview");
-    webview.setAttribute("src", F95_SEARCH_URL);
+    webview.setAttribute("src", initialUrl);
     webview.setAttribute("partition", "persist:f95-auth");
     webview.className = "h-full w-full";
     webview.style.width = "100%";
@@ -653,7 +653,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
         webviewRef.current = null;
       }
     };
-  }, [authState.isAuthenticated, browserKey]);
+  }, [authState.isAuthenticated, browserKey, initialUrl]);
 
   const progressLabel = useMemo(() => {
     if (!downloadState) {
@@ -1003,7 +1003,7 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
       try {
         webview.reload();
       } catch (error) {
-        webview.loadURL(F95_SEARCH_URL);
+        webview.loadURL(initialUrl);
       }
     });
   };
@@ -1043,7 +1043,10 @@ const F95BrowserWorkspace = ({ onOpenDownloads, onOpenLibraryRecord } = {}) => {
     if (!transferChipVisible || !downloadState) {
       return null;
     }
-    const meta = TRANSFER_PHASE_META[downloadState.phase];
+    const baseMeta = TRANSFER_PHASE_META[downloadState.phase];
+    const meta = baseMeta && downloadState.completionKind === "archive"
+      ? { ...baseMeta, label: downloadState.phase === "completed" ? "Archive saved" : downloadState.phase === "installing" ? "Saving archive" : baseMeta.label }
+      : baseMeta;
     if (!meta) {
       return null;
     }
