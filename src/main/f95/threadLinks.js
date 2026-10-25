@@ -189,8 +189,39 @@ function cleanText(value) {
 function looksLikeF95DownloadPath(parsedUrl) {
   return (
     parsedUrl.pathname.includes("/masked/") ||
-    parsedUrl.pathname.includes("/attachments/")
+    parsedUrl.pathname.includes("/attachments/") ||
+    isF95DownloadPagePath(parsedUrl)
   );
+}
+
+/**
+ * F95 download page links (`/dl/<post>/?k=…`) replaced masked links; the
+ * target host is only in the link text and the favicon F95 draws next to it.
+ * @param {URL} parsedUrl
+ */
+function isF95DownloadPagePath(parsedUrl) {
+  return /^\/dl\/\d+\/?$/i.test(parsedUrl.pathname);
+}
+
+/**
+ * Host of the favicon F95 puts on a link (`…/ip3/<host>.ico` in its style).
+ * @param {string} value inline style or the favicon URL
+ */
+function extractFaviconHost(value) {
+  const match = String(value || "").match(/\/ip3\/([a-z0-9.-]+?)\.ico\b/i);
+  return normalizeHintHost(match ? match[1] : "");
+}
+
+/**
+ * A host name usable as a mirror hint: lowercase, no `www.`, not F95 itself.
+ * @param {string} value
+ */
+function normalizeHintHost(value) {
+  const host = String(value || "").trim().toLowerCase().replace(/^www\./, "");
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || /(^|\.)f95zone\.to$/.test(host)) {
+    return "";
+  }
+  return host;
 }
 
 function looksLikeDownloadableAttachment(parsedUrl) {
@@ -371,13 +402,20 @@ function buildVariantSlug(value) {
 
 /**
  * Friendly host label + support level for a thread link. Masked F95 links are
- * described by the host they point to (from the masked path or the label).
+ * described by the host they point to (from the masked path or the label),
+ * download page links by their favicon host, then the label.
  */
-function describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint) {
+function describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint, faviconHost) {
   const isF95Attachment =
     isAllowedF95Mirror && parsedUrl.pathname.includes("/attachments/");
   if (isF95Attachment) {
     return getMirrorHostInfo(parsedUrl.href);
+  }
+
+  if (isAllowedF95Mirror && isF95DownloadPagePath(parsedUrl)) {
+    return getMirrorHostInfo(parsedUrl.href, {
+      hostHint: faviconHost || inferredHostHint,
+    });
   }
 
   if (isAllowedF95Mirror) {
@@ -418,6 +456,11 @@ function classifyThreadDownloadLink(rawLink) {
     return null;
   }
 
+  // Links F95 hides from people (decoys for bots) are never followed.
+  if (rawLink?.isHidden) {
+    return null;
+  }
+
   const hostname = parsedUrl.hostname;
   if (!/(^|\.)f95zone\.to$/i.test(hostname) && isBareHostUrl(parsedUrl)) {
     return null;
@@ -434,7 +477,11 @@ function classifyThreadDownloadLink(rawLink) {
   }
   const lineHostHint = extractFileHostHint(lineLabel);
   const labelHostHint = extractFileHostHint(label);
-  const inferredHostHint = labelHostHint || lineHostHint;
+  const faviconHost =
+    isF95Host && isF95DownloadPagePath(parsedUrl)
+      ? normalizeHintHost(rawLink?.faviconHost)
+      : "";
+  const inferredHostHint = labelHostHint || lineHostHint || faviconHost;
   const normalizedHost = isF95Host && inferredHostHint ? inferredHostHint : hostname;
   const variant =
     detectVariantFromHint(rawLink?.platformHint) ||
@@ -496,7 +543,12 @@ function classifyThreadDownloadLink(rawLink) {
     return null;
   }
 
-  const hostInfo = describeLinkHost(parsedUrl, isAllowedF95Mirror, inferredHostHint);
+  const hostInfo = describeLinkHost(
+    parsedUrl,
+    isAllowedF95Mirror,
+    inferredHostHint,
+    faviconHost,
+  );
 
   return {
     url: parsedUrl.href,
@@ -584,6 +636,7 @@ function normalizeThreadDownloadLinks(rawLinks) {
 module.exports = {
   classifyThreadDownloadLink,
   cleanText,
+  extractFaviconHost,
   extractLineLabel,
   normalizeThreadDownloadLinks,
 };

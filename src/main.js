@@ -117,6 +117,10 @@ const {
 } = require("./main/f95/downloadSupport");
 const { fetchWithCookieJar } = require("./main/f95/hosts/common");
 const { inspectF95Thread } = require("./main/f95/threadInspector");
+const {
+  createF95LinkRefresher,
+  prepareWithFreshF95Link,
+} = require("./main/f95/downloadLinkRefresh");
 const { backupGameSaves, restoreGameSaves } = require("./main/saveVault");
 const { buildLibraryIdentity } = require("./main/libraryIdentity");
 const {
@@ -1616,7 +1620,9 @@ function createF95ContextFromEntry(entry) {
   if (existing) {
     return existing;
   }
-  const hostInfo = getMirrorHostInfo(entry.requestedUrl || "");
+  const hostInfo = getMirrorHostInfo(entry.requestedUrl || "", {
+    hostHint: entry.sourceHost,
+  });
   const context = {
     id: entry.id,
     request: {
@@ -1696,7 +1702,9 @@ function buildF95DownloadRequest(payload) {
 
 function createF95DownloadContext(request) {
   const contextId = `f95-download-${++f95DownloadSequence}`;
-  const hostInfo = getMirrorHostInfo(request.downloadUrl);
+  const hostInfo = getMirrorHostInfo(request.downloadUrl, {
+    hostHint: request.mirrorHost,
+  });
   const context = {
     id: contextId,
     // Original request payload: retry re-resolves from here because resolved
@@ -2236,24 +2244,50 @@ async function runF95DownloadContext(context, options = {}) {
   };
   const candidates = [primaryCandidate, ...(context.request.fallbackLinks || [])];
   const describeCandidate = (candidate) => {
-    const info = getMirrorHostInfo(candidate?.url || candidate?.host || "");
+    const info = getMirrorHostInfo(candidate?.url || candidate?.host || "", {
+      hostHint: candidate?.host,
+    });
     return info.label || candidate?.host || "the next mirror";
+  };
+
+  // F95 download page links expire a few hours after the thread was opened;
+  // an expired one is swapped for the same mirror's fresh link.
+  const linkRefresher = createF95LinkRefresher({
+    threadUrl: context.request.threadUrl,
+    inspectThread: (threadUrl) => inspectF95Thread({ BrowserWindow, threadUrl }),
+  });
+  const adoptFreshLink = (staleUrl, freshUrl) => {
+    for (const candidate of candidates) {
+      if (candidate.url === staleUrl) {
+        candidate.url = freshUrl;
+      }
+    }
+    if (context.request.downloadUrl === staleUrl) {
+      context.request.downloadUrl = freshUrl;
+      context.requestedUrl = freshUrl;
+    }
   };
 
   const resolution = await resolveMirrorWithFallback({
     candidates,
     prepare: (candidateUrl) =>
-      prepareF95DownloadUrl(getF95ResolverSession(), candidateUrl, {
-        signal: controller.signal,
-        platformHint: context.request.platformHint,
-        onStatus: (text) => {
-          if (isStale()) {
-            return;
-          }
-          f95DownloadsStore.status(context.id, { text });
-          broadcastF95Downloads();
-        },
-      }),
+      prepareWithFreshF95Link(
+        candidateUrl,
+        (url) =>
+          prepareF95DownloadUrl(getF95ResolverSession(), url, {
+            signal: controller.signal,
+            platformHint: context.request.platformHint,
+            onStatus: (text) => {
+              if (isStale()) {
+                return;
+              }
+              f95DownloadsStore.status(context.id, { text });
+              broadcastF95Downloads();
+            },
+          }),
+        linkRefresher,
+        adoptFreshLink,
+      ),
     shouldStop: (error) =>
       isStale() ||
       controller.signal.aborted ||
@@ -2391,7 +2425,9 @@ async function runF95DownloadContext(context, options = {}) {
  * the browser step and later retries work on the mirror that needs the user.
  */
 function adoptF95FallbackCandidate(context, candidate, candidates) {
-  const info = getMirrorHostInfo(candidate.url || candidate.host || "");
+  const info = getMirrorHostInfo(candidate.url || candidate.host || "", {
+    hostHint: candidate.host,
+  });
   context.request = {
     ...context.request,
     downloadUrl: candidate.url,

@@ -57,3 +57,4 @@ npm run check:mirrors:app -- [те же опции] [--user-data <dir>] [--no-br
 ## История изменений
 - 2026-09-26 — первая версия: Node-режим, общий модуль опций передачи, cookie-jar-сессия.
 - 2026-09-26 — `--thread`, `--resolve-only`, `--max-size`, `--cookie-domains`, `--jar`; Electron-режим с окном шага; `probeTarget`; фикстуры Cloudflare/DataNodes/Mixdrop/Krakenfiles/Dropbox.
+- 2026-10-25 — `--thread` понимает ссылки страницы загрузки F95 (`/dl/`): хост по фавиконке, скрытая ссылка-ловушка вырезается до разбора; в таблице и `--only` хост берётся по подсказке. См. [f95-download-page-links.md](f95-download-page-links.md).

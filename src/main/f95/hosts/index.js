@@ -7,7 +7,7 @@
  * the resolver that turns a share link into a direct transfer target.
  *
  * Resolvers return either
- *   - a string: another URL to keep resolving (e.g. masked link → gofile), or
+ *   - a string: another URL to keep resolving (e.g. F95 download page → gofile), or
  *   - an object `{url, transfer?, headers?, fileName?, size?, rangeMode?, mega?}`:
  *     the final transfer target.
  */
@@ -30,7 +30,9 @@ const {
 const {
   extractMaskedTargetHost,
   isF95AttachmentLink,
+  isF95DownloadPageLink,
   isMaskedF95Link,
+  resolveF95DownloadPage,
   resolveMaskedF95Target,
 } = require("./f95");
 const {
@@ -269,6 +271,14 @@ const MIRROR_HOSTS = [
     resolve: resolveMaskedF95Target,
   },
   {
+    id: "f95-dl",
+    label: "F95zone download page",
+    support: "auto",
+    internal: true,
+    match: (parsedUrl) => isF95DownloadPageLink(parsedUrl),
+    resolve: resolveF95DownloadPage,
+  },
+  {
     id: "f95-attachment",
     label: "F95zone attachment",
     support: "auto",
@@ -500,6 +510,18 @@ function findMirrorHost(value) {
   return null;
 }
 
+/**
+ * Usable host hint: a real host name, not F95 itself.
+ * @param {string | undefined} value
+ */
+function describeHintHost(value) {
+  const parsedUrl = parseUrlOrHost(value);
+  if (!parsedUrl || /(^|\.)f95zone\.to$/i.test(parsedUrl.hostname)) {
+    return "";
+  }
+  return normalizeHostname(parsedUrl.hostname);
+}
+
 function getMirrorHostById(hostId) {
   return HOSTS_BY_ID.get(String(hostId || "")) || null;
 }
@@ -520,11 +542,13 @@ function parseUrlOrHost(value) {
 }
 
 /**
- * Describe a mirror link for the UI.
+ * Describe a mirror link for the UI. F95 download page links do not carry
+ * the target host; pass the host the thread shows for them as `hostHint`.
  * @param {string} value URL or bare hostname
+ * @param {{hostHint?: string}} [options]
  * @returns {{host: string, hostId: string, label: string, supported: "auto" | "browser" | "unsupported", generic: boolean, masked: boolean, reason: string}}
  */
-function getMirrorHostInfo(value) {
+function getMirrorHostInfo(value, options = {}) {
   const parsedUrl = parseUrlOrHost(value);
   if (!parsedUrl) {
     return {
@@ -538,12 +562,14 @@ function getMirrorHostInfo(value) {
     };
   }
 
-  if (isMaskedF95Link(parsedUrl)) {
-    const targetHost = extractMaskedTargetHost(parsedUrl);
-    if (targetHost) {
-      const targetInfo = getMirrorHostInfo(targetHost);
-      return { ...targetInfo, masked: true };
-    }
+  const targetHost = isMaskedF95Link(parsedUrl)
+    ? extractMaskedTargetHost(parsedUrl)
+    : isF95DownloadPageLink(parsedUrl)
+      ? describeHintHost(options.hostHint)
+      : "";
+  if (targetHost) {
+    const targetInfo = getMirrorHostInfo(targetHost);
+    return { ...targetInfo, masked: true };
   }
 
   const hostname = normalizeHostname(parsedUrl.hostname);
@@ -568,7 +594,7 @@ function getMirrorHostInfo(value) {
     label: host.label,
     supported,
     generic: false,
-    masked: host.id === "f95-masked",
+    masked: host.id === "f95-masked" || host.id === "f95-dl",
     reason: supported === "browser" ? host.browserReason || "needs a manual step in the browser." : "",
   };
 }

@@ -6,12 +6,13 @@ function isHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || "").trim());
 }
 
+/** F95 masked link or F95 download page link (`/dl/<post>/`). */
 function isF95MaskedUrl(value) {
   try {
     const parsedUrl = new URL(String(value || ""));
     return (
       /(^|\.)f95zone\.to$/i.test(parsedUrl.hostname) &&
-      parsedUrl.pathname.includes("/masked/")
+      (parsedUrl.pathname.includes("/masked/") || /^\/dl\/\d+\/?$/i.test(parsedUrl.pathname))
     );
   } catch {
     return false;
@@ -75,7 +76,7 @@ function buildMirrorCandidates(primary, fallbackLinks) {
 
 /**
  * Tries each mirror until one resolves to a downloadable URL. A captcha on an
- * F95 masked link gates every masked mirror, so it stops the chain; other
+ * F95 masked or download page link gates every F95 mirror, so it stops the chain; other
  * host-specific checks are remembered and the next mirror is tried.
  *
  * @param {{

@@ -17,7 +17,7 @@
  * Options:
  *   --file <path>           links, one per line (# comments, "url  # note")
  *   --thread <url>          F95 thread: check every mirror of its starter post
- *                           (repeatable; needs --cookies for masked links)
+ *                           (repeatable; needs --cookies for download links)
  *   --all-variants          with --thread: check every platform variant, not
  *                           only the one matching --platform
  *   --cookies <path>        Netscape cookies.txt (F95 login for masked links)
@@ -77,7 +77,7 @@ const {
   looksLikeCloudflareChallenge,
   stripHtmlTags,
 } = require(path.join(ROOT, "src/main/f95/hosts/common"));
-const { normalizeThreadDownloadLinks } = require(
+const { extractFaviconHost, normalizeThreadDownloadLinks } = require(
   path.join(ROOT, "src/main/f95/threadLinks"),
 );
 
@@ -293,7 +293,7 @@ async function expandThread(session, threadUrl, options) {
     throw new Error(`F95zone answered HTTP ${response.status}`);
   }
   if (!/data-logged-in="true"/i.test(html)) {
-    console.log("    (not logged in: masked links will need --cookies)");
+    console.log("    (not logged in: download links will need --cookies)");
   }
 
   let start = html.indexOf("message-threadStarterPost");
@@ -305,7 +305,10 @@ async function expandThread(session, threadUrl, options) {
     throw new Error("Could not find the starter post on this page.");
   }
   const end = html.indexOf("</article>", wrapperIndex);
-  const postHtml = html.slice(wrapperIndex, end > 0 ? end : undefined);
+  // F95's decoy link for bots sits in a hidden span: drop it before parsing.
+  const postHtml = html
+    .slice(wrapperIndex, end > 0 ? end : undefined)
+    .replace(/<span\b[^>]*\bclass="[^"]*\bu-hidden\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi, " ");
   const titleMatch = html.match(/<h1[^>]*class="p-title-value"[^>]*>([\s\S]*?)<\/h1>/i);
   const title = titleMatch ? stripHtmlTags(titleMatch[1]) : threadUrl;
 
@@ -319,7 +322,11 @@ async function expandThread(session, threadUrl, options) {
     for (const anchor of extractAnchors(fragment, threadUrl)) {
       const parsed = new URL(anchor.url);
       const isF95 = /(^|\.)f95zone\.to$/i.test(parsed.hostname);
-      if (isF95 && !/\/(masked|attachments)\//i.test(parsed.pathname)) {
+      if (
+        isF95 &&
+        !/\/(masked|attachments)\//i.test(parsed.pathname) &&
+        !/^\/dl\/\d+\/?$/i.test(parsed.pathname)
+      ) {
         continue;
       }
       rawLinks.push({
@@ -328,6 +335,9 @@ async function expandThread(session, threadUrl, options) {
         host: parsed.hostname,
         lineText,
         contextText: lineText,
+        faviconHost: extractFaviconHost(anchor.attributes.style),
+        isHidden:
+          anchor.attributes.tabindex === "-1" || anchor.attributes["aria-hidden"] === "true",
         order: rawLinks.length,
       });
     }
@@ -356,6 +366,7 @@ async function expandThread(session, threadUrl, options) {
         note: `${title} · ${variant.label} · ${link.hostLabel}`,
         expect: "",
         thread: threadUrl,
+        host: link.host,
       });
     }
   }
@@ -569,8 +580,8 @@ function errorSummary(error) {
   return `${code}${message}`.replace(/\s+/g, " ").trim();
 }
 
-function hostInfoFor(url) {
-  const info = getMirrorHostInfo(url);
+function hostInfoFor(url, hostHint) {
+  const info = getMirrorHostInfo(url, { hostHint });
   return {
     id: info.hostId || (info.generic ? "generic" : ""),
     label: info.label || info.host || url,
@@ -708,7 +719,7 @@ async function tryBrowserStep(error, entry, host, options, session, adapters, lo
 
 async function checkLink(entry, options, session, state, adapters = {}) {
   const startedAt = Date.now();
-  const host = hostInfoFor(entry.url);
+  const host = hostInfoFor(entry.url, entry.host);
   state.currentHost = host;
   const row = {
     host: host.id || "?",
@@ -1015,7 +1026,9 @@ async function run(options, adapters = {}) {
   if (options.only.length > 0) {
     const wanted = new Set(options.only.map((id) => id.toLowerCase()));
     const before = entries.length;
-    entries = entries.filter((entry) => wanted.has(hostInfoFor(entry.url).id.toLowerCase()));
+    entries = entries.filter((entry) =>
+      wanted.has(hostInfoFor(entry.url, entry.host).id.toLowerCase()),
+    );
     console.log(`--only: ${entries.length} of ${before} links match ${[...wanted].join(", ")}`);
     if (entries.length === 0) {
       return 0;
@@ -1024,7 +1037,7 @@ async function run(options, adapters = {}) {
 
   if (options.dryRun) {
     for (const entry of entries) {
-      const host = hostInfoFor(entry.url);
+      const host = hostInfoFor(entry.url, entry.host);
       console.log(`${host.id.padEnd(16)} ${host.supported.padEnd(8)} ${entry.url}${entry.note ? `  # ${entry.note}` : ""}`);
     }
     return 0;

@@ -366,8 +366,38 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
     return (
       resolvedUrl.pathname.includes("/masked/") ||
       resolvedUrl.pathname.includes("/attachments/") ||
+      /^\/dl\/\d+\/?$/i.test(resolvedUrl.pathname) ||
       !isF95Host
     );
+  };
+
+  // F95 puts a decoy download link for bots next to the real ones, hidden
+  // from people (u-hidden, aria-hidden, tabindex=-1). It must never be opened.
+  const isHiddenFromPeople = (anchor) => {
+    if (anchor.getAttribute("tabindex") === "-1") {
+      return true;
+    }
+    for (let node = anchor; node && node !== firstPostRoot; node = node.parentElement) {
+      if (
+        node.hidden ||
+        node.getAttribute("aria-hidden") === "true" ||
+        node.classList.contains("u-hidden") ||
+        node.style.display === "none" ||
+        node.style.visibility === "hidden"
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Download page links (/dl/) do not name the host; F95 draws its favicon
+  // (".../ip3/<host>.ico") next to the link.
+  const faviconHostOf = (anchor) => {
+    const match = String(anchor.getAttribute("style") || "").match(
+      /\/ip3\/([a-z0-9.-]+?)\.ico\b/i,
+    );
+    return match ? match[1].toLowerCase() : "";
   };
 
   const pushAnchorLinksFromLine = (lineText, anchors, state) => {
@@ -392,6 +422,8 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
         platformHint: state.platformHint || "",
         releaseHint: state.releaseHint || "",
         sectionHint: state.sectionHint || "",
+        faviconHost: faviconHostOf(anchor),
+        isHidden: isHiddenFromPeople(anchor),
         isLightboxImage:
           anchor.classList.contains("js-lbImage") ||
           anchor.hasAttribute("data-sub-html") ||
@@ -463,7 +495,9 @@ const EXTRACT_THREAD_DOWNLOADS_SCRIPT = String.raw`(() => {
 
       if (tagName === "A" && node.hasAttribute("href")) {
         lineState.anchors.push(node);
-        appendTextPart(lineState, node.innerText || node.textContent || "");
+        if (!isHiddenFromPeople(node)) {
+          appendTextPart(lineState, node.innerText || node.textContent || "");
+        }
         continue;
       }
 
