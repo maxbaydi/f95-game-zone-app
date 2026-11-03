@@ -347,9 +347,8 @@ function describeConnection(connection) {
     case SAVE_STORAGE_TYPES.WEBDAV:
       return settings.label ? `${settings.label} · ${settings.url}` : String(settings.url || "");
     case SAVE_STORAGE_TYPES.S3:
-      return `${settings.bucket || ""} @ ${String(settings.endpoint || "").replace(/^https?:\/\//, "")}`;
     case SAVE_STORAGE_TYPES.SUPABASE:
-      return `Supabase · ${settings.bucket || "f95launcher-saves"} @ ${String(settings.url || "").replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
+      return settings.label || "Cloud storage";
     default:
       return connection.type;
   }

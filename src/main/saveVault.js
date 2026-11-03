@@ -17,6 +17,24 @@ const COMMON_SAVE_PATHS = [
   "userdata/saves",
 ];
 
+// A restore must not observe the brief directory swap of a backup.
+const vaultOperations = new Map();
+function withVaultLock(input, operation) {
+  const root = getVaultGameRoot(input.appPaths, buildSaveVaultIdentity(input));
+  const previous = vaultOperations.get(root) || Promise.resolve();
+  const pending = previous.catch(() => {}).then(async () => {
+    const recoveryRoot = `${root}.previous`;
+    if (!(await pathExists(root)) && (await pathExists(recoveryRoot))) {
+      await fs.promises.rename(recoveryRoot, root);
+    }
+    return operation(input);
+  });
+  vaultOperations.set(root, pending);
+  return pending.finally(() => {
+    if (vaultOperations.get(root) === pending) vaultOperations.delete(root);
+  });
+}
+
 function extractThreadId(threadUrl) {
   const match = String(threadUrl || "").match(/\/threads\/[^./]+?\.(\d+)(?:\/|$)/i);
   return match ? match[1] : "";
@@ -51,8 +69,9 @@ async function pathExists(targetPath) {
   try {
     await fs.promises.access(targetPath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -152,7 +171,7 @@ async function copyProfileToVault(profile, destinationRoot) {
   }
 }
 
-async function backupGameSaves(input) {
+async function backupGameSavesUnlocked(input) {
   const identity = buildSaveVaultIdentity(input);
   const trackedProfiles = await resolveTrackedProfiles(input);
 
@@ -165,41 +184,66 @@ async function backupGameSaves(input) {
   }
 
   const vaultRoot = getVaultGameRoot(input.appPaths, identity);
-  await fs.promises.rm(vaultRoot, { recursive: true, force: true });
-  await fs.promises.mkdir(vaultRoot, { recursive: true });
+  await fs.promises.mkdir(path.dirname(vaultRoot), { recursive: true });
+  const stagingRoot = await fs.promises.mkdtemp(`${vaultRoot}.pending-`);
+  const recoveryRoot = `${vaultRoot}.previous`;
 
-  for (const trackedProfile of trackedProfiles) {
-    const destinationPath = path.join(vaultRoot, trackedProfile.vaultRelativePath);
-    await copyProfileToVault(trackedProfile, destinationPath);
+  try {
+    for (const trackedProfile of trackedProfiles) {
+      const destinationPath = path.join(stagingRoot, trackedProfile.vaultRelativePath);
+      await copyProfileToVault(trackedProfile, destinationPath);
+    }
+
+    await fs.promises.writeFile(
+      path.join(stagingRoot, "manifest.json"),
+      JSON.stringify(
+        {
+          identity,
+          threadUrl: input.threadUrl || "",
+          atlasId: input.atlasId || "",
+          title: input.title || "",
+          creator: input.creator || "",
+          updatedAt: Date.now(),
+          trackedPaths: trackedProfiles
+            .filter((entry) => entry.strategy?.type === "install-relative")
+            .map((entry) => entry.strategy.payload.relativePath),
+          trackedProfiles: trackedProfiles.map((entry) => ({
+            provider: entry.provider,
+            rootPath: entry.rootPath,
+            strategy: entry.strategy,
+            confidence: entry.confidence,
+            reasons: entry.reasons,
+            vaultRelativePath: entry.vaultRelativePath.replace(/\\/g, "/"),
+          })),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    // Keep the last complete snapshot until every new file and the manifest
+    // are written. Recover the old snapshot if publication fails.
+    if (await pathExists(vaultRoot)) {
+      await fs.promises.rm(recoveryRoot, { recursive: true, force: true });
+      await fs.promises.rename(vaultRoot, recoveryRoot);
+    }
+    try {
+      await fs.promises.rename(stagingRoot, vaultRoot);
+    } catch (error) {
+      if (await pathExists(recoveryRoot)) {
+        await fs.promises.rename(recoveryRoot, vaultRoot);
+      }
+      throw error;
+    }
+    await fs.promises.rm(recoveryRoot, { recursive: true, force: true }).catch((error) => {
+      console.warn("[save.vault] Previous snapshot cleanup failed:", error);
+    });
+  } finally {
+    await fs.promises.rm(stagingRoot, { recursive: true, force: true }).catch((error) => {
+      console.warn("[save.vault] Staging cleanup failed:", error);
+    });
   }
-
-  await fs.promises.writeFile(
-    path.join(vaultRoot, "manifest.json"),
-    JSON.stringify(
-      {
-        identity,
-        threadUrl: input.threadUrl || "",
-        atlasId: input.atlasId || "",
-        title: input.title || "",
-        creator: input.creator || "",
-        updatedAt: Date.now(),
-        trackedPaths: trackedProfiles
-          .filter((entry) => entry.strategy?.type === "install-relative")
-          .map((entry) => entry.strategy.payload.relativePath),
-        trackedProfiles: trackedProfiles.map((entry) => ({
-          provider: entry.provider,
-          rootPath: entry.rootPath,
-          strategy: entry.strategy,
-          confidence: entry.confidence,
-          reasons: entry.reasons,
-          vaultRelativePath: entry.vaultRelativePath.replace(/\\/g, "/"),
-        })),
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
 
   return {
     identity,
@@ -222,7 +266,7 @@ async function backupGameSaves(input) {
   };
 }
 
-async function restoreGameSaves(input) {
+async function restoreGameSavesUnlocked(input) {
   const identity = buildSaveVaultIdentity(input);
   const vaultRoot = getVaultGameRoot(input.appPaths, identity);
 
@@ -329,8 +373,8 @@ async function restoreGameSaves(input) {
 }
 
 module.exports = {
-  backupGameSaves,
+  backupGameSaves: (input) => withVaultLock(input, backupGameSavesUnlocked),
   buildSaveVaultIdentity,
   resolveSaveProfileDestinationPath,
-  restoreGameSaves,
+  restoreGameSaves: (input) => withVaultLock(input, restoreGameSavesUnlocked),
 };

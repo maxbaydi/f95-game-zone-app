@@ -83,23 +83,8 @@ function decideSaveSyncPlan(input) {
     };
   }
 
-  const localLatestMtimeMs = getManifestLatestMtimeMs(localManifest);
-  const remoteLatestMtimeMs = getManifestLatestMtimeMs(remoteManifest);
-
-  if (localLatestMtimeMs > remoteLatestMtimeMs) {
-    return {
-      action: "upload",
-      reason: "local-newer",
-    };
-  }
-
-  if (remoteLatestMtimeMs > localLatestMtimeMs) {
-    return {
-      action: "restore",
-      reason: "remote-newer",
-    };
-  }
-
+  // Independent edits (or an unknown baseline) need a user's choice.
+  // File clocks across PCs cannot establish which progress should survive.
   return {
     action: "conflict",
     reason: "ambiguous-divergence",

@@ -229,3 +229,97 @@ test("restore reports a missing backup and upload reports missing saves", async 
   await assert.rejects(() => sync.uploadGame(1), (error) => codeOf(error) === "no_saves");
   assert.equal((await sync.reconcileGame(1)).action, "noop");
 });
+
+function safetyFixture(t) {
+  const root = makeTempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const library = makeFakeLibrary(path.join(root, "pc"));
+  const install = path.join(root, "Game");
+  writeFiles(install, { "game/saves/slot.save": "remote" });
+  library.games.set(1, { title: "Game", siteUrl: "https://f95zone.to/threads/game.5/", installDirectory: install });
+  const connection = { type: "folder", settings: { folderPath: path.join(root, "store") }, secrets: {}, encryption: { enabled: false, passphrase: "" }, connectedAt: "", deviceName: "" };
+  return { root, library, install, connection };
+}
+
+test("restore refuses to overwrite saves when the safety backup fails", async (t) => {
+  const { library, install, connection } = safetyFixture(t);
+  const sync = createSaveStorageSync({ ...library.deps, getConnection: () => connection });
+  await sync.load();
+  await sync.uploadGame(1);
+  const save = path.join(install, "game/saves/slot.save");
+  fs.writeFileSync(save, "new local progress");
+  fs.mkdirSync(path.dirname(library.deps.appPaths.backups), { recursive: true });
+  fs.writeFileSync(library.deps.appPaths.backups, "blocks backup directory");
+  await assert.rejects(sync.restoreGame(1));
+  assert.equal(fs.readFileSync(save, "utf8"), "new local progress");
+  assert.equal(library.syncStates.get(1).syncStatus, "error");
+});
+
+for (const marker of ["{bad-json", '{"format":"other","version":1,"encrypted":false}', '{"format":"f95launcher-save-storage","version":99,"encrypted":false}']) {
+  test(`invalid marker blocks all storage writes: ${marker}`, async (t) => {
+    const { library, connection } = safetyFixture(t);
+    fs.mkdirSync(connection.settings.folderPath, { recursive: true });
+    fs.writeFileSync(path.join(connection.settings.folderPath, "storage.json"), marker);
+    const sync = createSaveStorageSync({ ...library.deps, getConnection: () => connection });
+    const loaded = await sync.load();
+    assert.ok(loaded.error);
+    assert.equal(sync.isReady(), false);
+    await assert.rejects(sync.uploadGame(1));
+    assert.deepEqual(fs.readdirSync(connection.settings.folderPath), ["storage.json"]);
+  });
+}
+
+test("switching connections waits for an in-flight upload without redirecting it", async (t) => {
+  const { root, library, connection } = safetyFixture(t);
+  let activeConnection = connection;
+  let release = () => {};
+  let entered = () => {};
+  const gate = new Promise((resolve) => { release = () => resolve(null); });
+  const started = new Promise((resolve) => { entered = () => resolve(null); });
+  const sync = createSaveStorageSync({
+    ...library.deps,
+    getConnection: () => activeConnection,
+    refreshSaveProfiles: async (id) => { entered(); await gate; return library.deps.refreshSaveProfiles(id); },
+  });
+  await sync.load();
+  const upload = sync.uploadGame(1);
+  await started;
+  activeConnection = { ...connection, settings: { folderPath: path.join(root, "other-store") } };
+  const switching = sync.load();
+  release();
+  await Promise.all([upload, switching]);
+  assert.equal(fs.existsSync(path.join(connection.settings.folderPath, "games/f95-5/latest.zip")), true);
+  assert.deepEqual(fs.readdirSync(activeConnection.settings.folderPath), ["storage.json"]);
+});
+
+test("repeated conflicts retain the last successful sync baseline", async (t) => {
+  const { library, install, connection } = safetyFixture(t);
+  const sync = createSaveStorageSync({ ...library.deps, getConnection: () => connection });
+  await sync.load();
+  await sync.uploadGame(1);
+  const baseline = { ...library.syncStates.get(1) };
+  fs.writeFileSync(path.join(install, "game/saves/slot.save"), "local progress");
+  const remotePath = path.join(connection.settings.folderPath, "games/f95-5/latest.manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(remotePath, "utf8"));
+  manifest.manifestHash = "remote changed";
+  manifest.contentHash = "remote content";
+  fs.writeFileSync(remotePath, JSON.stringify(manifest));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal((await sync.reconcileGame(1)).action, "conflict");
+    assert.equal(library.syncStates.get(1).lastLocalManifestHash, baseline.lastLocalManifestHash);
+    assert.equal(library.syncStates.get(1).lastRemoteManifestHash, baseline.lastRemoteManifestHash);
+  }
+  assert.equal(fs.readFileSync(path.join(install, "game/saves/slot.save"), "utf8"), "local progress");
+});
+
+test("connection reload cannot overtake an already queued manual sync", async (t) => {
+  const { root, library, connection } = safetyFixture(t);
+  let activeConnection = connection;
+  const sync = createSaveStorageSync({ ...library.deps, getConnection: () => activeConnection });
+  await sync.load();
+  const upload = sync.enqueue("manual upload", () => sync.syncAll({ mode: "upload" }));
+  activeConnection = { ...connection, settings: { folderPath: path.join(root, "other") } };
+  await Promise.all([upload, sync.load()]);
+  assert.equal(fs.existsSync(path.join(connection.settings.folderPath, "games/f95-5/latest.zip")), true);
+  assert.deepEqual(fs.readdirSync(activeConnection.settings.folderPath), ["storage.json"]);
+});

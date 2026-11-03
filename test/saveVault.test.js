@@ -14,6 +14,38 @@ function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "app-save-vault-test-"));
 }
 
+test("failed backup keeps the previous complete snapshot and removes staging", async (t) => {
+  const root = makeTempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const input = { appPaths: { backups: path.join(root, "backups") }, installDirectory: path.join(root, "game"), title: "Game" };
+  const file = path.join(input.installDirectory, "saves", "slot.save");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "previous");
+  await backupGameSaves(input);
+  fs.writeFileSync(file, "new");
+  const mock = t.mock.method(fs.promises, "copyFile", async () => { throw new Error("disk full"); });
+  await assert.rejects(backupGameSaves(input), /disk full/);
+  mock.mock.restore();
+  const restored = path.join(root, "restored");
+  await restoreGameSaves({ ...input, installDirectory: restored });
+  assert.equal(fs.readFileSync(path.join(restored, "saves", "slot.save"), "utf8"), "previous");
+  assert.deepEqual(fs.readdirSync(path.join(input.appPaths.backups, "save_vault")), [buildSaveVaultIdentity(input)]);
+});
+
+test("vault recovers the previous snapshot after an interrupted directory swap", async (t) => {
+  const root = makeTempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const input = { appPaths: { backups: path.join(root, "backups") }, installDirectory: path.join(root, "game"), title: "Game" };
+  fs.mkdirSync(path.join(input.installDirectory, "saves"), { recursive: true });
+  fs.writeFileSync(path.join(input.installDirectory, "saves", "slot.save"), "safe");
+  await backupGameSaves(input);
+  const vault = path.join(input.appPaths.backups, "save_vault", buildSaveVaultIdentity(input));
+  fs.renameSync(vault, `${vault}.previous`);
+  const restored = path.join(root, "restored");
+  await restoreGameSaves({ ...input, installDirectory: restored });
+  assert.equal(fs.readFileSync(path.join(restored, "saves", "slot.save"), "utf8"), "safe");
+});
+
 test("buildSaveVaultIdentity prefers F95 thread id", () => {
   const identity = buildSaveVaultIdentity({
     threadUrl:

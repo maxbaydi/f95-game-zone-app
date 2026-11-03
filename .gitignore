@@ -19,3 +19,5 @@ AGENTS.md
 .dev.vars
 /output/playwright/
 /.playwright-mcp/
+/.playwright-cli/
+/src/assets/compiled/

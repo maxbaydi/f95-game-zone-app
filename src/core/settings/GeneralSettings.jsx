@@ -409,8 +409,6 @@ const describeAppUpdateState = (state) => {
 const AboutSettings = ({ settings, appInfo }) => {
   const [updateState, setUpdateState] = React.useState(null);
   const [isChecking, setIsChecking] = React.useState(false);
-  const [debugChanged, setDebugChanged] = React.useState(false);
-  const interfaceSettings = settings.config?.Interface || {};
 
   React.useEffect(() => {
     window.electronAPI
@@ -526,26 +524,7 @@ const AboutSettings = ({ settings, appInfo }) => {
         </window.SettingsCard>
       )}
 
-      <window.SettingsCard icon="bug_report" title="Troubleshooting">
-        <window.SettingRow
-          title="Developer console"
-          description="Opens the developer tools with each window. Useful when reporting a bug."
-          badge={
-            debugChanged && (
-              <window.RestartRequiredBadge onRestart={settings.onRestart} />
-            )
-          }
-        >
-          <window.ToggleSwitch
-            label="Developer console"
-            checked={Boolean(interfaceSettings.showDebugConsole)}
-            onChange={(checked) => {
-              setDebugChanged(true);
-              settings.update("Interface", { showDebugConsole: checked });
-            }}
-          />
-        </window.SettingRow>
-      </window.SettingsCard>
+
     </div>
   );
 };

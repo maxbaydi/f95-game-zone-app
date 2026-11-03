@@ -74,7 +74,7 @@ test("save sync plan prefers upload when only local hash changed since last sync
   });
 });
 
-test("save sync plan prefers restore when both sides changed but cloud files are newer", () => {
+test("save sync plan preserves divergent saves even when cloud files are newer", () => {
   const plan = decideSaveSyncPlan({
     localManifest: createManifest("local-new", [40]),
     remoteManifest: createManifest("remote-new", [80]),
@@ -85,9 +85,18 @@ test("save sync plan prefers restore when both sides changed but cloud files are
   });
 
   assert.deepEqual(plan, {
-    action: "restore",
-    reason: "remote-newer",
+    action: "conflict",
+    reason: "ambiguous-divergence",
   });
+});
+
+test("save sync plan needs a choice for differing saves without a shared baseline", () => {
+  for (const times of [[10, 90], [90, 10]]) {
+    assert.equal(decideSaveSyncPlan({
+      localManifest: createManifest("local", [times[0]]),
+      remoteManifest: createManifest("remote", [times[1]]),
+    }).action, "conflict");
+  }
 });
 
 test("save sync plan marks equal-time divergence as conflict", () => {

@@ -150,8 +150,13 @@ function createSaveStorageSync(deps) {
   let lastError = "";
   let lastSyncAt = "";
   let busy = false;
-  /** @type {Promise<any>} */
-  let queue = Promise.resolve();
+  let operationQueue = Promise.resolve();
+  /** @template T @param {() => Promise<T>} operation @returns {Promise<T>} */
+  const serialize = (operation) => {
+    const pending = operationQueue.catch(() => {}).then(operation);
+    operationQueue = pending.then(() => {}, () => {});
+    return pending;
+  };
   /** @type {Map<number, { watchers: fs.FSWatcher[], timer: any, stopAt: number }>} */
   const watchers = new Map();
 
@@ -243,6 +248,9 @@ function createSaveStorageSync(deps) {
         throw new SaveStorageError("The storage marker is damaged. Pick another folder or clear it.", { code: "marker_invalid" });
       }
       marker = parsed;
+      if (parsed?.format !== STORAGE_FORMAT || parsed?.version !== STORAGE_VERSION || typeof parsed?.encrypted !== "boolean") {
+        throw new SaveStorageError("This save storage could not be opened. Reconnect it or choose another location.", { code: "marker_invalid" });
+      }
       if (parsed?.encrypted) {
         if (!passphrase) {
           key = null;
@@ -471,7 +479,7 @@ function createSaveStorageSync(deps) {
           creator: snapshot.game.displayCreator || snapshot.game.creator || "",
           installDirectory,
           profiles: snapshot.profiles,
-        }).catch((error) => logger.warn("[save.storage] Vault backup before restore failed:", error));
+        });
       }
       const imported = await withTemp("restore.zip", async (tempPath) => {
         await fs.promises.writeFile(tempPath, archive);
@@ -562,8 +570,8 @@ function createSaveStorageSync(deps) {
     }
     const previous = snapshot.syncState || {};
     const state = await saveState(recordId, identity, {
-      lastLocalManifestHash: localManifest?.manifestHash || previous.lastLocalManifestHash || "",
-      lastRemoteManifestHash: remoteManifest?.manifestHash || previous.lastRemoteManifestHash || "",
+      lastLocalManifestHash: plan.action === "conflict" ? previous.lastLocalManifestHash || "" : localManifest?.manifestHash || previous.lastLocalManifestHash || "",
+      lastRemoteManifestHash: plan.action === "conflict" ? previous.lastRemoteManifestHash || "" : remoteManifest?.manifestHash || previous.lastRemoteManifestHash || "",
       lastUploadedAt: previous.lastUploadedAt || "",
       lastDownloadedAt: previous.lastDownloadedAt || "",
       lastRemotePath: remoteManifest ? paths.archive : previous.lastRemotePath || "",
@@ -685,7 +693,7 @@ function createSaveStorageSync(deps) {
         return;
       }
       entry.timer = setTimeout(() => {
-        enqueue(`post-play reconcile ${recordId}`, () => reconcileGame(recordId));
+        enqueue(`post-play reconcile ${recordId}`, () => serialize(() => reconcileGame(recordId)));
       }, WATCH_DEBOUNCE_MS);
     };
     for (const root of roots) {
@@ -705,17 +713,17 @@ function createSaveStorageSync(deps) {
   // ── Lifecycle ────────────────────────────────────────────────────────
 
   const enqueue = (label, task) => {
-    queue = queue
-      .catch(() => null)
-      .then(async () => {
-        try {
-          return await task();
-        } catch (error) {
-          logger.warn(`[save.storage] ${label} failed:`, error instanceof Error ? error.message : error);
-          return null;
-        }
-      });
-    return queue;
+    const failed = (error) => {
+      logger.warn(`[save.storage] ${label} failed:`, error instanceof Error ? error.message : error);
+      return null;
+    };
+    // Public operations join operationQueue immediately. Deferring task()
+    // through another promise queue would let a later load overtake it.
+    try {
+      return Promise.resolve(task()).catch(failed);
+    } catch (error) {
+      return Promise.resolve(failed(error));
+    }
   };
 
   /**
@@ -728,11 +736,11 @@ function createSaveStorageSync(deps) {
    * @param {{ passphrase?: string, createEncrypted?: boolean }=} options
    * @returns {Promise<LoadResult>}
    */
-  const load = async (options = {}) => {
+  const load = async (options = {}, nextConnection = deps.getConnection()) => {
     for (const recordId of [...watchers.keys()]) {
       stopWatching(recordId);
     }
-    connection = deps.getConnection();
+    connection = nextConnection;
     provider = null;
     key = null;
     marker = null;
@@ -752,9 +760,9 @@ function createSaveStorageSync(deps) {
       return { connected: true, ...markerState };
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
-      if (/** @type {any} */ (error)?.code === "wrong_passphrase") {
-        locked = true;
-      }
+      // A failed marker read must never leave a writable, unencrypted provider.
+      key = null;
+      locked = true;
       emitState();
       return { connected: Boolean(provider), error: lastError, locked };
     }
@@ -789,16 +797,19 @@ function createSaveStorageSync(deps) {
   };
 
   return {
-    load,
+    load: (options = {}) => {
+      const nextConnection = deps.getConnection();
+      return serialize(() => load(options, nextConnection));
+    },
     getStatus,
     getProvider: () => provider,
     isReady: () => Boolean(provider && connection && !locked),
-    uploadGame,
-    restoreGame,
-    reconcileGame,
-    syncAll,
-    readCatalog,
-    clearRemoteGame,
+    uploadGame: (recordId, options = {}) => serialize(() => uploadGame(recordId, options)),
+    restoreGame: (recordId) => serialize(() => restoreGame(recordId)),
+    reconcileGame: (recordId) => serialize(() => reconcileGame(recordId)),
+    syncAll: (options = {}) => serialize(() => syncAll(options)),
+    readCatalog: () => serialize(readCatalog),
+    clearRemoteGame: (recordId) => serialize(() => clearRemoteGame(recordId)),
     watchGameSaves,
     stopWatching,
     enqueue,

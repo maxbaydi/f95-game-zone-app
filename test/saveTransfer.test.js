@@ -179,6 +179,61 @@ test("export without any save file is refused instead of writing an empty archiv
   assert.equal(fs.existsSync(path.join(root, "empty.zip")), false);
 });
 
+for (const corruption of ["changed", "missing", "extra", "invalid-json", "unsupported-version"]) {
+  test(`import rejects ${corruption} archive before touching any local save`, async (t) => {
+    const root = makeTempDir();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const install = path.join(root, "Game");
+    writeFiles(install, { "game/saves/slot.save": "original", "game/saves/other.save": "other" });
+    const snapshot = makeRenpySnapshot(install, "");
+    const archivePath = path.join(root, "export.zip");
+    await exportGameSavesToFile({ snapshot, targetPath: archivePath, identity: "game" });
+    const zip = new AdmZip(archivePath);
+    const entry = "profiles/local/game/saves/slot.save";
+    if (corruption === "changed") zip.updateFile(entry, Buffer.from("corrupt"));
+    if (corruption === "missing") zip.deleteFile(entry);
+    if (corruption === "extra") zip.addFile("profiles/local/game/saves/extra.save", Buffer.from("extra"));
+    if (corruption === "invalid-json") zip.updateFile("manifest.json", Buffer.from("{bad"));
+    if (corruption === "unsupported-version") {
+      const manifest = JSON.parse(zip.readAsText("manifest.json"));
+      manifest.formatVersion = 99;
+      zip.updateFile("manifest.json", Buffer.from(JSON.stringify(manifest)));
+    }
+    zip.writeZip(archivePath);
+    fs.writeFileSync(path.join(install, "game/saves/slot.save"), "local progress");
+    await assert.rejects(importGameSavesFromFile({ snapshot, archivePath, extractArchive: extractArchiveSafely, tempRoot: root }));
+    assert.equal(fs.readFileSync(path.join(install, "game/saves/slot.save"), "utf8"), "local progress");
+    assert.deepEqual(fs.readdirSync(path.join(install, "game/saves")).sort(), ["other.save", "slot.save"]);
+    assert.equal(fs.readdirSync(root).some((name) => name.startsWith("f95-saves-import-")), false);
+  });
+}
+
+test("failed extraction removes its temporary directory", async (t) => {
+  const root = makeTempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await assert.rejects(importGameSavesFromFile({
+    snapshot: makeRenpySnapshot(root, ""), archivePath: "broken.zip", tempRoot: root,
+    extractArchive: async () => { throw new Error("damaged archive"); },
+  }), /damaged archive/);
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test("foreign archives may include another launcher's manifest metadata", async (t) => {
+  const root = makeTempDir();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const install = path.join(root, "Game");
+  fs.mkdirSync(path.join(install, "game/saves"), { recursive: true });
+  const archivePath = path.join(root, "foreign.zip");
+  const zip = new AdmZip();
+  zip.addFile("slot.save", Buffer.from("foreign save"));
+  zip.addFile("manifest.json", Buffer.from(JSON.stringify({ format: "other-save-backup", files: ["slot.save"] })));
+  zip.writeZip(archivePath);
+  const imported = await importGameSavesFromFile({ snapshot: makeRenpySnapshot(install, ""), archivePath, extractArchive: extractArchiveSafely, tempRoot: root });
+  assert.equal(imported.foreign, true);
+  assert.equal(imported.importedFiles, 1);
+  assert.equal(fs.readFileSync(path.join(install, "game/saves/slot.save"), "utf8"), "foreign save");
+});
+
 test("a zip the user made of the saves folder lands in the detected save folder", async () => {
   const root = makeTempDir();
   const install = path.join(root, "Game");

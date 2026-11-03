@@ -87,6 +87,9 @@ test("archive path validation blocks traversal and absolute entry names", () => 
 
   assert.equal(validation.valid, false);
   assert.deepEqual(validation.invalidEntries, ["../evil.txt"]);
+  for (const entry of ["/absolute.txt", "\\\\server\\share\\file.txt", "\\rooted.txt"]) {
+    assert.equal(validateArchiveEntries([entry]).valid, false, entry);
+  }
 });
 
 test("archive formats are detected from magic bytes and from file names", () => {

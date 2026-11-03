@@ -1,5 +1,5 @@
 module.exports = {
-  content: ['./src/**/*.{html,js,jsx}', '!./src/assets/vendor/**'],
+  content: ['./src/**/*.{html,js,jsx}', '!./src/assets/vendor/**', '!./src/assets/compiled/**'],
   theme: {
     borderRadius: {
       none: '0',

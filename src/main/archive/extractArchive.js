@@ -126,7 +126,6 @@ function isUnsafeArchiveEntryName(entryName) {
  */
 function validateArchiveEntries(entryNames) {
   const invalidEntries = entryNames
-    .map((entryName) => normalizeArchiveEntryName(entryName))
     .filter((entryName) => entryName && isUnsafeArchiveEntryName(entryName));
 
   return {

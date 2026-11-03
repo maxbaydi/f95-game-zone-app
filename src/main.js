@@ -4172,12 +4172,13 @@ function broadcastSettingsChanged() {
 
 ipcMain.handle("update-settings", async (event, payload) => {
   try {
-    appConfig = applySettingsPatch(
+    const nextConfig = applySettingsPatch(
       appConfig || defaultConfig,
       String(payload?.section || ""),
       payload?.values || {},
     );
-    saveConfig();
+    saveConfig(nextConfig);
+    appConfig = nextConfig;
     trayController.refresh();
     applyLoginItemSettings();
     appUpdater.applySettings();
@@ -6557,8 +6558,8 @@ function loadConfig() {
   }
 }
 
-function saveConfig() {
-  writeFileAtomicSync(configPath, ini.stringify(appConfig));
+function saveConfig(config = appConfig) {
+  writeFileAtomicSync(configPath, ini.stringify(config));
 }
 
 function getF95MirrorPreferenceKey(threadUrl) {

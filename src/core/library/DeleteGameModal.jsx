@@ -116,14 +116,14 @@ const DeleteGameModal = (liveProps) => {
         role="alertdialog"
         aria-modal="true"
         aria-label={`Remove ${displayTitle}`}
-        className="app-dialog max-h-[88vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
+        className="app-dialog flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-border bg-primary/95 shadow-2xl outline-none"
         data-state={layer.state}
       >
-        <div className="border-b border-border px-6 py-5">
+        <div className="shrink-0 border-b border-border px-6 py-5">
           <div className="text-[11px] uppercase tracking-[0.22em] text-red-200/75">
             Remove Game
           </div>
-          <div className="mt-2 text-2xl font-semibold text-text">
+          <div className="mt-2 break-words text-2xl font-semibold text-text">
             {displayTitle}
           </div>
           <div className="mt-2 text-sm text-text/65">
@@ -131,7 +131,7 @@ const DeleteGameModal = (liveProps) => {
           </div>
         </div>
 
-        <div className="grid max-h-[58vh] gap-6 overflow-y-auto px-6 py-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
+        <div className="grid min-h-0 gap-6 overflow-y-auto px-6 py-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
           <div className="space-y-4">
             <DeleteModeCard
               title="Just remove it from my library"
@@ -238,7 +238,7 @@ const DeleteGameModal = (liveProps) => {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-4">
           <div className="text-xs text-text/55">
             {mode === DeleteGameModes.LIBRARY_ONLY
               ? "Your game files and progress will stay on this PC."

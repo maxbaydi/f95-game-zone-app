@@ -18,7 +18,8 @@ const crypto = require("crypto");
 const os = require("os");
 const AdmZip = require("adm-zip");
 
-const { buildSaveManifest } = require("../shared/saveManifest");
+const { buildSaveManifest, createSaveManifestHash, createSaveContentHash } = require("../shared/saveManifest");
+const { isUnsafeArchiveEntryName } = require("./archive/extractArchive");
 const {
   buildTrackedProfileDescriptor,
   listSaveProfileFiles,
@@ -252,23 +253,21 @@ async function exportGameSavesToFile(input) {
       continue;
     }
     const archiveRoot = getArchiveRoot(profile, index);
-    let files = [];
-    try {
-      files = await listSaveProfileFiles(profile);
-    } catch {
-      files = [];
-    }
+    const files = await listSaveProfileFiles(profile);
     let count = 0;
     for (const file of files) {
       const archivePath = `${archiveRoot}/${String(file.relativePath || "").replace(/\\/g, "/")}`;
-      zip.addFile(archivePath, fs.readFileSync(file.filePath));
+      // Hash the exact bytes included in the archive, even if the game saves
+      // again while the export is running. Avoid reading each file twice.
+      const contents = await fs.promises.readFile(file.filePath);
+      zip.addFile(archivePath, contents);
       manifestEntries.push({
         path: archivePath,
-        size: file.size,
+        size: contents.length,
         mtimeMs: file.mtimeMs,
-        sha256: hashFileSync(file.filePath),
+        sha256: crypto.createHash("sha256").update(contents).digest("hex"),
       });
-      totalBytes += Number(file.size) || 0;
+      totalBytes += contents.length;
       count += 1;
     }
     manifestProfiles.push({
@@ -516,25 +515,63 @@ async function inspectSaveArchive(input) {
   const tempDir = await fs.promises.mkdtemp(
     path.join(input.tempRoot || os.tmpdir(), "f95-saves-import-"),
   );
-  await input.extractArchive({
-    archivePath: input.archivePath,
-    destinationPath: tempDir,
-    password: input.password || "",
-  });
-  const files = walkFiles(tempDir);
-  let manifest = null;
-  const manifestFile = files.find((file) => file.relativePath === "manifest.json");
-  if (manifestFile) {
-    try {
+  try {
+    await input.extractArchive({
+      archivePath: input.archivePath,
+      destinationPath: tempDir,
+      password: input.password || "",
+    });
+    const files = walkFiles(tempDir);
+    let manifest = null;
+    const manifestFile = files.find((file) => file.relativePath === "manifest.json");
+    if (manifestFile) {
       const parsed = JSON.parse(await fs.promises.readFile(manifestFile.filePath, "utf8"));
-      if (parsed && Array.isArray(parsed.profiles) && Array.isArray(parsed.entries)) {
+      // Other launchers can include their own metadata file. Only our format
+      // (or a damaged copy of its recognizable shape) defines restore paths.
+      if (parsed?.format === SAVE_TRANSFER_FORMAT || "profiles" in Object(parsed) || "entries" in Object(parsed)) {
+        validateSaveArchiveManifest(parsed, files);
         manifest = parsed;
       }
-    } catch {
-      manifest = null;
     }
+    return { tempDir, manifest, files };
+  } catch (error) {
+    await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
   }
-  return { tempDir, manifest, files };
+}
+
+function invalidSaveArchive() {
+  return Object.assign(new Error("The save archive is damaged or incomplete. No saves were imported."), { code: "invalid_save_manifest" });
+}
+
+// Check the complete archive before writing the first destination file.
+function validateSaveArchiveManifest(manifest, files) {
+  if (manifest?.format !== SAVE_TRANSFER_FORMAT ||
+      manifest.formatVersion !== SAVE_TRANSFER_FORMAT_VERSION ||
+      !Array.isArray(manifest.profiles) || !Array.isArray(manifest.entries) ||
+      !manifest.entries.length ||
+      manifest.manifestHash !== createSaveManifestHash(manifest) ||
+      (manifest.contentHash && manifest.contentHash !== createSaveContentHash(manifest))) {
+    throw invalidSaveArchive();
+  }
+  const roots = manifest.profiles.map((profile) => profile?.archiveRoot);
+  if (roots.some((root) => typeof root !== "string" || !root || isUnsafeArchiveEntryName(root) ||
+      normalizeRelativeSegments(root).join("/") !== root) || new Set(roots).size !== roots.length) {
+    throw invalidSaveArchive();
+  }
+  const actual = new Map(files.filter((file) => file.relativePath !== "manifest.json")
+    .map((file) => [file.relativePath, file]));
+  const seen = new Set();
+  for (const entry of manifest.entries) {
+    const file = actual.get(entry?.path);
+    if (!file || seen.has(entry.path.toLowerCase()) || isUnsafeArchiveEntryName(entry.path) ||
+        roots.filter((root) => entry.path.startsWith(`${root}/`)).length !== 1 ||
+        file.size !== entry.size || hashFileSync(file.filePath) !== entry.sha256) {
+      throw invalidSaveArchive();
+    }
+    seen.add(entry.path.toLowerCase());
+  }
+  if (seen.size !== actual.size) throw invalidSaveArchive();
 }
 
 /**
@@ -574,6 +611,8 @@ async function importGameSavesFromFile(input) {
 
   try {
     if (inspected.manifest) {
+      const copies = [];
+      const targets = new Set();
       for (const manifestProfile of inspected.manifest.profiles) {
         const archiveRoot = String(manifestProfile?.archiveRoot || "").replace(/\\/g, "/").replace(/\/+$/, "");
         if (!archiveRoot) {
@@ -605,12 +644,17 @@ async function importGameSavesFromFile(input) {
             skippedFiles += 1;
             continue;
           }
-          await copyFileInto(file.filePath, path.join(destination, ...segments));
+          const target = path.resolve(destination, ...segments);
+          const targetKey = process.platform === "win32" ? target.toLowerCase() : target;
+          if (targets.has(targetKey)) throw invalidSaveArchive();
+          targets.add(targetKey);
+          copies.push({ source: file.filePath, target });
           count += 1;
         }
         importedFiles += count;
         destinations.push({ rootPath: destination, files: count, how: matched.how });
       }
+      for (const copy of copies) await copyFileInto(copy.source, copy.target);
       return {
         importedFiles,
         skippedFiles,

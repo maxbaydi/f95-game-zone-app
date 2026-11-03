@@ -12,6 +12,7 @@ const SearchBox = ({
   // Ctrl/Cmd+F or "/" focuses the search field from anywhere in the window.
   React.useEffect(() => {
     const handleShortcut = (event) => {
+      if (event.defaultPrevented || document.querySelector('[aria-modal="true"]:not([data-state="closed"])')) return;
       const target = event.target;
       const isTyping =
         target &&
@@ -42,7 +43,7 @@ const SearchBox = ({
   return (
     <div className="flex w-full items-center justify-center">
       <div
-        className={`group relative flex h-11 w-[min(420px,calc(100vw-200px))] items-center rounded-2xl border bg-black/25 shadow-glass-sm backdrop-blur-xl transition-[border-color,box-shadow,background-color,width] duration-500 focus-within:w-[min(480px,calc(100vw-200px))] focus-within:border-accent/60 focus-within:bg-black/35 focus-within:shadow-glow-accent ${
+        className={`group relative flex h-11 w-[420px] max-w-full items-center rounded-2xl border bg-black/25 shadow-glass-sm backdrop-blur-xl transition-[border-color,box-shadow,background-color,width] duration-500 focus-within:w-[480px] focus-within:border-accent/60 focus-within:bg-black/35 focus-within:shadow-glow-accent ${
           isSearchActive
             ? "border-accent/60 ring-2 ring-accent/25 shadow-glow-accent"
             : "border-border hover:border-accent/40 hover:shadow-glass"

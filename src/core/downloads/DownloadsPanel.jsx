@@ -700,7 +700,6 @@ const DownloadItemRow = ({ item, index, onOpenLibraryRecord }) => {
 const DownloadsPanel = (liveProps) => {
   const layer = useDownloadsLayer(liveProps.isOpen, liveProps, {
     onClose: () => liveProps.onClose?.(),
-    manageFocus: false,
   });
   const [isClearing, setIsClearing] = React.useState(false);
 
@@ -750,12 +749,15 @@ const DownloadsPanel = (liveProps) => {
         role="presentation"
       />
       <div
-        className="app-popover fixed bottom-[52px] right-3 z-[1700] w-[min(520px,calc(100vw-1rem))] overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl"
+        ref={layer.dialogRef}
+        tabIndex={-1}
+        className="app-popover fixed bottom-[52px] right-3 z-[1700] flex max-h-[calc(100vh-76px)] w-[min(520px,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-border bg-primary/90 shadow-2xl backdrop-blur-xl"
         data-state={layer.state}
         role="dialog"
+        aria-modal="true"
         aria-label="Downloads"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-accent/80">
               Downloads
@@ -807,7 +809,7 @@ const DownloadsPanel = (liveProps) => {
             Background downloads will appear here.
           </div>
         ) : (
-          <div className="max-h-[420px] overflow-y-auto px-3 py-3">
+          <div className="min-h-0 max-h-[420px] overflow-y-auto px-3 py-3">
             <div className="space-y-3">
               {items.map((item, index) => (
                 <DownloadItemRow

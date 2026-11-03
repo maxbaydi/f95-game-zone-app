@@ -286,6 +286,7 @@ const SettingsButton = ({
     >
       {(icon || busy) && (
         <span
+          aria-hidden="true"
           className={`material-symbols-outlined text-[16px] leading-none ${
             busy ? "animate-spin" : ""
           }`}

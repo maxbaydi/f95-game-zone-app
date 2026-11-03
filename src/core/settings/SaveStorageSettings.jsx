@@ -12,8 +12,8 @@
 const SAVE_STORAGE_TYPE_META = {
   folder: { icon: "cloud_sync", label: "Synced folder" },
   webdav: { icon: "dns", label: "WebDAV server" },
-  s3: { icon: "database", label: "S3 bucket" },
-  supabase: { icon: "deployed_code", label: "Supabase project" },
+  s3: { icon: "cloud", label: "Cloud storage" },
+  supabase: { icon: "cloud", label: "Cloud storage" },
 };
 
 const saveStorageApi = () => window.electronAPI || {};
@@ -154,8 +154,6 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
   const [cardPassphrase, setCardPassphrase] = React.useState("");
   const [cardFilePath, setCardFilePath] = React.useState("");
   const [webdav, setWebdav] = React.useState({ url: "", username: "", password: "" });
-  const [s3, setS3] = React.useState({ endpoint: "", region: "auto", bucket: "", prefix: "f95launcher-saves", accessKeyId: "", secretAccessKey: "" });
-  const [supabase, setSupabase] = React.useState({ url: "", key: "", bucket: "f95launcher-saves", prefix: "" });
   const [testResult, setTestResult] = React.useState(null);
 
   React.useEffect(() => {
@@ -173,6 +171,10 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
   }, [busy, onBusyChange]);
 
   const connect = async (payload, busyKey) => {
+    if (payload.encryptNew && !String(payload.passphrase || "").trim()) {
+      onError?.("Enter a passphrase before connecting protected storage.");
+      return;
+    }
     setBusy(busyKey);
     setTestResult(null);
     onError?.("");
@@ -199,8 +201,8 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
   const connectionPayload = (type, fields) => ({
     type,
     fields,
-    passphrase: encrypt ? passphrase.trim() : "",
-    encryptNew: encrypt && Boolean(passphrase.trim()),
+    passphrase: encrypt ? passphrase : "",
+    encryptNew: encrypt,
   });
 
   const useDetected = (folder) =>
@@ -222,7 +224,7 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
     try {
       const result = await saveStorageCall("importSaveStorageCard", {
         filePath: cardFilePath,
-        cardPassphrase: cardPassphrase.trim(),
+        cardPassphrase,
       });
       if (result?.cancelled) {
         return;
@@ -369,12 +371,6 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
             <window.SettingsButton icon="dns" variant={mode === "webdav" ? "primary" : "secondary"} disabled={Boolean(busy)} onClick={() => setMode(mode === "webdav" ? "pick" : "webdav")}>
               WebDAV server
             </window.SettingsButton>
-            <window.SettingsButton icon="database" variant={mode === "s3" ? "primary" : "secondary"} disabled={Boolean(busy)} onClick={() => setMode(mode === "s3" ? "pick" : "s3")}>
-              S3 bucket
-            </window.SettingsButton>
-            <window.SettingsButton icon="deployed_code" variant={mode === "supabase" ? "primary" : "secondary"} disabled={Boolean(busy)} onClick={() => setMode(mode === "supabase" ? "pick" : "supabase")}>
-              Supabase project
-            </window.SettingsButton>
           </>
         )}
       </div>
@@ -407,84 +403,6 @@ const SaveStorageChooser = ({ compact = false, onConnected, onError, onBusyChang
               Test connection
             </window.SettingsButton>
             <window.SettingsButton variant="primary" icon="link" busy={busy === "webdav"} disabled={Boolean(busy) || !webdav.url} type="submit">
-              Connect
-            </window.SettingsButton>
-          </div>
-        </form>
-      )}
-
-      {mode === "s3" && (
-        <form
-          className="space-y-3 border border-border bg-black/15 p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            connect(connectionPayload("s3", s3), "s3");
-          }}
-        >
-          <div className="text-sm font-medium text-text">S3-compatible bucket</div>
-          <div className="text-xs text-text/55">Backblaze B2, Cloudflare R2, Wasabi, MinIO, AWS S3. Create a bucket and an access key with read/write rights on it.</div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SaveStorageField label="Endpoint" hint="e.g. https://s3.us-west-004.backblazeb2.com or https://<account>.r2.cloudflarestorage.com">
-              <SaveStorageInput value={s3.endpoint} onChange={(event) => setS3({ ...s3, endpoint: event.target.value })} placeholder="https://..." />
-            </SaveStorageField>
-            <SaveStorageField label="Bucket">
-              <SaveStorageInput value={s3.bucket} onChange={(event) => setS3({ ...s3, bucket: event.target.value })} />
-            </SaveStorageField>
-            <SaveStorageField label="Region" hint="auto works for R2 and B2">
-              <SaveStorageInput value={s3.region} onChange={(event) => setS3({ ...s3, region: event.target.value })} />
-            </SaveStorageField>
-            <SaveStorageField label="Folder inside the bucket">
-              <SaveStorageInput value={s3.prefix} onChange={(event) => setS3({ ...s3, prefix: event.target.value })} />
-            </SaveStorageField>
-            <SaveStorageField label="Access key ID">
-              <SaveStorageInput value={s3.accessKeyId} onChange={(event) => setS3({ ...s3, accessKeyId: event.target.value })} autoComplete="off" />
-            </SaveStorageField>
-            <SaveStorageField label="Secret access key">
-              <SaveStorageInput type="password" value={s3.secretAccessKey} onChange={(event) => setS3({ ...s3, secretAccessKey: event.target.value })} autoComplete="off" />
-            </SaveStorageField>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <window.SettingsButton icon="network_check" busy={busy === "test"} disabled={Boolean(busy)} onClick={() => testRemote("s3", s3)}>
-              Test connection
-            </window.SettingsButton>
-            <window.SettingsButton variant="primary" icon="link" busy={busy === "s3"} disabled={Boolean(busy)} type="submit">
-              Connect
-            </window.SettingsButton>
-          </div>
-        </form>
-      )}
-
-      {mode === "supabase" && (
-        <form
-          className="space-y-3 border border-border bg-black/15 p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            connect(connectionPayload("supabase", supabase), "supabase");
-          }}
-        >
-          <div className="text-sm font-medium text-text">Your own Supabase project</div>
-          <div className="text-xs text-text/55">
-            A free project at supabase.com is enough. Open the project, go to Settings → API, and copy the project URL and the <span className="font-medium text-text/80">service_role</span> key (it stays on this PC, encrypted). The bucket is created for you on first use. Free projects pause after a week without traffic; the launcher wakes them up the next time it syncs.
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <SaveStorageField label="Project URL">
-              <SaveStorageInput value={supabase.url} onChange={(event) => setSupabase({ ...supabase, url: event.target.value })} placeholder="https://xxxxxxxx.supabase.co" />
-            </SaveStorageField>
-            <SaveStorageField label="API key" hint="service_role for a private project, or a publishable key with storage policies">
-              <SaveStorageInput type="password" value={supabase.key} onChange={(event) => setSupabase({ ...supabase, key: event.target.value })} autoComplete="off" />
-            </SaveStorageField>
-            <SaveStorageField label="Bucket">
-              <SaveStorageInput value={supabase.bucket} onChange={(event) => setSupabase({ ...supabase, bucket: event.target.value })} placeholder="f95launcher-saves" />
-            </SaveStorageField>
-            <SaveStorageField label="Folder inside the bucket" hint="optional">
-              <SaveStorageInput value={supabase.prefix} onChange={(event) => setSupabase({ ...supabase, prefix: event.target.value })} />
-            </SaveStorageField>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <window.SettingsButton icon="network_check" busy={busy === "test"} disabled={Boolean(busy) || !supabase.url || !supabase.key} onClick={() => testRemote("supabase", supabase)}>
-              Test connection
-            </window.SettingsButton>
-            <window.SettingsButton variant="primary" icon="link" busy={busy === "supabase"} disabled={Boolean(busy) || !supabase.url || !supabase.key} type="submit">
               Connect
             </window.SettingsButton>
           </div>
@@ -775,11 +693,11 @@ const SaveStorageSettings = () => {
       <window.SettingsCard
         icon="info"
         title="How it works"
-        description="Every game's saves are packed into one zip with a manifest. After each install, after you play, and on every start the app compares your PC with the storage and copies the newer side. Before anything is overwritten the previous saves go to the local vault."
+        description="Saves are backed up after installation, after you play, and when the app starts. If saves changed on both PCs, you choose which copy to keep. Before a restore, the current saves are backed up on this PC."
       >
         <window.SettingRow
           title="F95Launcher runs no servers"
-          description="Your saves only ever go to the place you connected: a folder your cloud client syncs, your WebDAV server, your S3 bucket or your own Supabase project. Disconnecting leaves the files where they are."
+          description="Your saves only go to the folder or cloud storage you connected. Disconnecting leaves the files where they are."
         />
       </window.SettingsCard>
     </div>

@@ -96,13 +96,19 @@ const CatalogLinkModal = (liveProps) => {
   );
 
   React.useEffect(() => {
+    searchSequenceRef.current += 1;
+    setResults([]);
     if (!liveProps.isOpen) {
       return undefined;
     }
+    setStatus(query.trim().length >= 2 ? "searching" : "idle");
     const timer = window.setTimeout(() => {
       void runSearch(query);
     }, CATALOG_LINK_SEARCH_DELAY_MS);
-    return () => window.clearTimeout(timer);
+    return () => {
+      searchSequenceRef.current += 1;
+      window.clearTimeout(timer);
+    };
   }, [query, liveProps.isOpen, runSearch]);
 
   if (!layer.isMounted) {

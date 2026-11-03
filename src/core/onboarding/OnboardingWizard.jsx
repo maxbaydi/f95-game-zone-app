@@ -481,16 +481,23 @@ const OnboardingWizard = ({
   const [f95Connected, setF95Connected] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
+  const dialogRef = React.useRef(null);
+  const detectionSequenceRef = React.useRef(0);
+  const busyRef = React.useRef(false);
+  window.AppMotion?.useDialogFocus?.(isOpen, dialogRef);
   const { insight, loading: insightLoading } =
     window.settingsKit.useFolderInsight(selectedPath);
   const gameFolder = String(settings.config?.Library?.gameFolder || "").trim();
 
   React.useEffect(() => {
+    detectionSequenceRef.current += 1;
     if (isOpen) {
       setStep(initialStep);
       setError("");
       setDetected(null);
+      setCheckedPaths([]);
     }
+    return () => { detectionSequenceRef.current += 1; };
   }, [isOpen, initialStep]);
 
   React.useEffect(() => {
@@ -535,22 +542,27 @@ const OnboardingWizard = ({
   }, [isOpen]);
 
   const loadDetectedFolders = React.useCallback(async () => {
+    const sequence = ++detectionSequenceRef.current;
     setDetected(null);
     const [folders, sourcesResult] = await Promise.all([
       window.electronAPI.detectGameFolders().catch(() => []),
       window.electronAPI.getScanSources().catch(() => null),
     ]);
+    if (sequence !== detectionSequenceRef.current) return;
     const list = Array.isArray(folders) ? folders : [];
-    setDetected(list);
+    setDetected((previous) => [...list, ...(previous || []).filter((manual) =>
+      !list.some((folder) => onboardingSamePath(folder.path, manual.path)),
+    )]);
     setSourcesCount(
       (sourcesResult?.sources || []).filter((source) => source.isEnabled)
         .length,
     );
-    setCheckedPaths(
-      list
+    setCheckedPaths((previous) => [...new Set([
+      ...previous,
+      ...list
         .filter((folder) => !folder.alreadyAdded)
         .map((folder) => folder.path),
-    );
+    ])]);
   }, []);
 
   React.useEffect(() => {
@@ -574,11 +586,13 @@ const OnboardingWizard = ({
     );
   const goBack = () => goTo(ONBOARDING_STEPS[Math.max(stepIndex - 1, 0)]);
 
-  const markCompleted = () =>
-    window.electronAPI.updateSettings("Onboarding", {
+  const markCompleted = async () => {
+    const result = await window.electronAPI.updateSettings("Onboarding", {
       completed: true,
       completedAt: new Date().toISOString(),
     });
+    if (!result?.success) throw new Error(result?.error || "Your setup could not be saved. Please try again.");
+  };
 
   const saveFolderAndContinue = async () => {
     if (!selectedPath) {
@@ -603,6 +617,8 @@ const OnboardingWizard = ({
       }
       setDetected(null);
       goNext();
+    } catch (failure) {
+      setError(window.AppUI?.errorMessage(failure) || "The folder could not be saved. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -639,6 +655,8 @@ const OnboardingWizard = ({
         return;
       }
       goNext();
+    } catch (failure) {
+      setError(window.AppUI?.errorMessage(failure) || "The folders could not be added. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -672,20 +690,23 @@ const OnboardingWizard = ({
         : [...previous, folderPath],
     );
 
-  const finish = async (goToSection = "") => {
+  const finish = async (goToSection = "", skipped = false) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setError("");
     try {
       await markCompleted();
+      onFinish?.({ startScan: !skipped && sourcesCount > 0, goTo: goToSection, skipped });
+    } catch (failure) {
+      setError(window.AppUI?.errorMessage(failure) || "Your setup could not be saved. Please try again.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
-    onFinish?.({ startScan: sourcesCount > 0, goTo: goToSection });
   };
 
-  const skip = async () => {
-    await markCompleted();
-    onFinish?.({ startScan: false, goTo: "", skipped: true });
-  };
+  const skip = () => finish("", true);
 
   const primaryAction = {
     welcome: { label: "Get started", icon: "arrow_forward", run: goNext },
@@ -719,6 +740,8 @@ const OnboardingWizard = ({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="fixed inset-0 z-[1720] flex items-center justify-center bg-canvas/95 px-4 py-6 backdrop-blur-md"
       role="dialog"
       aria-modal="true"
@@ -741,6 +764,7 @@ const OnboardingWizard = ({
             <button
               type="button"
               onClick={skip}
+              disabled={busy}
               className="ml-auto text-xs text-text/55 underline decoration-dotted underline-offset-4 hover:text-text"
             >
               Skip setup
@@ -750,7 +774,7 @@ const OnboardingWizard = ({
 
         <div
           key={step}
-          className="min-h-[360px] flex-1 overflow-y-auto px-8 py-7 motion-safe:animate-app-fade-up"
+          className="min-h-0 flex-1 overflow-y-auto px-8 py-7 motion-safe:animate-app-fade-up"
         >
           {step === "welcome" && <OnboardingWelcomeStep />}
           {step === "folder" && (

@@ -11,8 +11,9 @@ const { sanitizePathSegment } = require("../install/installTarget");
 /**
  * Save an original package in persistent storage, without extraction or
  * library registration. Cache and archive storage share the userData
- * volume: publishing a hard link is atomic and never replaces another
- * download. The source remains available if publication fails.
+ * volume: prefer atomic hard-link publication, with an exclusive copy for
+ * filesystems without links. Never replace an existing download. The source
+ * remains available if publication fails.
  * @param {{ filePath: string, archivesDir: string, mimeType?: string,
  *   archiveExtensions: string[], gameExtensions: string[] }} input
  */
@@ -53,7 +54,15 @@ async function saveDownloadedPackage(input) {
       index ? `${stem} (${index})${extension}` : fileName,
     );
     try {
-      await fs.promises.link(input.filePath, targetPath);
+      try {
+        await fs.promises.link(input.filePath, targetPath);
+      } catch (error) {
+        const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+        if (!["EXDEV", "EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes(code)) throw error;
+        // Some Windows volumes and network folders do not support links.
+        // Exclusive copy retains the no-overwrite guarantee in that case.
+        await fs.promises.copyFile(input.filePath, targetPath, fs.constants.COPYFILE_EXCL);
+      }
     } catch (error) {
       if (/** @type {NodeJS.ErrnoException} */ (error).code === "EEXIST")
         continue;

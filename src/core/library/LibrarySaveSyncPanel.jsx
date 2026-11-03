@@ -425,7 +425,7 @@ const LibrarySaveSyncPanel = ({ game, onOpenSaveStorage }) => {
                   icon={storageState?.locked ? "lock_open" : "add_link"}
                   label={storageState?.locked ? "Unlock save storage" : "Connect your cloud"}
                   disabled={busyAction !== ""}
-                  title="OneDrive, Dropbox, Google Drive, a WebDAV server, an S3 bucket or your own Supabase project. Set up once, works on every PC."
+                  title="OneDrive, Dropbox, Google Drive, a WebDAV server or a connection card. Set up once, works on every PC."
                   onClick={() => onOpenSaveStorage?.()}
                 />
               )}

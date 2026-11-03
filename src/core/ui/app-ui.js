@@ -820,13 +820,16 @@
       overlay.appendChild(dialog);
 
       var settled = false;
+      var focusTimer = null;
       var releaseEscape = function () {};
       var close = function (result) {
         if (settled) {
           return;
         }
         settled = true;
+        clearTimeout(focusTimer);
         releaseEscape();
+        overlay.inert = true;
         overlay.setAttribute("data-state", "closed");
         dialog.setAttribute("data-state", "closed");
         setTimeout(function () {
@@ -867,7 +870,8 @@
       (doc.body || root).appendChild(overlay);
       var initialFocus =
         options.tone === "danger" && cancelButton ? cancelButton : confirmButton;
-      setTimeout(function () {
+      focusTimer = setTimeout(function () {
+        if (settled || !dialog.isConnected) return;
         try {
           initialFocus.focus({ preventScroll: true });
         } catch (_) {

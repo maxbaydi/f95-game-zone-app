@@ -1,6 +1,6 @@
 name: Release
 
-# A release is built and published only for a version tag (v1.7.1 ...), never
+# Release assets are built into a draft for a version tag, never
 # for a plain push to main: main is the working branch and every push there
 # used to rebuild and overwrite the installers of the current release.
 on:
@@ -16,6 +16,7 @@ jobs:
   build-and-release:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
     timeout-minutes: 30
@@ -27,7 +28,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Clean npm cache
@@ -50,6 +51,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
 
+      - name: Verify release version
+        run: node -e "const p=require('./package.json'),l=require('./package-lock.json');if(p.version!==l.version||p.version!==l.packages[''].version)throw Error('Version mismatch');if(process.env.GITHUB_REF.startsWith('refs/tags/')&&process.env.GITHUB_REF_NAME!=='v'+p.version)throw Error('Tag does not match package version');"
+
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -57,22 +61,33 @@ jobs:
           sudo apt-get install -y libarchive-tools rpm
         shell: bash
 
+      - name: Validate release
+        run: npm run ci:check
+
       - name: Build and publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          Write-Output "Starting build and publish for ${{ matrix.os }}"
-          npm run publish
-          Write-Output "Build and publish completed"
+          EP_DRAFT: 'true'
+        run: npm run publish
         if: matrix.os == 'windows-latest'
         shell: pwsh
 
       - name: Build and publish (Linux)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_DRAFT: 'true'
         run: |
-          echo "Starting build and publish for ${{ matrix.os }}"
-          npm run build:css && npx electron-builder --linux -p always
-          echo "Build and publish completed"
+          npm run build:ui
+          npx electron-builder --linux --x64 -p always
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
+
+      - name: Verify packaged UI (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run check:package
+        shell: pwsh
+
+      - name: Verify packaged UI (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: node scripts/check-packaged-ui.js dist/linux-unpacked/resources/app.asar
         shell: bash

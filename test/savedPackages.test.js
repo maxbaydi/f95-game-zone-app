@@ -29,6 +29,18 @@ function fixture(t) {
   return { paths, bytes, options };
 }
 
+test("saved packages use exclusive copy on filesystems without hard links", async (t) => {
+  const { paths, bytes, options } = fixture(t);
+  const filePath = path.join(paths.downloads, "Game.zip");
+  fs.writeFileSync(filePath, bytes);
+  fs.writeFileSync(path.join(paths.archives, "Game.zip"), "existing");
+  t.mock.method(fs.promises, "link", async () => { throw Object.assign(new Error("unsupported"), { code: "ENOTSUP" }); });
+  const saved = await saveDownloadedPackage({ ...options, filePath });
+  assert.equal(path.basename(saved.packagePath), "Game (1).zip");
+  assert.equal(fs.readFileSync(path.join(paths.archives, "Game.zip"), "utf8"), "existing");
+  assert.deepEqual(fs.readFileSync(saved.packagePath), bytes);
+});
+
 test("saved packages remain byte-for-byte original, without extraction, after restart and history cleanup", async (t) => {
   const { paths, bytes, options } = fixture(t);
   const filePath = path.join(paths.downloads, "Game.zip");

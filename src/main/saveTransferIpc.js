@@ -178,12 +178,7 @@ function registerSaveTransferIpc(deps) {
 
       // Safety net: whatever is there now goes to the vault before anything
       // is overwritten.
-      let backup = null;
-      try {
-        backup = await backupGameSaves(buildVaultInput(snapshot));
-      } catch (error) {
-        logger.warn("[save.transfer] Vault backup before import failed:", error);
-      }
+      const backup = await backupGameSaves(buildVaultInput(snapshot));
 
       const result = await importGameSavesFromFile({
         snapshot,

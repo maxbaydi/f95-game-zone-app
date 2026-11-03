@@ -271,26 +271,18 @@ test("connection cards round-trip, sealed cards need the passphrase", () => {
   assert.throws(() => readConnectionCard({ format: "other" }), (error) => codeOf(error) === "invalid_card");
 });
 
-test("Supabase provider talks to the Storage REST API, creates the bucket once and walks folders", async () => {
+test("Supabase provider uses public credentials and only object APIs, and walks folders", async () => {
   const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
   const calls = [];
   const store = new Map();
-  let bucketExists = false;
   const json = (value, status = 200) =>
     new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
   const fetchImpl = async (url, init) => {
     const parsed = new URL(url);
     calls.push({ method: init.method, path: parsed.pathname });
-    assert.equal(init.headers.apikey, "service-key");
-    assert.equal(init.headers.Authorization, "Bearer service-key");
+    assert.equal(init.headers.apikey, "sb_publishable_test");
+    assert.equal(init.headers.Authorization, undefined);
     const path = parsed.pathname.replace(/^\/storage\/v1/, "");
-    if (path === "/bucket/saves" && init.method === "GET") {
-      return bucketExists ? json({ id: "saves", name: "saves" }) : json({ statusCode: "404", error: "Bucket not found", message: "Bucket not found" }, 400);
-    }
-    if (path === "/bucket" && init.method === "POST") {
-      bucketExists = true;
-      return json({ name: "saves" });
-    }
     if (path === "/object/list/saves" && init.method === "POST") {
       const body = JSON.parse(init.body);
       const prefix = body.prefix ? `${body.prefix}/` : "";
@@ -329,18 +321,14 @@ test("Supabase provider talks to the Storage REST API, creates the bucket once a
   };
   const provider = createSupabaseProvider({
     url: "https://abc.supabase.co/",
-    key: "service-key",
+    key: "sb_publishable_test",
     bucket: "saves",
     prefix: "f95launcher",
     fetchImpl,
   });
   await provider.write("games/f95-1/latest.zip", Buffer.from("zip"));
   await provider.write("catalog.json", Buffer.from("{}"));
-  assert.deepEqual(
-    calls.slice(0, 3).map((call) => `${call.method} ${call.path}`),
-    ["GET /storage/v1/bucket/saves", "POST /storage/v1/bucket", "POST /storage/v1/object/saves/f95launcher/games/f95-1/latest.zip"],
-  );
-  assert.equal(calls.filter((call) => call.path === "/storage/v1/bucket").length, 1, "bucket created once");
+  assert.equal(calls.some((call) => call.path.includes("/bucket")), false, "no administrative bucket APIs");
   assert.equal((await provider.read("games/f95-1/latest.zip")).toString(), "zip");
   assert.equal(await provider.read("games/f95-1/none.zip"), null);
   assert.deepEqual((await provider.list("games")).map((entry) => entry.path), ["games/f95-1/latest.zip"]);
@@ -355,7 +343,7 @@ test("Supabase provider maps 401/403 to auth_failed and refuses bad input", asyn
   const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
   const provider = createSupabaseProvider({
     url: "https://abc.supabase.co",
-    key: "anon",
+    key: "sb_publishable_test",
     fetchImpl: async () => new Response(JSON.stringify({ message: "new row violates row-level security policy" }), { status: 403 }),
   });
   await assert.rejects(() => provider.read("catalog.json"), (error) => codeOf(error) === "auth_failed");
@@ -367,5 +355,30 @@ test("Supabase connection splits into public settings and a secret key", () => {
   const split = splitConnectionInput("supabase", { url: "https://abc.supabase.co", key: "service", bucket: "saves", prefix: "" });
   assert.deepEqual(split.settings, { url: "https://abc.supabase.co", bucket: "saves", prefix: "" });
   assert.deepEqual(split.secrets, { key: "service" });
-  assert.equal(describeConnection({ type: "supabase", settings: split.settings }), "Supabase · saves @ abc.supabase.co");
+  assert.equal(describeConnection({ type: "supabase", settings: split.settings }), "Cloud storage");
+});
+
+test("Supabase rejects privileged and unknown credentials before making a request", () => {
+  const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
+  const jwt = (role) => `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ role })).toString("base64url")}.signature`;
+  for (const key of ["sb_secret_example", jwt("service_role"), jwt("authenticated"), "unknown-key"]) {
+    assert.throws(() => createSupabaseProvider({ url: "https://example.supabase.co", key }),
+      (error) => codeOf(error) === "unsafe_credentials");
+  }
+  assert.doesNotThrow(() => createSupabaseProvider({ url: "https://example.supabase.co", key: jwt("anon") }));
+});
+
+test("legacy anon Supabase keys retain JWT Authorization without administrative calls", async () => {
+  const { createSupabaseProvider } = require("../src/main/saveStorage/providers");
+  const key = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from('{"role":"anon"}').toString("base64url")}.signature`;
+  const provider = createSupabaseProvider({
+    url: "https://example.supabase.co", key,
+    fetchImpl: async (url, init) => {
+      assert.match(String(url), /\/storage\/v1\/object\//);
+      assert.equal(init.headers["apikey"], key);
+      assert.equal(init.headers["Authorization"], `Bearer ${key}`);
+      return new Response("save");
+    },
+  });
+  assert.equal((await provider.read("saves.zip")).toString(), "save");
 });

@@ -718,6 +718,7 @@ const App = () => {
   const saveStorageHeader = (window.useSaveStorageState || (() => ({ state: null })))();
   const saveStorageHeaderState = saveStorageHeader?.state || null;
   const gridRef = useRef(null);
+  const previewDialogRef = useRef(null);
   const gameGridRef = useRef(null);
   const resizeGridFrameRef = useRef(null);
   const selectedGameRef = useRef(null);
@@ -3448,7 +3449,7 @@ const App = () => {
       }`
     : saveStorageHeaderState?.locked
       ? "Save storage is locked: enter the passphrase in Settings"
-      : "Set up save storage (OneDrive, Dropbox, Google Drive, WebDAV, S3, Supabase)";
+      : "Set up save storage";
   const saveStorageButtonIcon = saveStorageReady
     ? saveStorageHeaderState.lastError
       ? "cloud_alert"
@@ -3745,6 +3746,7 @@ const App = () => {
     isPreviewOpen,
   );
   appMotion.useEscape(isPreviewOpen, closePreviewModal);
+  appMotion.useDialogFocus?.(isPreviewOpen, previewDialogRef);
 
   const isDetailsOpen =
     activeSection !== SECTION_SEARCH &&
@@ -3817,7 +3819,7 @@ const App = () => {
   );
 
   const renderSectionControls = (resultsCount) => (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       <button type="button" onClick={() => setTagPickerOpen((value) => !value)} aria-expanded={tagPickerOpen} className={`inline-flex items-center gap-1 border px-2.5 py-1 text-xs ${libraryTags.length ? "border-accent/60 bg-accent/15 text-text" : "border-border bg-black/25 text-text/75 hover:bg-white/10"}`}>
         <span className="material-symbols-outlined text-[15px]" aria-hidden>label</span>
         Tags{libraryTags.length ? ` (${libraryTags.length})` : ""}
@@ -4300,7 +4302,7 @@ const App = () => {
         </div>
         <div className="relative flex-1 [-webkit-app-region:drag] h-[70px] bg-primary">
           <div className="absolute left-[48px] right-[200px] top-0 h-px bg-gradient-to-r from-transparent via-accent/35 to-transparent"></div>
-          <div className="flex h-[70px] w-full items-center">
+          <div className="flex h-[70px] w-full items-center pr-[264px]">
             <div className="ml-5 flex min-w-[72px] shrink-0 items-center">
               <div
                 key={sectionTitle}
@@ -4402,7 +4404,7 @@ const App = () => {
             activeSection !== SECTION_SETTINGS &&
             showGameList &&
             !(!isGamesLoading && games.length === 0) && (
-            <div className="app-glass-subtle app-list-enter w-[220px] shrink-0 overflow-y-auto border-r border-border">
+            <div data-library-titles className={`app-glass-subtle app-list-enter w-[220px] shrink-0 overflow-y-auto border-r border-border ${detailsPresence.isMounted ? "max-xl:hidden" : ""}`}>
               <div className="sticky top-0 z-10 flex min-h-[5rem] items-center justify-between gap-2 border-b border-border bg-black/20 px-3 text-[11px] uppercase leading-none tracking-[0.2em] text-text/55 backdrop-blur-md">
                 <span>
                   {activeSection === SECTION_UPDATES
@@ -4586,6 +4588,8 @@ const App = () => {
 
       {previewPresence.isMounted && previewList.length > 0 && (
         <div
+          ref={previewDialogRef}
+          tabIndex={-1}
           className="fixed inset-0 z-[1600]"
           role="dialog"
           aria-modal="true"

@@ -91,10 +91,6 @@ const LibraryResetModal = (liveProps) => {
               A backup of the library is saved first. You can bring it back
               any time in Settings → Library &amp; folders → Library backups.
             </LibraryResetFact>
-            <LibraryResetFact icon="cloud_sync">
-              Games from your account library are added back as "Not installed"
-              after the next cloud sync.
-            </LibraryResetFact>
           </ul>
 
           {error && (

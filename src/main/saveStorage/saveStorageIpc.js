@@ -104,7 +104,7 @@ function createSaveStorageController(deps) {
     return {
       ...status,
       description: describeConnection(connection),
-      settings: connection?.settings || {},
+      settings: connection?.type === SAVE_STORAGE_TYPES.FOLDER ? { folderPath: connection.settings.folderPath } : {},
       encryptionEnabled: Boolean(connection?.encryption?.enabled),
       secretsEncrypted: secrets.isEncrypted,
       deviceName,
@@ -116,6 +116,9 @@ function createSaveStorageController(deps) {
    * @param {{ type: string, fields?: Record<string, any>, passphrase?: string, encryptNew?: boolean }} payload
    */
   const buildConnectionFromPayload = (payload) => {
+    if (payload?.encryptNew && !String(payload?.passphrase || "").trim()) {
+      throw new Error("Enter a passphrase before connecting protected storage.");
+    }
     const type = String(payload?.type || "");
     const split = splitConnectionInput(type, payload?.fields || {});
     if (type === SAVE_STORAGE_TYPES.FOLDER && !split.settings.folderPath) {

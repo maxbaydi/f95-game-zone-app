@@ -26,10 +26,10 @@ test("writeFileAtomicSync creates missing directories", () => {
   assert.equal(fs.readFileSync(target, "utf8"), "value=1\n");
 });
 
-test("writeFileAtomicSync falls back to a direct write when rename fails", () => {
+test("writeFileAtomicSync preserves the original when rename fails", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "app-atomic-"));
   const target = path.join(directory, "config.ini");
-  const fallbacks = [];
+  fs.writeFileSync(target, "previous=1\n");
   const flakyFs = {
     ...fs,
     renameSync() {
@@ -40,12 +40,8 @@ test("writeFileAtomicSync falls back to a direct write when rename fails", () =>
     },
   };
 
-  writeFileAtomicSync(target, "value=2\n", {
-    fs: flakyFs,
-    onFallback: (error) => fallbacks.push(error.code),
-  });
+  assert.throws(() => writeFileAtomicSync(target, "value=2\n", { fs: flakyFs }), /EPERM/);
 
-  assert.equal(fs.readFileSync(target, "utf8"), "value=2\n");
-  assert.deepEqual(fallbacks, ["EPERM"]);
+  assert.equal(fs.readFileSync(target, "utf8"), "previous=1\n");
   assert.deepEqual(fs.readdirSync(directory), ["config.ini"]);
 });

@@ -1,6 +1,6 @@
 {
   "name": "f95launcher",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "author": {
     "name": "maxbaydi",
     "email": "maxbaydi@users.noreply.github.com"
@@ -11,16 +11,16 @@
     "endpoint": "https://f95launcher-stats.maxbayqoor.workers.dev"
   },
   "scripts": {
-    "start": "electron .",
-    "f95launcher": "npm run build:css && electron .",
-    "build": "npm run build:css && electron-builder --win --x64",
+    "start": "npm run build:ui && electron .",
+    "f95launcher": "npm run build:ui && electron .",
+    "build": "npm run build:ui && electron-builder --win --x64",
     "dev:css:watch": "postcss src/assets/css/tailwind.css -o src/assets/css/tailwind.output.css --watch",
-    "dev:web": "node scripts/dev-serve.js",
-    "dev": "npm run build:css && concurrently -k -n css,electron,web -c cyan,magenta,green \"npm run dev:css:watch\" \"electron . --dev\" \"node scripts/dev-serve.js\"",
+    "dev:web": "npm run build:ui && node scripts/dev-serve.js",
+    "dev": "npm run build:ui && concurrently -k -n css,renderer,electron,web -c cyan,yellow,magenta,green \"npm run dev:css:watch\" \"npm run dev:renderer:watch\" \"electron . --dev\" \"node scripts/dev-serve.js\"",
     "build:css": "postcss src/assets/css/tailwind.css -o src/assets/css/tailwind.output.css",
     "rebuild": "npx electron-rebuild --version=37.0.0",
     "structure": "node scripts/generate-structure.js > scripts/project-structure.txt",
-    "publish": "npm run build:css && electron-builder --win -p always",
+    "publish": "npm run build:ui && electron-builder --win -p always",
     "format": "prettier --write src/**/*.{js,jsx,css} && prettier --write src/assets/**/*.{js,jsx,css}",
     "lint": "eslint src/main.js src/database.js \"src/main/**/*.js\" \"src/shared/**/*.js\" \"test/**/*.test.js\" scripts/check-mirrors.js scripts/check-mirrors-electron.js scripts/usage-stats.js \"stats-worker/src/**/*.js\"",
     "stats": "node scripts/usage-stats.js",
@@ -29,9 +29,14 @@
     "catalog:probe": "electron scripts/catalog-probe-electron.js",
     "typecheck": "tsc --project tsconfig.typecheck.json --noEmit",
     "check:jsx": "node scripts/check-jsx.js",
-    "screenshots": "node scripts/screenshots.js",
+    "screenshots": "npm run build:ui && node scripts/screenshots.js",
     "test": "node --test \"test/*.test.js\"",
-    "ci:check": "npm run build:css && npm run lint && npm run check:jsx && npm run typecheck && npm run test"
+    "ci:check": "npm run build:ui && npm run lint && npm run check:jsx && npm run typecheck && npm run test",
+    "build:renderer": "node scripts/build-renderer.js",
+    "build:ui": "npm run build:css && npm run build:renderer",
+    "dev:renderer:watch": "node scripts/build-renderer.js --watch",
+    "qa:ui": "npm run build:ui && node scripts/verify-ui.js",
+    "check:package": "node scripts/check-packaged-ui.js"
   },
   "build": {
     "appId": "com.maxbaydi.f95launcher",
@@ -49,7 +54,8 @@
       "src/database.js",
       "src/index.html",
       "src/settings.html",
-      "src/importer.html",
+      "src/scrollbar-reveal.js",
+      "src/web-preview-api.js",
       "src/renderer.js",
       "src/App.jsx",
       "src/shared/**/*",
@@ -62,7 +68,8 @@
       "node_modules/7zip-bin/**/*",
       "node_modules/sqlite3/**/*",
       "node_modules/node-7z/**/*",
-      "node_modules/node-unrar-js/**/*"
+      "node_modules/node-unrar-js/**/*",
+      "!src/assets/vendor/babel/**/*"
     ],
     "asar": true,
     "nodeGypRebuild": false,
@@ -91,7 +98,6 @@
     }
   },
   "dependencies": {
-    "@babel/standalone": "^7.25.6",
     "@npmcli/fs": "^3.1.0",
     "7zip-bin": "^5.2.0",
     "adm-zip": "^0.5.10",
@@ -111,6 +117,7 @@
     "swiper": "^10.3.1"
   },
   "devDependencies": {
+    "@babel/standalone": "^7.25.6",
     "@electron/rebuild": "^3.7.2",
     "@types/node": "^18.19.42",
     "autoprefixer": "^10.4.21",

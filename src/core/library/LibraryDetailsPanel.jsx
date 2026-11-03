@@ -21,7 +21,9 @@ const getLibraryDetailsPanelMaxWidthPx = () =>
     LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX,
     Math.max(
       LIBRARY_DETAILS_PANEL_WIDTH_MIN_PX,
-      typeof window !== "undefined" ? window.innerWidth - 160 : LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX,
+      typeof window !== "undefined"
+        ? window.innerWidth - 60 - (document.querySelector("[data-library-titles]")?.getBoundingClientRect().width || 0) - 300
+        : LIBRARY_DETAILS_PANEL_WIDTH_MAX_PX,
     ),
   );
 
@@ -41,7 +43,7 @@ const readStoredLibraryDetailsPanelWidthPx = () => {
   } catch {
     /* ignore */
   }
-  return LIBRARY_DETAILS_PANEL_WIDTH_DEFAULT_PX;
+  return Math.min(LIBRARY_DETAILS_PANEL_WIDTH_DEFAULT_PX, getLibraryDetailsPanelMaxWidthPx());
 };
 
 const formatDetailDate = (value) => {
@@ -49,10 +51,10 @@ const formatDetailDate = (value) => {
     return "Unknown";
   }
 
-  const date =
-    typeof value === "number"
-      ? new Date(value * 1000)
-      : new Date(Number(value) ? Number(value) * 1000 : value);
+  const numeric = typeof value === "number" || /^\d+(\.\d+)?$/.test(String(value)) ? Number(value) : NaN;
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric < 1e12 ? numeric * 1000 : numeric)
+    : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
     return "Unknown";
@@ -107,7 +109,7 @@ const DetailRow = ({ label, value }) => (
     <span className="shrink-0 uppercase tracking-[0.16em] opacity-50">
       {label}
     </span>
-    <span className="text-right text-text">{value || "Unknown"}</span>
+    <span className="min-w-0 break-words text-right text-text">{value || "Unknown"}</span>
   </div>
 );
 
@@ -822,7 +824,7 @@ const LibraryDetailsPanel = ({
                 className="app-view-enter space-y-5"
               >
                 <section className="overflow-hidden rounded-2xl border border-border bg-secondary/20">
-                  <div className="group/banner relative h-[220px] overflow-hidden bg-secondary/40">
+                  <div className="group/banner relative aspect-[21/9] overflow-hidden bg-secondary/40">
                     {(game.f95_id || game.banner_url) && onImageAction && (
                       <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity duration-300 focus-within:opacity-100 group-hover/banner:opacity-100">
                         {game.f95_id && (
@@ -856,9 +858,9 @@ const LibraryDetailsPanel = ({
                     <DetailsImage
                       src={game.banner_url}
                       alt={displayTitle}
-                      className="h-[220px] w-full object-cover transition-transform duration-700 hover:scale-[1.03]"
+                      className="h-full w-full object-contain"
                       fallback={
-                        <div className="flex h-[220px] flex-col items-center justify-center gap-2 bg-secondary/40 text-sm opacity-60">
+                        <div className="flex h-full flex-col items-center justify-center gap-2 bg-secondary/40 text-sm opacity-60">
                           <span className="material-symbols-outlined text-[32px]" aria-hidden>
                             image_not_supported
                           </span>
@@ -1248,7 +1250,7 @@ const LibraryDetailsPanel = ({
                   <DetailRow label="Language" value={game.language} />
                   <DetailRow label="Platform" value={game.os} />
                   <DetailRow label="Censored" value={game.censored} />
-                  <DetailRow label="Release" value={game.release_date} />
+                  <DetailRow label="Release" value={formatDetailDate(game.release_date)} />
                   <DetailRow label="Rating" value={game.rating ? String(game.rating) : ""} />
                   <DetailRow
                     label="Updated on site"

@@ -550,7 +550,7 @@ function createS3Provider(settings) {
 
   return {
     kind: SAVE_STORAGE_TYPES.S3,
-    label: settings.label || `${bucket} @ ${endpoint.host}`,
+    label: settings.label || "Cloud storage",
     async list(prefix = "") {
       const fullPrefix = objectKey(prefix);
       /** @type {StorageEntry[]} */
@@ -639,10 +639,8 @@ function supabaseEncodePath(value) {
 
 /**
  * Storage bucket in a Supabase project the user owns, through the Storage
- * REST API (no SDK). The key is either the project's `service_role` secret
- * (full access, the simplest choice for a private personal project) or a
- * publishable/anon key together with storage policies that allow it.
- * A missing bucket is created on first use when the key allows it.
+ * REST API (no SDK), using only public application keys. Storage must
+ * already be provisioned with appropriate access policies.
  *
  * @param {{
  *   url: string,
@@ -664,11 +662,22 @@ function createSupabaseProvider(settings) {
   if (!/^[a-z0-9][a-z0-9._-]{0,99}$/i.test(bucket)) {
     throw new SaveStorageError("The bucket name may only contain letters, digits, dots, dashes and underscores.", { code: "invalid_config" });
   }
+  let publicKey = /^sb_publishable_[A-Za-z0-9_-]+$/.test(key);
+  if (!publicKey) {
+    try {
+      const parts = key.split(".");
+      publicKey = parts.length === 3 && JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")).role === "anon";
+    } catch {
+      publicKey = false;
+    }
+  }
+  if (!publicKey) {
+    throw new SaveStorageError("This connection uses an unsupported access key. Use a supported connection card or a synced folder.", { code: "unsafe_credentials" });
+  }
   const projectUrl = new URL(projectUrlRaw);
   const storageBase = `${projectUrl.origin}${projectUrl.pathname.replace(/\/+$/, "")}/storage/v1`;
   const keyPrefix = settings.prefix ? normalizeStoragePath(settings.prefix) : "";
   const fetchImpl = settings.fetchImpl || fetch;
-  let bucketEnsured = false;
 
   const objectKey = (relativePath) => {
     const normalized = relativePath ? normalizeStoragePath(relativePath) : "";
@@ -678,7 +687,7 @@ function createSupabaseProvider(settings) {
   const request = async (method, pathname, options = {}) => {
     const headers = {
       apikey: key,
-      Authorization: `Bearer ${key}`,
+      ...(key.startsWith("sb_publishable_") ? {} : { Authorization: `Bearer ${key}` }),
       ...(options.headers || {}),
     };
     let response;
@@ -693,7 +702,7 @@ function createSupabaseProvider(settings) {
     }
     if (response.status === 401 || response.status === 403) {
       throw new SaveStorageError(
-        "Supabase rejected the key. Use the project's service_role key, or add storage policies that let this key read and write the bucket.",
+        "The connection does not have permission to access these saves. Reconnect with a supported connection card.",
         { code: "auth_failed", status: response.status },
       );
     }
@@ -727,37 +736,6 @@ function createSupabaseProvider(settings) {
       code: status === 404 ? "not_found" : status === 507 || /exceeded|quota/i.test(String(error?.message || "")) ? "disk_full" : "storage_failed",
       status,
     });
-
-  const ensureBucket = async () => {
-    if (bucketEnsured) {
-      return;
-    }
-    const probe = await request("GET", `/bucket/${encodeURIComponent(bucket)}`);
-    if (probe.ok) {
-      bucketEnsured = true;
-      return;
-    }
-    const probeError = await readErrorBody(probe);
-    if (probe.status !== 404 && !isBucketMissing(probeError)) {
-      // Anon keys usually cannot read bucket metadata; the object calls decide.
-      bucketEnsured = probe.status === 400;
-      return;
-    }
-    const created = await request("POST", "/bucket", {
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: bucket, name: bucket, public: false }),
-    });
-    if (!created.ok) {
-      const error = await readErrorBody(created);
-      if (!/already exists|duplicate/i.test(error.message)) {
-        throw new SaveStorageError(
-          `The bucket "${bucket}" does not exist and could not be created (${error.message || `HTTP ${created.status}`}). Create it in the Supabase dashboard or use the service_role key.`,
-          { code: "bucket_missing", status: created.status },
-        );
-      }
-    }
-    bucketEnsured = true;
-  };
 
   /**
    * One level of the bucket, as the Storage API lists it (folders have no id).
@@ -802,7 +780,7 @@ function createSupabaseProvider(settings) {
 
   return {
     kind: SAVE_STORAGE_TYPES.SUPABASE,
-    label: settings.label || `${bucket} @ ${projectUrl.host}`,
+    label: settings.label || "Cloud storage",
     async list(prefix = "") {
       /** @type {StorageEntry[]} */
       const entries = [];
@@ -836,7 +814,6 @@ function createSupabaseProvider(settings) {
       throw describeFailure("Download", response.status, error);
     },
     async write(relativePath, data) {
-      await ensureBucket();
       const response = await request("POST", `/object/${encodeURIComponent(bucket)}/${supabaseEncodePath(objectKey(relativePath))}`, {
         body: data,
         headers: {

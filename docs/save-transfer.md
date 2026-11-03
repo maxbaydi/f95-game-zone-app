@@ -1,11 +1,11 @@
 # Экспорт и импорт сохранений через файл
 
 **Статус:** active
-**Модули:** src/main/saveTransfer.js, src/main/saveTransferIpc.js, src/main/detectors/saveProfileDetector.js, src/main/detectors/renpySaveDetector.js, src/main/saveProfileStrategies.js, src/core/library/LibrarySaveSyncPanel.jsx, src/renderer.js, src/web-preview-api.js
-**Тесты:** test/saveTransfer.test.js, test/saveProfileDetector.test.js, test/saveVault.test.js; `node --test test/saveTransfer.test.js test/saveProfileDetector.test.js test/saveVault.test.js`
+**Модули:** src/main/saveTransfer.js, src/main/saveTransferIpc.js, src/main/saveVault.js, src/main/archive/extractArchive.js, src/main/detectors/saveProfileDetector.js, src/main/detectors/renpySaveDetector.js, src/main/saveProfileStrategies.js, src/core/library/LibrarySaveSyncPanel.jsx, src/renderer.js, src/web-preview-api.js
+**Тесты:** test/saveTransfer.test.js, test/saveTransferIpc.test.js, test/saveProfileDetector.test.js, test/saveVault.test.js, test/extractArchive.test.js; `node --test test/saveTransfer.test.js test/saveTransferIpc.test.js test/saveProfileDetector.test.js test/saveVault.test.js test/extractArchive.test.js`
 
 ## Назначение
-Сохранения можно было только выгрузить в облако (Supabase) и вернуть оттуда. Бесплатный проект Supabase ставится на паузу после недели без трафика, и вся работа с сохранениями упиралась в недоступное облако. Теперь облако — необязательная надстройка: сохранения экспортируются в zip и импортируются из файла на любой машине, без аккаунта. Параллельно расширен список движков и мест, где ищутся сохранения.
+Экспорт и импорт через файл работают независимо от подключённого хранилища и не требуют аккаунта. Архив можно перенести на другую машину; импорт сопоставляет сохранённые профили с путями на текущем ПК и делает локальную резервную копию до записи.
 
 ## Для пользователя
 Панель игры → блок **Saves**:
@@ -29,18 +29,17 @@
 - любой движок: `Documents\My Games\<игра>`, `Documents\<игра>`, `Saved Games\<игра>` — только при сильном совпадении имени (короткие и общие слова вроде `Game` не считаются; в корне `Documents` засчитывается только точное имя папки, иначе автор «Studio» совпал бы с `Visual Studio 2022`). Полное удаление игры умеет стирать такие папки, но никогда не трогает сами `Documents`, `Documents\My Games` и `Saved Games`.
 
 ## Как это работает
-1. **Экспорт** (`exportGameSavesToFile`): для каждого профиля берётся тот же `archiveRoot`, что использует локальное хранилище и облако (`profiles/local/<путь>`, `profiles/roaming/RenPy/<папка>`, `profiles/local-low/...`, `profiles/documents/...`), файлы кладутся в zip (adm-zip), `manifest.json` = общий `buildSaveManifest` (identity, profiles, entries с sha256/mtime) + `format: "f95launcher-saves"`, `formatVersion`, `app`, `game { title, creator, engine, threadUrl }`. Пустой набор → ошибка `no_save_files`, файл не создаётся.
+1. **Экспорт** (`exportGameSavesToFile`): для каждого профиля берётся тот же `archiveRoot`, что использует локальное хранилище и облако (`profiles/local/<путь>`, `profiles/roaming/RenPy/<папка>`, `profiles/local-low/...`, `profiles/documents/...`). Каждый файл читается один раз; те же байты попадают в ZIP и используются для размера и SHA-256 в `manifest.json`. Манифест содержит общий `buildSaveManifest` (identity, profiles, entries с sha256/mtime, `manifestHash`, `contentHash`) и `format: "f95launcher-saves"`, `formatVersion`, app и сведения об игре. Ошибка чтения файла прерывает экспорт; пустой набор даёт `no_save_files`.
 2. **Импорт** (`importGameSavesFromFile`): архив распаковывается во временную папку через `extractArchiveSafely` (все форматы и пароли — см. install-recovery.md).
-   - С манифестом: каждый профиль манифеста сопоставляется с локальным (`matchManifestProfile`): та же стратегия и payload → тот же провайдер → иначе путь вычисляется из стратегии манифеста на этой машине (`resolveSaveProfileDestinationPath`). Файлы копируются с перезаписью.
-   - Без манифеста (`planForeignSaveImport`): общий префикс папок срезается, если заканчивается на `saves|save|savedata|savegames|saved` (`MyGame/Saved/SaveGames/…` → `…`), иначе срезается единственная обёртка верхнего уровня; остаются файлы, похожие на сохранения (`isLikelySaveFile`: расширения `.save .sav .rpgsave .rmmzsave .rvdata2 .lsd .dat .json .sol …`, файлы `persistent`, `global`); мусор (`Thumbs.db`, `readme`) пропускается. Назначение: файлы RPG Maker в корень (профиль `install-file-patterns`) → лучший профиль в папке игры → лучший профиль вне папки (AppData/Documents) → папка по умолчанию для движка (`game/saves` Ren'Py, `save` RPGM, `Saved/SaveGames` Unreal, `Save` Wolf, `savedata` KiriKiri, иначе `saves`).
-   - Перед записью IPC делает `backupGameSaves` в vault; после — `refreshSaveProfiles`.
+   - В архиве F95Launcher до записи проверяются формат и версия, хеш манифеста, профили и корни путей, полный состав архива, размер и SHA-256 каждого файла. Дополнительные, отсутствующие или изменённые файлы отклоняются как `invalid_save_manifest`; временная папка удаляется.
+   - Каждый профиль манифеста сопоставляется с локальным (`matchManifestProfile`): та же стратегия и payload → тот же провайдер → иначе путь вычисляется из стратегии манифеста на этой машине (`resolveSaveProfileDestinationPath`). После полной проверки архивных файлов и назначения файлы копируются с перезаписью.
+   - Без манифеста F95Launcher (`planForeignSaveImport`): общий префикс папок срезается, если заканчивается на `saves|save|savedata|savegames|saved` (`MyGame/Saved/SaveGames/…` → `…`), иначе срезается единственная обёртка верхнего уровня; остаются файлы, похожие на сохранения (`isLikelySaveFile`: расширения `.save .sav .rpgsave .rmmzsave .rvdata2 .lsd .dat .json .sol …`, файлы `persistent`, `global`); мусор (`Thumbs.db`, `readme`) пропускается. Назначение: файлы RPG Maker в корень (профиль `install-file-patterns`) → лучший профиль в папке игры → лучший профиль вне папки (AppData/Documents) → папка по умолчанию для движка (`game/saves` Ren'Py, `save` RPGM, `Saved/SaveGames` Unreal, `Save` Wolf, `savedata` KiriKiri, иначе `saves`).
+   - IPC сначала делает `backupGameSaves` в vault. Ошибка резервирования прерывает импорт; после успешной записи вызывается `refreshSaveProfiles`.
 3. **Массовый экспорт** (`export-all-game-saves`): диалог папки, затем для каждой игры библиотеки — обновление профилей и экспорт; игры без сохранений попадают в `skipped`.
 4. **Новые стратегии**: `windows-known-folder` получил `baseFolder: "documents" | "savedGames"` (`getKnownFolderRoot`, токены vault `documents`, `saved-games`; переменные `F95LAUNCHER_DOCUMENTS_DIR`/`F95LAUNCHER_SAVED_GAMES_DIR` для тестов). Новые провайдеры: `documents`, `saved_games`, `flash_sharedobjects`, `gamemaker_localappdata`. Семейства движков в детекторе: `wolf`, `kirikiri`, `flash`, `gamemaker`, а `tyrano`/`construct`/`twine` относятся к `html`.
-5. **Облако при паузе**: `getCloudSyncErrorDetails` распознаёт `project is paused`, `503/502`, `service unavailable` → код `cloud_paused` с объяснением, что локальные функции работают. Окно аккаунта при недоступном облаке показывает то же и всё равно даёт экспортировать файлы.
-
 ## Контракт
 - IPC `export-game-saves({ recordId })` → `{ success: true, archivePath, fileCount, totalBytes, profiles: [{ rootPath, files }] }` | `{ success: false, cancelled: true }` | `{ success: false, error, code }`.
-- IPC `import-game-saves({ recordId, password?, archivePath? })` → `{ success: true, archivePath, importedFiles, skippedFiles, destinations: [{ rootPath, files, how }], foreign, warnings, backupIdentity, backedUpPaths }` | `{ success: false, cancelled: true }` | `{ success: false, error, code, needsPassword }`. Коды: `no_save_files`, `no_destination`, коды архива.
+- IPC `import-game-saves({ recordId, password?, archivePath? })` → `{ success: true, archivePath, importedFiles, skippedFiles, destinations: [{ rootPath, files, how }], foreign, warnings, backupIdentity, backedUpPaths }` | `{ success: false, cancelled: true }` | `{ success: false, error, code, needsPassword }`. Коды включают `no_save_files`, `no_destination`, `invalid_save_manifest` и коды архива. Ошибка vault backup также завершает операцию без импорта.
 - IPC `export-all-game-saves()` → `{ success: true, folder, exported: [{ recordId, title, archivePath, fileCount }], skipped: [{ recordId, title, reason }] }`.
 - IPC `open-save-location({ recordId, rootPath })` → `{ success }`; путь должен принадлежать профилям игры.
 - Preload: `exportGameSaves(recordId)`, `importGameSaves(recordId, { password })`, `exportAllGameSaves()`, `openSaveLocation(recordId, rootPath)`.
@@ -50,12 +49,13 @@
 - Игра без папки установки на этой машине: профили из манифеста с путями AppData всё равно импортируются; «чужой» архив без назначения → `no_destination`.
 - Архив без единого файла, похожего на сохранение → `no_save_files`, ничего не записано.
 - Разные имена папок Ren'Py в AppData на двух машинах: профиль сопоставляется по провайдеру `renpy_appdata`, файлы идут в локальную папку.
-- Импорт всегда перезаписывает одноимённые файлы; откат — через vault (`backups/save_vault/<identity>`).
+- Импорт перезаписывает одноимённые файлы только после успешного завершения резервной копии в vault (`backups/save_vault/<identity>`); при ошибке копии импорт прекращается.
+- Vault собирает новую копию во временной staging-папке и публикует её после завершения копирования и manifest. Предыдущая полная копия сохраняется до успешной замены; если прерывание оставило основной каталог отсутствующим, следующая операция vault восстанавливает его из `.previous`.
 - Экспорт из панели предварительно обновляет профили, чтобы захватить папку, появившуюся после последнего сканирования.
 
 ## Проверка
-1. Автотесты: цикл экспорт → импорт на «другой машине» (другая папка установки и другая папка AppData), отказ пустого экспорта, zip папки `saves` с мусором, план для RPG Maker/Unreal/вложенных обёрток, отказ архива без сохранений, сопоставление профилей; детектор — Documents/My Games, Saved Games, GameMaker, Flash SharedObjects, KiriKiri `savedata`, Wolf `save`.
-2. Вручную: игра Ren'Py → **Export to file** → zip в Документах с `manifest.json` и `profiles/local/game/saves/...` → удалить сохранения → **Import from file** → сохранения на месте, в vault появилась копия. Заархивировать папку `saves` WinRAR → импорт → файлы в `game/saves`. Окно аккаунта при выключенном облаке → **Export all saves to folder…** → по zip на игру.
+1. Автотесты покрывают цикл экспорт → импорт на «другой машине», пустой экспорт, foreign ZIP, проверку manifest и SHA-256, повреждённый архив, сбой резервной копии и сопоставление профилей.
+2. Вручную (pending final verification): в изолированном профиле запретить запись в каталог vault и проверить, что file import и cloud restore останавливаются, а хеш исходных локальных сейвов не меняется; скопировать корректный ZIP и повредить manifest или один файл внутри, затем проверить отказ импорта и отсутствие изменений локальных файлов; выполнить обычный экспорт/импорт и импорт foreign ZIP, проверив сохранность исходного архива.
 
 ## История изменений
 - 2026-09-29 — первая версия: экспорт/импорт через файл, массовый экспорт, новые места сохранений (Documents, Saved Games, Flash, GameMaker, KiriKiri, Wolf RPG, RPG Maker 2000/2003), сообщение о паузе облака.

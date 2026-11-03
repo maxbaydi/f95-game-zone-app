@@ -20,23 +20,24 @@ F95Launcher (repository `f95-game-zone-app`) is a desktop manager for F95 games 
 - detects save locations for Ren'Py, RPG Maker, Unity, Unreal, Godot, Wolf RPG, KiriKiri, GameMaker, Flash and HTML games (game folder, AppData, LocalLow, Documents, Saved Games)
 - exports and imports saves as plain zip files, per game or for the whole library, with no account needed
 - backs up saves before destructive operations
-- syncs saves into a cloud you already own: OneDrive, Dropbox, Google Drive, Yandex.Disk and other desktop clients in one click, or any WebDAV server, S3 bucket or your own Supabase project, with optional end-to-end encryption and a connection card for your other PCs
+- syncs saves into a cloud you already own: OneDrive, Dropbox, Google Drive, Yandex.Disk and other desktop clients in one click, or a WebDAV server, with optional end-to-end encryption and a connection card for your other PCs
 - works in the background: launch with Windows into the tray, automatic app updates, weekly library backups, thread checks and save sync after the PC wakes up, install notifications, archive passwords read from the thread
 - keeps the save storage state in the main header and scan-source management inside Scan Hub instead of burying both in a generic settings window
 
 ## Cloud saves
 
-F95Launcher ships no cloud account and keeps no saves on its own servers. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client, a WebDAV server, an S3-compatible bucket or a bucket in the user's own Supabase project. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage offers the rest, including a passphrase for end-to-end encryption and a portable connection card.
+F95Launcher ships no cloud account and keeps no saves on its own servers. Saves sync into storage the user owns (see `docs/save-storage.md`): a folder kept in sync by a desktop cloud client or a WebDAV server. The first-launch assistant detects the clouds already installed on the PC and connects one in a single click; Settings → Save storage also supports a portable connection card and a passphrase for end-to-end encryption. Existing S3 and supported Supabase connections can be reconnected through a connection card; the settings page does not ask users to enter infrastructure credentials.
 
 Current cloud-save behavior:
 
 - local save detection covers install-relative save folders and common Ren'Py AppData locations
 - the app auto-reconciles saves on startup, after install/update, after you play, and after the PC wakes up
 - when only one side exists, that side is used automatically
-- when both sides exist, the app compares manifest hashes and latest save-file mtimes to choose upload vs restore
+- identical save content is treated as already synced; when content differs, the app uses the last successful sync baseline to identify a single changed side
+- if both sides appear changed, or neither side has a saved sync baseline, the game is marked as a conflict and waits for an explicit Back up or Restore choice; file modification times never pick the winner
 - upload creates a cloud backup from the current local save set
 - restore pulls the latest backup back to the current machine
-- before restore, the app creates a local safety backup so local data is not silently lost
+- before a file import or cloud restore, the app creates a local safety backup; if that backup fails, the import or restore stops before overwriting local saves
 - local safety copies live on disk under the app profile vault, not inside SQLite blobs
 - deleting a game can preserve saves in the local vault for later reinstall
 
@@ -45,7 +46,7 @@ This is a bidirectional sync foundation:
 - local -> cloud: back up current saves from this machine
 - cloud -> local: restore the latest backup onto this machine
 
-It is still safety-first, not a blind merge engine. If local and cloud copies diverge with the same timestamp, the app flags the game for review instead of silently overwriting either side.
+It is still safety-first, not a blind merge engine. Divergent local and cloud copies require an explicit choice whenever both sides are considered changed, including before any sync baseline hashes have been recorded.
 
 ## Update and install flow
 
@@ -62,11 +63,11 @@ When a mirror requires captcha confirmation, the app now keeps that flow resumab
 
 ## Interface runtime
 
-- Every renderer window loads React, Babel, fonts and icons from `src/assets/vendor`, so the app starts without network access (see `src/assets/vendor/README.md` for versions).
+- Every renderer window loads React, fonts and icons from `src/assets/vendor`. Renderer JSX/JavaScript is compiled into `src/assets/compiled` before launch, so Babel does not run in the window (see `src/assets/vendor/README.md`).
 - `src/core/ui/app-ui.js` is the framework-free layer loaded first in each window: boot splash with a recoverable error screen, global error capture (logged to the main process), toasts, confirm/alert dialogs, an Escape-key stack, ripple/press feedback and the offline notice.
 - `src/core/ui/app-react.js` adds the React helpers: `usePresence`/`useModalLayer` for enter/exit animations, `useEscape`, `useBusyAction` and error boundaries (`AppErrorBoundary`, `AppSafe`) that keep a failing panel from blanking the window.
 - Motion tokens live in `src/assets/css/main.css` (400–700 ms, expo-out easing). Settings → Interface → *Interface animations* switches between System, Full, Reduced and Off; the choice applies instantly to every window.
-- The main process reloads crashed renderers and offers a recovery dialog for hung windows (`src/main/windowResilience.js`); `config.ini` is written atomically (`src/main/atomicFile.js`).
+- The main process reloads crashed renderers and offers a recovery dialog for hung windows (`src/main/windowResilience.js`); `config.ini` is written through a temporary file and rename, and a failed replacement leaves the previous file intact (`src/main/atomicFile.js`).
 
 ## Development
 
@@ -74,6 +75,16 @@ When a mirror requires captcha confirmation, the app now keeps that flow resumab
 npm install
 npm run dev
 ```
+
+`npm run dev` starts the CSS and renderer watchers alongside Electron and the web preview. After the renderer watcher prints `renderer: rebuilt`, reload the window to load the generated scripts. `npm run build:ui` builds CSS and compiled renderer scripts; `start`, `build`, `publish`, `screenshots` and `ci:check` invoke the UI build they need.
+
+Browser UI review uses demo data and optional Playwright support. With `npm run dev:web` running on port 5173:
+
+```powershell
+npm run qa:ui
+```
+
+See [docs/ui-review.md](docs/ui-review.md) for coverage, output artifacts and the current verification limits.
 
 Checks:
 

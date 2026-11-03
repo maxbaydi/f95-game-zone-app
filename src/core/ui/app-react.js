@@ -1,5 +1,5 @@
 // React helpers shared by the renderer windows (plain JS, no JSX, so it
-// loads before Babel runs): presence-based enter/exit animations, the Escape
+// loads before the compiled components): enter/exit animations, the Escape
 // stack, dialog focus handling, busy-guarded async actions and an error
 // boundary that keeps one broken panel from blanking the whole window.
 (function () {
@@ -91,6 +91,9 @@
   // Moves focus into a dialog when it opens, traps Tab inside it and restores
   // the previously focused element when it closes.
   function useDialogFocus(active, containerRef) {
+    useLayoutEffect(function () {
+      if (containerRef.current) containerRef.current.inert = !active;
+    }, [active]);
     useEffect(
       function () {
         if (!active) {
