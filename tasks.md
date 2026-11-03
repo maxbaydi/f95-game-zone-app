@@ -23,12 +23,15 @@ Last updated: 2026-11-03
 
 ### 2026-11-03 — Release 1.9.2
 
-- Status: in_progress
-- Progress: 25% of the release stage; the reviewed implementation is complete, publication and live artifact readback are pending.
-- ТЗ impact: delivers the completed data-safety/UI fixes; does not change the overall roadmap percentages.
-- Prepared version 1.9.2 and user-facing release notes. Checks now compile the renderer and validate JSX. Both release platforms run the full checks and build precompiled UI, then verify the packaged HTML references.
-- Release uploads are forced to a draft with `EP_DRAFT=true`. Public publication is a separate final step after both platform jobs and updater-manifest/hash checks succeed.
-- Remaining: independent release review, exact-commit CI, Windows/Linux draft builds, downloaded artifact/manifest verification, publication and public readback.
+- Status: done
+- Progress: 100% of this release stage. Overall roadmap percentages are unchanged.
+- Published `v1.9.2` as the latest stable release from `947b9f1b5190ab5fe064b86f021af42426fb9dc3`: https://github.com/maxbaydi/f95-game-zone-app/releases/tag/v1.9.2
+- Checks run `41609436770` and Windows/Linux Release run `41609842133` passed on that exact SHA. Both platforms passed 649/649 tests and verified all 71 UI asset references in the package.
+- Built into a pre-created draft with `EP_DRAFT=true`, then downloaded all six assets. Versions, filenames, lengths and SHA-512 values in `latest.yml`/`latest-linux.yml` match the Windows installer, Linux AppImage and DEB; SHA-256 matches GitHub digests. Independent release review accepted the gates before publication.
+- Extracted the downloaded Windows NSIS payload without executing the installer: packaged version 1.9.2, 71/71 asset references, all three Electron windows and real IPC smoke passed in a disposable userData profile, including config-write failure recovery; no src/data was created. This fresh-payload smoke took about 9.9 seconds to main-window readiness; it is a single sample and does not establish cold-start performance.
+- Published at 2026-11-03 14:25:57 Asia/Yekaterinburg. Public release is not a draft/prerelease; Windows updater using the shipped provider discovered 1.9.2 from 1.9.1 with automatic download/installation disabled during the check.
+- Artifacts: Windows EXE/blockmap, Linux AppImage/DEB, latest.yml and latest-linux.yml. Local release evidence: output/playwright/release-1.9.2/.
+- Remaining limits: no installer execution, physical Linux GUI test or new live F95/cloud-account test. These are not claimed by the release verification.
 
 ### 2026-11-03 — Review fix: save recovery, archive integrity, and conflict safety
 

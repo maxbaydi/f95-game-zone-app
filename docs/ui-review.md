@@ -65,3 +65,7 @@ The native bootstrap check created no `src/data` directory.
 - `npm run check:package` validates all **71 local script/style references across three packaged windows**. Added the previously omitted scrollbar/preview scripts; all 25 compiled scripts are packaged and Babel is absent.
 - Native source and packaged-ASAR smoke used separate disposable `userData` profiles: main, settings and importer ready, real IPC readback, no renderer exceptions, failed config write left the prior config active, no `src/data` directory created. This loads the packaged payload through the development Electron runtime; it is not an installed-EXE or installer test.
 - The 44 browser checks use demo data and mocks. They do not verify live F95 authentication, real mirror hosts, real cloud authentication/sync, installer execution, or every possible UI combination.
+
+## Published update
+
+The reviewed changes shipped as [F95Launcher 1.9.2](https://github.com/maxbaydi/f95-game-zone-app/releases/tag/v1.9.2) on 2026-11-03. Windows and Linux release jobs each passed 649 tests and the 71-reference packaged UI check. All six downloaded release assets and both updater manifests were verified before publication. The downloaded Windows installer payload was exercised through the isolated Electron harness; this fresh-payload run reached the main window in about 9.9 seconds, a single sample rather than a cold-start benchmark. Public Windows updater discovery from 1.9.1 to 1.9.2 passed. See tasks.md for the exact commit, workflow runs and verification limits.

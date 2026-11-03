@@ -106,11 +106,17 @@ Releases are published from this repository:
 
 - [GitHub Releases](https://github.com/maxbaydi/f95-game-zone-app/releases)
 
-A release is built by the *Release* workflow when a version tag is pushed (a plain push to `main` only runs the checks):
+A version tag starts the *Release* workflow for Windows x64 and Linux x64. Both platforms run the full checks, build the precompiled renderer, verify packaged UI assets, and upload to a **draft** release. A plain push to `main` only runs checks.
+
+After committing the version bump and release notes and pushing `main`, wait for its Checks workflow to pass. Create one draft on the exact commit before pushing the tag, so the two build jobs share the same release:
 
 ```powershell
-npm version 1.7.1 --no-git-tag-version   # or edit package.json
-git commit -am "release: 1.7.1"
-git tag v1.7.1
-git push origin main v1.7.1
+$releaseVersion = node -p "require('./package.json').version"
+$releaseTag = "v$releaseVersion"
+$releaseSha = git rev-parse HEAD
+gh release create $releaseTag --draft --target $releaseSha --title "F95Launcher $releaseVersion" --notes-file "docs/release-notes/$releaseVersion.md"
+git tag $releaseTag $releaseSha
+git push origin $releaseTag
 ```
+
+Before publishing, require both release jobs to pass on that SHA. Verify the downloaded Windows installer/blockmap, Linux AppImage/DEB, `latest.yml` and `latest-linux.yml`: versions, filenames, sizes and manifest SHA-512 values must match. Then publish with `gh release edit $releaseTag --draft=false --latest --verify-tag` and check the public release and updater discovery. Do not overwrite an existing published version.
